@@ -148,3 +148,26 @@
 .animate-hex-bounce {
   animation: hex-bounce 0.5s ease-out;
 }
+
+/* Square Block Away Animations */
+@keyframes square-bounce {
+  0% {
+    transform: translate(0, 0);
+  }
+  40% {
+    transform: translate(var(--bounce-x, 15px), var(--bounce-y, 0));
+  }
+  70% {
+    transform: translate(
+      calc(var(--bounce-x, 15px) * -0.2),
+      calc(var(--bounce-y, 0) * -0.2)
+    );
+  }
+  100% {
+    transform: translate(0, 0);
+  }
+}
+
+.animate-square-bounce {
+  animation: square-bounce 0.5s ease-out;
+}

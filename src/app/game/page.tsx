@@ -1,6 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Gamepad2, Hexagon } from 'lucide-react';
+import { Gamepad2, Hexagon, Square } from 'lucide-react';
 import Link from 'next/link';
 
 const games = [
@@ -23,6 +23,16 @@ const games = [
     status: 'ready' as const,
     color: 'from-cyan-500/20 to-blue-500/20',
     borderColor: 'border-cyan-500/30 hover:border-cyan-500/50',
+  },
+  {
+    id: 'square-block',
+    title: 'Square Block Away',
+    description: 'Same puzzle on a rectangular grid. Tap blocks to slide them off in 4 directions.',
+    href: '/game/square-block',
+    icon: Square,
+    status: 'ready' as const,
+    color: 'from-amber-500/20 to-orange-500/20',
+    borderColor: 'border-amber-500/30 hover:border-amber-500/50',
   },
 ];
 
