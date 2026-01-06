@@ -144,12 +144,12 @@ export default function Dashboard() {
                   10-level pattern: Easy recovery → Rising → Hard spike (5) → Dip → Rising → Super Hard peak (10)
                 </p>
               </div>
-              <div>
-                <p className="text-sm font-medium">The Golden Rule</p>
-                <p className="text-xs text-muted-foreground italic">
+              <div className="p-3 rounded-lg bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/30">
+                <p className="text-sm font-semibold text-amber-400">The Golden Rule</p>
+                <p className="text-sm text-amber-100/90 italic mt-1">
                   &quot;Make players feel losses are their own fault, not the game&apos;s.&quot;
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="text-xs text-amber-200/70 mt-2">
                   When players fail, they should think &quot;I could beat it next time if I play better&quot; — not that the game cheated. This keeps players retrying instead of quitting.
                 </p>
               </div>
