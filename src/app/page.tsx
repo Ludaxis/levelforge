@@ -149,6 +149,9 @@ export default function Dashboard() {
                 <p className="text-xs text-muted-foreground italic">
                   &quot;Make players feel losses are their own fault, not the game&apos;s.&quot;
                 </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  When players fail, they should think &quot;I could beat it next time if I play better&quot; — not that the game cheated. This keeps players retrying instead of quitting.
+                </p>
               </div>
             </div>
           </CardContent>
