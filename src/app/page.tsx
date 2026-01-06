@@ -1,65 +1,159 @@
-import Image from "next/image";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { TrendingUp, Brain, Heart, Calculator, BookOpen, CheckSquare, Gamepad2 } from "lucide-react";
+import Link from "next/link";
 
-export default function Home() {
+const tools = [
+  {
+    title: "Sawtooth Difficulty Curve",
+    description: "Visualize and design the 10-level difficulty cycle pattern",
+    href: "/sawtooth",
+    icon: TrendingUp,
+    status: "ready",
+  },
+  {
+    title: "Cognitive Balance",
+    description: "Balance System 1 (automatic) vs System 2 (deliberate) thinking",
+    href: "/cognitive",
+    icon: Brain,
+    status: "ready",
+  },
+  {
+    title: "Emotional Spectrum",
+    description: "Engineer near-loss wins and almost-win losses",
+    href: "/emotional",
+    icon: Heart,
+    status: "ready",
+  },
+  {
+    title: "Move Calculator",
+    description: "Calculate recommended move limits by level range",
+    href: "/calculator",
+    icon: Calculator,
+    status: "ready",
+  },
+];
+
+const principles = [
+  "Make the Goal Easily Understood",
+  "Make it Easy to Get Started",
+  "Give a Sense of Progress",
+  "Give a Sense of Solvability",
+  "Increase Difficulty Gradually",
+  "Use Parallelism to Prevent Bottlenecks",
+  "Apply Pyramid Structure",
+  "Hints Extend Interest",
+  "Eventually Give the Answer",
+  "Use Perceptual Shifts Cautiously",
+];
+
+export default function Dashboard() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+    <div className="space-y-6 lg:space-y-8">
+      <div>
+        <h1 className="text-2xl lg:text-3xl font-bold tracking-tight">LevelForge</h1>
+        <p className="text-muted-foreground mt-2 text-sm lg:text-base">
+          Interactive tools for designing engaging puzzle experiences based on industry best practices.
+        </p>
+      </div>
+
+      {/* Featured: Game Demo */}
+      <Link href="/game" className="block mb-6">
+        <Card className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 border-purple-500/20 hover:border-purple-500/40 transition-colors cursor-pointer">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-purple-500 rounded-lg">
+                <Gamepad2 className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <CardTitle>Match-3 Game Demo</CardTitle>
+                <CardDescription>
+                  Test framework concepts with a playable game. Configure levels and see outcomes in real-time.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+        </Card>
+      </Link>
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {tools.map((tool) => (
+          <Link key={tool.href} href={tool.href}>
+            <Card className="h-full transition-colors hover:bg-accent/50 cursor-pointer">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{tool.title}</CardTitle>
+                <tool.icon className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs text-muted-foreground">{tool.description}</p>
+              </CardContent>
+            </Card>
+          </Link>
+        ))}
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BookOpen className="h-5 w-5" />
+              Core Design Principles
+            </CardTitle>
+            <CardDescription>
+              The 10 foundational principles of puzzle design
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {principles.map((principle, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Badge variant="outline" className="w-6 h-6 flex items-center justify-center p-0 text-xs">
+                    {i + 1}
+                  </Badge>
+                  <span className="text-sm">{principle}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CheckSquare className="h-5 w-5" />
+              Quick Reference
+            </CardTitle>
+            <CardDescription>
+              Key metrics and targets
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-medium">Win Rate Targets</p>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  <Badge className="bg-green-500">Easy: 70-90%</Badge>
+                  <Badge className="bg-yellow-500">Medium: 40-60%</Badge>
+                  <Badge className="bg-orange-500">Hard: 25-40%</Badge>
+                  <Badge className="bg-red-500">Super Hard: 20-30%</Badge>
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-medium">Sawtooth Cycle</p>
+                <p className="text-xs text-muted-foreground">
+                  10-level pattern: Easy recovery → Rising → Hard spike (5) → Dip → Rising → Super Hard peak (10)
+                </p>
+              </div>
+              <div>
+                <p className="text-sm font-medium">The Golden Rule</p>
+                <p className="text-xs text-muted-foreground italic">
+                  &quot;Make players feel losses are their own fault, not the game&apos;s.&quot;
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
