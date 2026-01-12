@@ -6,11 +6,13 @@ import {
   AnimationData,
   StackDirection,
   HexAxis,
+  Carousel,
   isBidirectional,
 } from '@/types/hexaBlock';
 import {
   AxialCoord,
   HexDirection,
+  HEX_DIRECTIONS,
   hexKey,
   createHexagonalGrid,
   axialToPixel,
@@ -27,7 +29,10 @@ interface HexBlockBoardProps {
   gridRadius: number;
   stacks: Map<string, HexStack>;
   holes: Set<string>;
+  pauses?: Set<string>;
+  carousels?: Map<string, Carousel>;
   onStackTap: (coord: AxialCoord) => void;
+  onCarouselTap?: (coord: AxialCoord) => void;
   clearableStacks: string[];
   animatingStack: string | null;
   animationPhase: 'idle' | 'rolling' | 'bouncing' | 'exiting';
@@ -63,7 +68,10 @@ export function HexBlockBoard({
   gridRadius,
   stacks,
   holes,
+  pauses,
+  carousels,
   onStackTap,
+  onCarouselTap,
   clearableStacks,
   animatingStack,
   animationPhase,
@@ -101,14 +109,34 @@ export function HexBlockBoard({
           const pixel = axialToPixel(coord, HEX_SIZE, origin);
           const points = getHexPolygonPoints(pixel, HEX_SIZE);
           const isHole = holes.has(key);
+          const isPause = pauses?.has(key);
+          const isCarousel = carousels?.has(key);
+
+          let fillColor = 'rgba(255, 255, 255, 0.03)';
+          let strokeColor = 'rgba(255, 255, 255, 0.1)';
+          let strokeWidth = 1;
+
+          if (isHole) {
+            fillColor = 'rgba(0, 0, 0, 0.8)';
+            strokeColor = 'rgba(139, 69, 19, 0.6)';
+            strokeWidth = 2;
+          } else if (isPause) {
+            fillColor = 'rgba(59, 130, 246, 0.2)';
+            strokeColor = 'rgba(59, 130, 246, 0.6)';
+            strokeWidth = 2;
+          } else if (isCarousel) {
+            fillColor = 'rgba(168, 85, 247, 0.15)';
+            strokeColor = 'rgba(168, 85, 247, 0.6)';
+            strokeWidth = 2;
+          }
 
           return (
             <polygon
               key={`bg-${key}`}
               points={points}
-              fill={isHole ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.03)'}
-              stroke={isHole ? 'rgba(139, 69, 19, 0.6)' : 'rgba(255, 255, 255, 0.1)'}
-              strokeWidth={isHole ? 2 : 1}
+              fill={fillColor}
+              stroke={strokeColor}
+              strokeWidth={strokeWidth}
             />
           );
         })}
@@ -148,6 +176,103 @@ export function HexBlockBoard({
               </g>
             );
           })}
+
+        {/* Pauses - render pause icon */}
+        {pauses && gridCoords
+          .filter((coord) => pauses.has(hexKey(coord)))
+          .map((coord) => {
+            const key = hexKey(coord);
+            const pixel = axialToPixel(coord, HEX_SIZE, origin);
+
+            return (
+              <g key={`pause-${key}`} pointerEvents="none">
+                {/* Left bar */}
+                <rect
+                  x={pixel.x - 8}
+                  y={pixel.y - 12}
+                  width={6}
+                  height={24}
+                  rx={2}
+                  fill="rgba(59, 130, 246, 0.8)"
+                />
+                {/* Right bar */}
+                <rect
+                  x={pixel.x + 2}
+                  y={pixel.y - 12}
+                  width={6}
+                  height={24}
+                  rx={2}
+                  fill="rgba(59, 130, 246, 0.8)"
+                />
+              </g>
+            );
+          })}
+
+        {/* Carousels - render rotator */}
+        {carousels && Array.from(carousels.entries()).map(([key, carousel]) => {
+          const pixel = axialToPixel(carousel.coord, HEX_SIZE, origin);
+
+          return (
+            <g
+              key={`carousel-${key}`}
+              onClick={() => !disabled && onCarouselTap?.(carousel.coord)}
+              style={{ cursor: disabled ? 'default' : 'pointer' }}
+            >
+              {/* Center circle */}
+              <circle
+                cx={pixel.x}
+                cy={pixel.y}
+                r={HEX_SIZE * 0.3}
+                fill="rgba(168, 85, 247, 0.8)"
+                stroke="rgba(168, 85, 247, 1)"
+                strokeWidth={2}
+              />
+              {/* Arm lines */}
+              {carousel.arms.map((dir) => {
+                const armLength = HEX_SIZE * 0.6;
+                const angle = DIRECTION_ANGLES[dir];
+                const radians = (angle * Math.PI) / 180;
+                const endX = pixel.x + Math.cos(radians) * armLength;
+                const endY = pixel.y + Math.sin(radians) * armLength;
+                return (
+                  <g key={dir}>
+                    <line
+                      x1={pixel.x}
+                      y1={pixel.y}
+                      x2={endX}
+                      y2={endY}
+                      stroke="rgba(168, 85, 247, 0.9)"
+                      strokeWidth={4}
+                      strokeLinecap="round"
+                    />
+                    <circle
+                      cx={endX}
+                      cy={endY}
+                      r={5}
+                      fill="rgba(168, 85, 247, 1)"
+                    />
+                  </g>
+                );
+              })}
+              {/* Clockwise arrow indicator */}
+              <path
+                d={`M ${pixel.x - 6} ${pixel.y - 3} A 6 6 0 1 1 ${pixel.x + 6} ${pixel.y - 3}`}
+                fill="none"
+                stroke="white"
+                strokeWidth={2}
+                strokeLinecap="round"
+              />
+              <path
+                d={`M ${pixel.x + 4} ${pixel.y - 6} L ${pixel.x + 6} ${pixel.y - 3} L ${pixel.x + 3} ${pixel.y}`}
+                fill="none"
+                stroke="white"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </g>
+          );
+        })}
 
         {/* Stacks */}
         {Array.from(stacks.entries()).map(([key, stack]) => {

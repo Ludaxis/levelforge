@@ -13,6 +13,42 @@ export type StackDirection = HexDirection | HexAxis;
 // Game mode
 export type GameMode = 'classic' | 'push';
 
+// Carousel - rotates tiles on its arms clockwise
+export interface Carousel {
+  id: string;
+  coord: AxialCoord;           // Center position of the carousel
+  arms: HexDirection[];        // 2-6 directions where tiles can be rotated (clockwise order)
+}
+
+// Clockwise order of hex directions for rotation
+export const CLOCKWISE_DIRECTIONS: HexDirection[] = ['NE', 'E', 'SE', 'SW', 'W', 'NW'];
+
+// Get next direction in clockwise order
+export function getNextClockwiseDirection(dir: HexDirection): HexDirection {
+  const idx = CLOCKWISE_DIRECTIONS.indexOf(dir);
+  return CLOCKWISE_DIRECTIONS[(idx + 1) % 6];
+}
+
+// Sort arms in clockwise order starting from first arm
+export function sortArmsClockwise(arms: HexDirection[]): HexDirection[] {
+  if (arms.length < 2) return arms;
+
+  // Find indices in clockwise order
+  const indices = arms.map(arm => CLOCKWISE_DIRECTIONS.indexOf(arm));
+
+  // Sort by clockwise index
+  const sorted = [...arms].sort((a, b) => {
+    return CLOCKWISE_DIRECTIONS.indexOf(a) - CLOCKWISE_DIRECTIONS.indexOf(b);
+  });
+
+  return sorted;
+}
+
+// Generate unique carousel ID
+export function generateCarouselId(): string {
+  return `carousel-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
 export interface HexStack {
   id: string;
   coord: AxialCoord;
@@ -41,6 +77,8 @@ export interface HexaBlockLevel {
   gridRadius: number;              // Hexagonal grid radius (2-4)
   stacks: HexStack[];              // Initial stack configuration
   holes?: AxialCoord[];            // Hole positions - stacks fall in and disappear
+  pauses?: AxialCoord[];           // Pause positions - stacks stop here and need another tap
+  carousels?: Carousel[];          // Carousel positions - rotate adjacent tiles clockwise
   difficulty: 'tutorial' | 'easy' | 'medium' | 'hard';
   gameMode?: GameMode;             // 'classic' (default) or 'push'
   parMoves?: number;               // Target moves for optimal solution
@@ -60,12 +98,16 @@ export interface HexaBlockState {
   level: HexaBlockLevel;
   stacks: Map<string, HexStack>;   // Current positions (keyed by "q,r")
   holes: Set<string>;              // Hole positions (keyed by "q,r")
+  pauses: Set<string>;             // Pause cell positions (keyed by "q,r")
+  carousels: Map<string, Carousel>; // Carousel positions (keyed by "q,r")
+  pausedStacks: Set<string>;       // Stack IDs that are currently paused (need tap to continue)
   moveCount: number;               // Moves made
   moveLimit: number;               // Maximum moves allowed (0 = unlimited)
   isComplete: boolean;             // All stacks cleared
   isWon: boolean;                  // Level completed successfully
   isLost: boolean;                 // Ran out of moves before clearing
   history: Map<string, HexStack>[];// For undo functionality
+  pausedStacksHistory: Set<string>[]; // History of paused stacks for undo
   animatingStack: string | null;   // Stack ID currently animating
   animationPhase: 'idle' | 'rolling' | 'bouncing' | 'exiting';
   animationData: AnimationData | null; // Extended animation data
@@ -119,7 +161,9 @@ export type DifficultyTier = 'easy' | 'medium' | 'hard' | 'superHard';
 export interface LevelMetrics {
   cellCount: number;           // Number of hex cells
   holeCount: number;           // Number of holes
-  optimalMoves: number;        // = cellCount (minimum moves to solve)
+  pauseCount: number;          // Number of pause cells
+  carouselCount: number;       // Number of carousels
+  optimalMoves: number;        // Minimum moves to solve (cellCount + pause encounters)
   moveLimit: number;           // Total moves allowed (optimal + extra)
   moveBuffer: number;          // Extra moves beyond optimal (moveLimit - optimalMoves)
   moveBufferPercent: number;   // Buffer as percentage of optimal
@@ -136,6 +180,8 @@ export interface DesignedLevel {
   gridRadius: number;
   stacks: HexStack[];
   holes?: AxialCoord[];
+  pauses?: AxialCoord[];       // Pause cell positions
+  carousels?: Carousel[];      // Carousel rotators
   gameMode: GameMode;
   metrics: LevelMetrics;
   createdAt: number;           // Timestamp

@@ -37,6 +37,7 @@ function GameContainer({ level, onBack }: { level: HexaBlockLevel; onBack?: () =
   const {
     state,
     tapStack,
+    tapCarousel,
     undo,
     reset,
     clearableStacks,
@@ -69,7 +70,10 @@ function GameContainer({ level, onBack }: { level: HexaBlockLevel; onBack?: () =
               gridRadius={level.gridRadius}
               stacks={state.stacks}
               holes={state.holes}
+              pauses={state.pauses}
+              carousels={state.carousels}
               onStackTap={tapStack}
+              onCarouselTap={tapCarousel}
               clearableStacks={clearableStacks}
               animatingStack={state.animatingStack}
               animationPhase={state.animationPhase}
@@ -121,6 +125,8 @@ export default function HexaBlockPage() {
       gameMode: designedLevel.gameMode,
       stacks: designedLevel.stacks,
       holes: designedLevel.holes,
+      pauses: designedLevel.pauses,
+      carousels: designedLevel.carousels,
     };
     setPlayingLevel(level);
     setGameKey((k) => k + 1);
@@ -200,42 +206,16 @@ export default function HexaBlockPage() {
         </TabsList>
 
         {/* Design Tab */}
-        <TabsContent value="design" className="space-y-4">
-          <div className="grid gap-4 lg:grid-cols-[400px_1fr]">
-            <HexBlockLevelDesigner
-              onPlayLevel={handlePlayCustomLevel}
-              onAddToCollection={handleAddToCollection}
-              levelNumber={levelNumber}
-              onLevelNumberChange={setLevelNumber}
-              maxLevelNumber={100}
-              editingLevel={editingLevel}
-              showMetricsPanel={true}
-            />
-            <Card>
-              <CardHeader>
-                <CardTitle>How to Design</CardTitle>
-                <CardDescription>Create puzzle levels that follow best practices</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4 text-sm text-muted-foreground">
-                <div className="space-y-2">
-                  <p className="font-medium text-foreground">1. Set the Grid Size</p>
-                  <p>Choose radius 2-6. Larger grids allow more complex puzzles.</p>
-                </div>
-                <div className="space-y-2">
-                  <p className="font-medium text-foreground">2. Match Expected Difficulty</p>
-                  <p>Check the expected difficulty for your level position. Position 5 should be hard, position 10 super hard.</p>
-                </div>
-                <div className="space-y-2">
-                  <p className="font-medium text-foreground">3. Follow the Sawtooth Pattern</p>
-                  <p>Easy levels after hard spikes. Hard spikes at positions 5, 15, 25... Super hard peaks at 10, 20, 30...</p>
-                </div>
-                <div className="space-y-2">
-                  <p className="font-medium text-foreground">4. Keep Players in Flow</p>
-                  <p>Difficulty should match player skill. Too easy = boredom. Too hard = frustration.</p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+        <TabsContent value="design" className="h-[calc(100vh-200px)]">
+          <HexBlockLevelDesigner
+            onPlayLevel={handlePlayCustomLevel}
+            onAddToCollection={handleAddToCollection}
+            levelNumber={levelNumber}
+            onLevelNumberChange={setLevelNumber}
+            maxLevelNumber={100}
+            editingLevel={editingLevel}
+            showMetricsPanel={false}
+          />
         </TabsContent>
 
         {/* Collection Tab */}

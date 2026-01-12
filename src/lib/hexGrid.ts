@@ -201,12 +201,15 @@ export function getHexesInRange(center: AxialCoord, range: number): AxialCoord[]
 
 /**
  * Get hexes forming a ring at distance N from center
+ * Uses the algorithm from Red Blob Games:
+ * Start at W * radius, then walk around the ring in each direction
  */
 export function getHexRing(center: AxialCoord, radius: number): AxialCoord[] {
   if (radius === 0) return [center];
 
   const results: AxialCoord[] = [];
-  let hex = hexAdd(center, hexMultiply(HEX_DIRECTIONS.SW, radius));
+  // Start from W direction (not SW!) - this keeps us on the ring
+  let hex = hexAdd(center, hexMultiply(HEX_DIRECTIONS.W, radius));
 
   for (const dir of DIRECTION_ORDER) {
     for (let i = 0; i < radius; i++) {
@@ -381,4 +384,88 @@ export function getGridBounds(
     width: maxX - minX,
     height: maxY - minY,
   };
+}
+
+// ============================================================================
+// Blocks Ahead Analysis (for level designer)
+// ============================================================================
+
+/**
+ * Count how many stacks block a path in a given direction
+ * @param startCoord - Starting hex position
+ * @param direction - Direction to check
+ * @param stacks - Map of current stack positions (keyed by "q,r")
+ * @param holes - Set of hole positions (keyed by "q,r")
+ * @param gridRadius - Radius of the hexagonal grid
+ * @returns Number of stacks blocking the path (0 = immediately clearable)
+ */
+export function countBlocksInDirection(
+  startCoord: AxialCoord,
+  direction: HexDirection,
+  stacks: Map<string, unknown>,
+  holes: Set<string>,
+  gridRadius: number
+): number {
+  const dirVec = HEX_DIRECTIONS[direction];
+  let current = hexAdd(startCoord, dirVec);
+  let blocksCount = 0;
+
+  while (isInHexagonalBounds(current, gridRadius)) {
+    const key = hexKey(current);
+    // If there's a hole, path ends here (can fall in)
+    if (holes.has(key)) {
+      return blocksCount;
+    }
+    // Count stacks in the path
+    if (stacks.has(key)) {
+      blocksCount++;
+    }
+    current = hexAdd(current, dirVec);
+  }
+
+  return blocksCount;
+}
+
+/**
+ * Get the minimum blocks ahead for a stack considering its direction(s)
+ * For bidirectional stacks, returns the minimum of both directions
+ */
+export function getMinBlocksAhead<T extends string>(
+  startCoord: AxialCoord,
+  direction: T,
+  stacks: Map<string, unknown>,
+  holes: Set<string>,
+  gridRadius: number,
+  isBidirectionalFn: (dir: T) => boolean,
+  getAxisDirectionsFn: (axis: T) => [HexDirection, HexDirection]
+): number {
+  if (isBidirectionalFn(direction)) {
+    const [dir1, dir2] = getAxisDirectionsFn(direction);
+    const count1 = countBlocksInDirection(startCoord, dir1, stacks, holes, gridRadius);
+    const count2 = countBlocksInDirection(startCoord, dir2, stacks, holes, gridRadius);
+    return Math.min(count1, count2);
+  } else {
+    return countBlocksInDirection(startCoord, direction as HexDirection, stacks, holes, gridRadius);
+  }
+}
+
+/**
+ * Color gradient for blocks-ahead visualization
+ * 0 = green (immediately clearable), higher = yellow -> orange -> red
+ */
+export function getBlocksAheadColor(blocksCount: number): string {
+  switch (blocksCount) {
+    case 0: return '#22c55e'; // green-500 - immediately clearable
+    case 1: return '#84cc16'; // lime-500
+    case 2: return '#eab308'; // yellow-500
+    case 3: return '#f97316'; // orange-500
+    default: return '#ef4444'; // red-500 - many blocks ahead
+  }
+}
+
+/**
+ * Get fill opacity for blocks-ahead overlay
+ */
+export function getBlocksAheadOpacity(blocksCount: number): number {
+  return blocksCount === 0 ? 0.25 : 0.35;
 }
