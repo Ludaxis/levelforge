@@ -1010,6 +1010,8 @@ export function HexBlockLevelDesigner({
     const metrics: LevelMetrics = {
       cellCount: stacks.size,
       holeCount: holes.size,
+      pauseCount: pauses.size,
+      carouselCount: carousels.size,
       optimalMoves: optMoves,
       moveLimit: moveLim,
       moveBuffer: extraMoves,
@@ -1020,6 +1022,13 @@ export function HexBlockLevelDesigner({
       sawtoothPosition,
     };
 
+    const pauseCoords = Array.from(pauses).map(key => {
+      const [q, r] = key.split(',').map(Number);
+      return { q, r };
+    });
+
+    const carouselArray = Array.from(carousels.values());
+
     const designedLevel: DesignedLevel = {
       id: `level-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       name: `Level ${levelNumber}`,
@@ -1027,13 +1036,15 @@ export function HexBlockLevelDesigner({
       gridRadius,
       stacks: Array.from(stacks.values()),
       holes: holeCoords.length > 0 ? holeCoords : undefined,
+      pauses: pauseCoords.length > 0 ? pauseCoords : undefined,
+      carousels: carouselArray.length > 0 ? carouselArray : undefined,
       gameMode,
       metrics,
       createdAt: Date.now(),
     };
 
     downloadLevelJSON(designedLevel);
-  }, [stacks, holes, gridRadius, gameMode, levelNumber, extraMoves]);
+  }, [stacks, holes, pauses, carousels, gridRadius, gameMode, levelNumber, extraMoves]);
 
   // Import level from JSON file
   const handleImportJSON = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {

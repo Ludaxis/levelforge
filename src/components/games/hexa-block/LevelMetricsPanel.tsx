@@ -25,6 +25,8 @@ import { BarChart3, Target, Lightbulb, TrendingUp, Activity } from 'lucide-react
 interface LevelMetricsPanelProps {
   stacks: Map<string, HexStack>;
   holes: Set<string>;
+  pauses?: Set<string>;
+  carousels?: Map<string, unknown>;
   levelNumber: number;
   solvable: boolean;
   initialClearability: number;
@@ -67,6 +69,8 @@ const FLOW_ZONE_LABELS: Record<FlowZone, string> = {
 export function LevelMetricsPanel({
   stacks,
   holes,
+  pauses,
+  carousels,
   levelNumber,
   solvable,
   initialClearability,
@@ -75,6 +79,8 @@ export function LevelMetricsPanel({
   const metrics = useMemo((): LevelMetrics => {
     const cellCount = stacks.size;
     const holeCount = holes.size;
+    const pauseCount = pauses?.size ?? 0;
+    const carouselCount = carousels?.size ?? 0;
     const optimalMoves = cellCount; // Greedy simulation
     const moveBuffer = 5; // Default buffer
     const moveLimit = optimalMoves + moveBuffer;
@@ -86,6 +92,8 @@ export function LevelMetricsPanel({
     return {
       cellCount,
       holeCount,
+      pauseCount,
+      carouselCount,
       optimalMoves,
       moveLimit,
       moveBuffer,
@@ -95,7 +103,7 @@ export function LevelMetricsPanel({
       flowZone,
       sawtoothPosition,
     };
-  }, [stacks, holes, levelNumber, initialClearability]);
+  }, [stacks, holes, pauses, carousels, levelNumber, initialClearability]);
 
   const expectedDifficulty = getExpectedDifficulty(levelNumber);
   const flowColors = FLOW_ZONE_COLORS[metrics.flowZone];
