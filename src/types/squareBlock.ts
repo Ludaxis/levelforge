@@ -1,5 +1,19 @@
 import { GridCoord, SquareDirection, SquareAxis } from '@/lib/squareGrid';
 
+// Re-export puzzle analysis types
+export type {
+  PuzzleAnalysis,
+  DifficultyWeights,
+  DifficultyBreakdown,
+} from '@/lib/puzzleAnalyzer';
+
+export {
+  analyzePuzzle,
+  calculateDifficultyScore,
+  quickSolve,
+  DEFAULT_WEIGHTS,
+} from '@/lib/puzzleAnalyzer';
+
 // ============================================================================
 // Core Types
 // ============================================================================
@@ -15,6 +29,7 @@ export interface SquareBlock {
   coord: GridCoord;
   direction: BlockDirection;  // Can be single direction or bidirectional axis
   color: string;              // Color for the block
+  locked?: boolean;           // If true, block can only be tapped when all neighbors are cleared
 }
 
 export interface SquareBlockLevel {
@@ -39,19 +54,23 @@ export interface AnimationData {
   pushOffset?: { x: number; y: number };
 }
 
+// Maximum mistakes allowed before game over
+export const MAX_MISTAKES = 3;
+
 export interface SquareBlockState {
   level: SquareBlockLevel;
   blocks: Map<string, SquareBlock>;   // Current positions (keyed by "row,col")
   holes: Set<string>;                  // Hole positions (keyed by "row,col")
-  moveCount: number;                   // Moves made
-  moveLimit: number;                   // Maximum moves allowed (0 = unlimited)
+  moveCount: number;                   // Successful moves made (blocks cleared)
+  mistakes: number;                    // Mistakes made (tapping blocked blocks)
   isComplete: boolean;                 // All blocks cleared
   isWon: boolean;                      // Level completed successfully
-  isLost: boolean;                     // Ran out of moves before clearing
+  isLost: boolean;                     // Made too many mistakes
   history: Map<string, SquareBlock>[]; // For undo functionality
   animatingBlock: string | null;       // Block ID currently animating
   animationPhase: 'idle' | 'rolling' | 'bouncing' | 'pushing' | 'exiting';
   animationData: AnimationData | null;
+  lastMistakeBlockId: string | null;   // Block that was just mistakenly tapped (for shake animation)
 }
 
 // ============================================================================
@@ -100,15 +119,27 @@ export type DifficultyTier = 'easy' | 'medium' | 'hard' | 'superHard';
 export interface LevelMetrics {
   cellCount: number;
   holeCount: number;
-  optimalMoves: number;
-  moveLimit: number;
-  moveBuffer: number;
-  moveBufferPercent: number;
+  lockedCount: number;
+  gridSize: number;
+  density: number;
   initialClearability: number;
-  difficulty: DifficultyTier;
+  solutionCount: number;
+  avgBranchingFactor: number;
+  forcedMoveRatio: number;
+  solutionDepth: number;
+  difficultyScore: number;       // 0-100 score
+  difficulty: DifficultyTier;    // Tier from score
   flowZone: FlowZone;
   sawtoothPosition: number;
 }
+
+// Difficulty target ranges for generation
+export const DIFFICULTY_RANGES: Record<DifficultyTier, { min: number; max: number }> = {
+  easy: { min: 0, max: 19 },
+  medium: { min: 20, max: 39 },
+  hard: { min: 40, max: 59 },
+  superHard: { min: 60, max: 100 },
+};
 
 export interface DesignedLevel {
   id: string;
@@ -216,7 +247,6 @@ export interface LevelEstimation {
 }
 
 export function estimateLevel(
-  moveLimit: number,
   difficulty: DifficultyTier,
   cellCount: number
 ): LevelEstimation {
@@ -226,8 +256,9 @@ export function estimateLevel(
 
   const complexityMod = cellCount > 30 ? 1.2 : cellCount > 20 ? 1.1 : 1.0;
 
-  const minTimePerAttempt = Math.round(moveLimit * minSecPerMove * complexityMod);
-  const maxTimePerAttempt = Math.round(moveLimit * maxSecPerMove * complexityMod);
+  // Use cellCount as the number of moves needed (one move per block)
+  const minTimePerAttempt = Math.round(cellCount * minSecPerMove * complexityMod);
+  const maxTimePerAttempt = Math.round(cellCount * maxSecPerMove * complexityMod);
   const avgTimePerAttempt = Math.round((minTimePerAttempt + maxTimePerAttempt) / 2);
 
   const avgAttempts = Math.round(Math.sqrt(minAttempts * maxAttempts));
@@ -267,36 +298,20 @@ export function estimateLevel(
 
 export function calculateDifficulty(
   clearability: number,
-  cellCount: number,
-  moveBufferPercent: number
+  cellCount: number
 ): DifficultyTier {
   const tiers: DifficultyTier[] = ['easy', 'medium', 'hard', 'superHard'];
+
+  // Base tier from clearability
   let baseTierIndex: number;
+  if (clearability >= 0.5) baseTierIndex = 0;      // easy
+  else if (clearability >= 0.2) baseTierIndex = 1; // medium
+  else if (clearability >= 0.05) baseTierIndex = 2; // hard
+  else baseTierIndex = 3;                          // superHard
 
-  if (clearability >= 0.5) baseTierIndex = 0;
-  else if (clearability >= 0.2) baseTierIndex = 1;
-  else if (clearability >= 0.05) baseTierIndex = 2;
-  else baseTierIndex = 3;
+  // Size modifier - larger puzzles are harder (more chances for mistakes)
+  const sizeAdjustment = cellCount >= 40 ? 1 : cellCount >= 25 ? 0.5 : 0;
 
-  let bufferAdjustment = 0;
-  const sizeModifier = cellCount >= 30 ? 1 : cellCount >= 15 ? 0.5 : 0;
-
-  if (moveBufferPercent >= 100) {
-    bufferAdjustment = -2;
-  } else if (moveBufferPercent >= 60) {
-    bufferAdjustment = -1;
-  } else if (moveBufferPercent >= 40) {
-    bufferAdjustment = 0;
-  } else if (moveBufferPercent >= 25) {
-    bufferAdjustment = 1;
-  } else if (moveBufferPercent >= 15) {
-    bufferAdjustment = 2;
-  } else if (moveBufferPercent >= 5) {
-    bufferAdjustment = 2 + Math.round(sizeModifier);
-  } else {
-    bufferAdjustment = 3 + Math.round(sizeModifier);
-  }
-
-  const finalTierIndex = Math.max(0, Math.min(3, baseTierIndex + bufferAdjustment));
+  const finalTierIndex = Math.min(3, Math.round(baseTierIndex + sizeAdjustment));
   return tiers[finalTierIndex];
 }

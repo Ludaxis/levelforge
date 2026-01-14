@@ -155,3 +155,66 @@ export function getOppositeDirection(dir: SquareDirection): SquareDirection {
     case 'W': return 'E';
   }
 }
+
+// ============================================================================
+// Block Counter Functions (for showing blocks ahead)
+// ============================================================================
+
+// Count blocking blocks in a single direction
+export function countBlocksInDirection(
+  startCoord: GridCoord,
+  direction: SquareDirection,
+  blocks: Map<string, unknown>,
+  holes: Set<string>,
+  rows: number,
+  cols: number
+): number {
+  const dirVec = SQUARE_DIRECTIONS[direction];
+  let current = gridAdd(startCoord, dirVec);
+  let blocksCount = 0;
+
+  while (isInBounds(current, rows, cols)) {
+    const key = gridKey(current);
+    // If there's a hole, path ends here (can fall in)
+    if (holes.has(key)) {
+      return blocksCount;
+    }
+    // Count blocks in the path
+    if (blocks.has(key)) {
+      blocksCount++;
+    }
+    current = gridAdd(current, dirVec);
+  }
+
+  return blocksCount;
+}
+
+// Get minimum blocks ahead (handles bidirectional arrows)
+export function getMinBlocksAhead(
+  startCoord: GridCoord,
+  direction: SquareDirection | SquareAxis,
+  blocks: Map<string, unknown>,
+  holes: Set<string>,
+  rows: number,
+  cols: number
+): number {
+  if (isBidirectional(direction)) {
+    const [dir1, dir2] = getAxisDirections(direction);
+    const count1 = countBlocksInDirection(startCoord, dir1, blocks, holes, rows, cols);
+    const count2 = countBlocksInDirection(startCoord, dir2, blocks, holes, rows, cols);
+    return Math.min(count1, count2);
+  } else {
+    return countBlocksInDirection(startCoord, direction, blocks, holes, rows, cols);
+  }
+}
+
+// Color gradient for blocks ahead visualization
+export function getBlocksAheadColor(blocksCount: number): string {
+  switch (blocksCount) {
+    case 0: return '#22c55e'; // green-500 - immediately clearable
+    case 1: return '#84cc16'; // lime-500
+    case 2: return '#eab308'; // yellow-500
+    case 3: return '#f97316'; // orange-500
+    default: return '#ef4444'; // red-500 - many blocks ahead
+  }
+}

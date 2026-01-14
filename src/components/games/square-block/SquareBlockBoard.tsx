@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo } from 'react';
-import { SquareBlockState, SquareBlock, BlockDirection } from '@/types/squareBlock';
+import { useMemo, useEffect, useState } from 'react';
+import { SquareBlockState, SquareBlock, BlockDirection, MAX_MISTAKES } from '@/types/squareBlock';
 import {
   GridCoord,
   SquareDirection,
@@ -23,14 +23,23 @@ interface SquareBlockBoardProps {
   onTapBlock: (coord: GridCoord) => void;
   clearableBlocks: string[];
   canClearBlock: (block: SquareBlock) => boolean;
+  isBlockUnlocked: (block: SquareBlock) => boolean;
 }
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-const CELL_SIZE = 50;
-const PADDING = 20;
+const MAX_CANVAS_SIZE = 500; // Maximum canvas size for game board
+const MIN_CELL_SIZE = 10;
+const MAX_CELL_SIZE = 50;
+
+// Calculate optimal cell size based on grid dimensions
+function calculateCellSize(rows: number, cols: number): number {
+  const maxDimension = Math.max(rows, cols);
+  const calculatedSize = Math.floor(MAX_CANVAS_SIZE / maxDimension);
+  return Math.max(MIN_CELL_SIZE, Math.min(MAX_CELL_SIZE, calculatedSize));
+}
 
 // ============================================================================
 // Component
@@ -41,23 +50,40 @@ export function SquareBlockBoard({
   onTapBlock,
   clearableBlocks,
   canClearBlock,
+  isBlockUnlocked,
 }: SquareBlockBoardProps) {
-  const { level, blocks, holes, animatingBlock, animationPhase, animationData } = state;
+  const { level, blocks, holes, animatingBlock, animationPhase, animationData, mistakes, lastMistakeBlockId } = state;
   const { rows, cols } = level;
+
+  // Track shaking block for animation
+  const [shakingBlockId, setShakingBlockId] = useState<string | null>(null);
+
+  // Trigger shake animation when a mistake occurs
+  useEffect(() => {
+    if (lastMistakeBlockId) {
+      setShakingBlockId(lastMistakeBlockId);
+      const timer = setTimeout(() => setShakingBlockId(null), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [lastMistakeBlockId]);
+
+  // Calculate dynamic cell size
+  const cellSize = useMemo(() => calculateCellSize(rows, cols), [rows, cols]);
+  const padding = useMemo(() => Math.max(10, Math.min(20, cellSize / 2)), [cellSize]);
 
   // Calculate SVG dimensions
   const { viewBox, origin, width, height } = useMemo(() => {
-    const bounds = getGridBounds(rows, cols, CELL_SIZE);
-    const w = bounds.width + PADDING * 2;
-    const h = bounds.height + PADDING * 2;
+    const bounds = getGridBounds(rows, cols, cellSize);
+    const w = bounds.width + padding * 2;
+    const h = bounds.height + padding * 2;
 
     return {
       viewBox: `0 0 ${w} ${h}`,
-      origin: { x: PADDING, y: PADDING },
+      origin: { x: padding, y: padding },
       width: w,
       height: h,
     };
-  }, [rows, cols]);
+  }, [rows, cols, cellSize, padding]);
 
   // Generate grid coordinates
   const gridCoords = useMemo(() => {
@@ -70,8 +96,35 @@ export function SquareBlockBoard({
     return coords;
   }, [rows, cols]);
 
+  // Generate hearts display
+  const hearts = Array.from({ length: MAX_MISTAKES }, (_, i) => {
+    const isLost = i < mistakes;
+    return (
+      <span
+        key={i}
+        className={`text-2xl transition-all duration-300 ${isLost ? 'grayscale opacity-50' : ''}`}
+      >
+        {isLost ? '🩶' : '❤️'}
+      </span>
+    );
+  });
+
   return (
     <div className="relative">
+      {/* Hearts display */}
+      <div className="flex justify-center gap-2 mb-4">
+        {hearts}
+      </div>
+
+      {/* CSS keyframes for shake animation */}
+      <style jsx>{`
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+          20%, 40%, 60%, 80% { transform: translateX(4px); }
+        }
+      `}</style>
+
       <svg
         viewBox={viewBox}
         className="w-full max-w-md mx-auto"
@@ -81,8 +134,8 @@ export function SquareBlockBoard({
         <rect
           x={origin.x}
           y={origin.y}
-          width={cols * CELL_SIZE}
-          height={rows * CELL_SIZE}
+          width={cols * cellSize}
+          height={rows * cellSize}
           fill="rgba(0, 0, 0, 0.3)"
           rx={8}
         />
@@ -90,17 +143,17 @@ export function SquareBlockBoard({
         {/* Grid cells */}
         {gridCoords.map((coord) => {
           const key = gridKey(coord);
-          const pixel = gridToPixel(coord, CELL_SIZE, origin);
+          const pixel = gridToPixel(coord, cellSize, origin);
           const hasHole = holes.has(key);
 
           return (
             <g key={key}>
               {/* Cell background */}
               <rect
-                x={pixel.x - CELL_SIZE / 2 + 2}
-                y={pixel.y - CELL_SIZE / 2 + 2}
-                width={CELL_SIZE - 4}
-                height={CELL_SIZE - 4}
+                x={pixel.x - cellSize / 2 + 2}
+                y={pixel.y - cellSize / 2 + 2}
+                width={cellSize - 4}
+                height={cellSize - 4}
                 fill={hasHole ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.03)'}
                 stroke={hasHole ? 'rgba(139, 69, 19, 0.6)' : 'rgba(255, 255, 255, 0.1)'}
                 strokeWidth={hasHole ? 2 : 1}
@@ -113,13 +166,13 @@ export function SquareBlockBoard({
                   <circle
                     cx={pixel.x}
                     cy={pixel.y}
-                    r={CELL_SIZE * 0.3}
+                    r={cellSize * 0.3}
                     fill="rgba(0, 0, 0, 0.9)"
                   />
                   <circle
                     cx={pixel.x}
                     cy={pixel.y}
-                    r={CELL_SIZE * 0.35}
+                    r={cellSize * 0.35}
                     fill="none"
                     stroke="rgba(60, 40, 20, 0.8)"
                     strokeWidth={4}
@@ -127,7 +180,7 @@ export function SquareBlockBoard({
                   <circle
                     cx={pixel.x}
                     cy={pixel.y}
-                    r={CELL_SIZE * 0.18}
+                    r={cellSize * 0.18}
                     fill="rgba(20, 10, 5, 1)"
                   />
                 </g>
@@ -139,13 +192,21 @@ export function SquareBlockBoard({
         {/* Blocks */}
         {Array.from(blocks.values()).map((block) => {
           const key = gridKey(block.coord);
-          const pixel = gridToPixel(block.coord, CELL_SIZE, origin);
+          const pixel = gridToPixel(block.coord, cellSize, origin);
           const isClearable = clearableBlocks.includes(key);
           const isAnimating = animatingBlock === block.id;
+          const isLocked = block.locked && !isBlockUnlocked(block);
 
           // Calculate animation transform
           let animationStyle: React.CSSProperties = {};
-          if (isAnimating && animationData) {
+          const isShaking = shakingBlockId === block.id;
+
+          if (isShaking) {
+            // Shake animation for mistakes
+            animationStyle = {
+              animation: 'shake 0.5s ease-in-out',
+            };
+          } else if (isAnimating && animationData) {
             if (animationPhase === 'rolling' && animationData.exitOffset) {
               // Exit animation - slide out and fade
               animationStyle = {
@@ -188,10 +249,10 @@ export function SquareBlockBoard({
             >
               {/* Block body */}
               <rect
-                x={pixel.x - CELL_SIZE / 2 + 4}
-                y={pixel.y - CELL_SIZE / 2 + 4}
-                width={CELL_SIZE - 8}
-                height={CELL_SIZE - 8}
+                x={pixel.x - cellSize / 2 + 4}
+                y={pixel.y - cellSize / 2 + 4}
+                width={cellSize - 8}
+                height={cellSize - 8}
                 fill={block.color}
                 stroke="rgba(0, 0, 0, 0.3)"
                 strokeWidth={2}
@@ -203,18 +264,45 @@ export function SquareBlockBoard({
               <g transform={`translate(${pixel.x}, ${pixel.y})`}>
                 <DirectionArrow
                   direction={block.direction}
-                  size={CELL_SIZE * 0.5}
-                  color={isClearable ? '#ffffff' : 'rgba(255, 255, 255, 0.5)'}
+                  size={cellSize * 0.5}
+                  color={isLocked ? 'rgba(255, 255, 255, 0.3)' : isClearable ? '#ffffff' : 'rgba(255, 255, 255, 0.5)'}
                 />
               </g>
+
+              {/* Lock icon overlay for locked blocks */}
+              {isLocked && (
+                <g transform={`translate(${pixel.x}, ${pixel.y})`}>
+                  {/* Lock body */}
+                  <rect
+                    x={-8}
+                    y={-2}
+                    width={16}
+                    height={12}
+                    fill="rgba(0, 0, 0, 0.7)"
+                    stroke="#fbbf24"
+                    strokeWidth={1.5}
+                    rx={2}
+                  />
+                  {/* Lock shackle */}
+                  <path
+                    d="M -5 -2 L -5 -6 A 5 5 0 0 1 5 -6 L 5 -2"
+                    fill="none"
+                    stroke="#fbbf24"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                  />
+                  {/* Keyhole */}
+                  <circle cx={0} cy={4} r={2} fill="#fbbf24" />
+                </g>
+              )}
 
               {/* Clearable indicator */}
               {isClearable && (
                 <rect
-                  x={pixel.x - CELL_SIZE / 2 + 2}
-                  y={pixel.y - CELL_SIZE / 2 + 2}
-                  width={CELL_SIZE - 4}
-                  height={CELL_SIZE - 4}
+                  x={pixel.x - cellSize / 2 + 2}
+                  y={pixel.y - cellSize / 2 + 2}
+                  width={cellSize - 4}
+                  height={cellSize - 4}
                   fill="none"
                   stroke="rgba(34, 197, 94, 0.6)"
                   strokeWidth={2}

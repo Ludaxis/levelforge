@@ -15,11 +15,13 @@ import {
   DesignedLevel,
   LevelMetrics,
   DifficultyTier,
-  calculateDifficulty,
   calculateFlowZone,
   getSawtoothPosition,
   getExpectedDifficulty,
   estimateLevel,
+  analyzePuzzle,
+  calculateDifficultyScore,
+  quickSolve,
 } from '@/types/squareBlock';
 import {
   GridCoord,
@@ -37,18 +39,30 @@ import {
   gridAdd,
   isBidirectional,
   getAxisDirections,
+  getMinBlocksAhead,
+  getBlocksAheadColor,
 } from '@/lib/squareGrid';
 import {
-  Settings, Play, Trash2, Shuffle, CheckCircle, AlertTriangle,
-  Dices, Circle, Plus, Lightbulb, BarChart3, Target, Activity,
-  TrendingUp, Clock, Percent
+  Settings, Play, Trash2, CheckCircle, AlertTriangle,
+  Circle, Plus, BarChart3, Target, Activity,
+  TrendingUp, Clock, Percent, Lock, Unlock, Eye, EyeOff, Sparkles
 } from 'lucide-react';
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-const CELL_SIZE = 40;
+const MAX_CANVAS_SIZE = 400; // Maximum canvas width/height in pixels
+const MIN_CELL_SIZE = 8;    // Minimum cell size for very large grids
+const MAX_CELL_SIZE = 40;   // Maximum cell size for small grids
+
+// Calculate optimal cell size based on grid dimensions
+function calculateCellSize(rows: number, cols: number): number {
+  const maxDimension = Math.max(rows, cols);
+  const calculatedSize = Math.floor(MAX_CANVAS_SIZE / maxDimension);
+  return Math.max(MIN_CELL_SIZE, Math.min(MAX_CELL_SIZE, calculatedSize));
+}
+
 const BLOCK_COLOR_OPTIONS = Object.entries(BLOCK_COLORS);
 
 const DIRECTION_LABELS: Record<BlockDirection, string> = {
@@ -112,13 +126,11 @@ export function SquareBlockLevelDesigner({
   // Game mode
   const [gameMode, setGameMode] = useState<GameMode>('classic');
 
-  // Random generator settings
-  const [targetBlockCount, setTargetBlockCount] = useState(5);
-  const [targetDifficulty, setTargetDifficulty] = useState<'any' | 'easy' | 'medium' | 'hard'>('any');
 
   // Current tool settings
   const [selectedDirection, setSelectedDirection] = useState<BlockDirection>('E');
   const [selectedColor, setSelectedColor] = useState<string>(BLOCK_COLORS.cyan);
+  const [selectedLocked, setSelectedLocked] = useState(false);
 
   // Edit mode
   const [editMode, setEditMode] = useState<'place' | 'direction'>('place');
@@ -128,30 +140,53 @@ export function SquareBlockLevelDesigner({
   const [blocks, setBlocks] = useState<Map<string, SquareBlock>>(new Map());
   const [holes, setHoles] = useState<Set<string>>(new Set());
 
-  // Move limit
-  const [extraMoves, setExtraMoves] = useState(5);
-
   // Hover state
   const [hoveredCell, setHoveredCell] = useState<string | null>(null);
+
+  // Show blocks ahead toggle
+  const [showBlocksAhead, setShowBlocksAhead] = useState(false);
+
+  // Loading state
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // Calculate dynamic cell size based on grid dimensions
+  const cellSize = useMemo(() => calculateCellSize(rows, cols), [rows, cols]);
 
   // Generate grid coordinates
   const gridCoords = useMemo(() => createRectangularGrid(rows, cols), [rows, cols]);
 
   // Calculate SVG dimensions
   const { viewBox, origin, width, height } = useMemo(() => {
-    const padding = 20;
-    const w = cols * CELL_SIZE + padding * 2;
-    const h = rows * CELL_SIZE + padding * 2;
+    const padding = Math.max(10, Math.min(20, cellSize / 2));
+    const w = cols * cellSize + padding * 2;
+    const h = rows * cellSize + padding * 2;
     return {
       viewBox: `0 0 ${w} ${h}`,
       origin: { x: padding, y: padding },
       width: w,
       height: h,
     };
-  }, [rows, cols]);
+  }, [rows, cols, cellSize]);
+
+  // Calculate blocks ahead for all blocks (for visualization)
+  const blocksAheadMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const [key, block] of blocks) {
+      const blocksAhead = getMinBlocksAhead(
+        block.coord,
+        block.direction,
+        blocks,
+        holes,
+        rows,
+        cols
+      );
+      map.set(key, blocksAhead);
+    }
+    return map;
+  }, [blocks, holes, rows, cols]);
 
   // Check if direction is clear
-  const isDirectionClear = (
+  const isDirectionClear = useCallback((
     startCoord: GridCoord,
     direction: SquareDirection,
     currentBlocks: Map<string, SquareBlock>,
@@ -167,17 +202,30 @@ export function SquareBlockLevelDesigner({
       current = gridAdd(current, dirVec);
     }
     return true;
-  };
+  }, [rows, cols]);
 
   // Check if block can be cleared
-  const canClearBlock = (block: SquareBlock, currentBlocks: Map<string, SquareBlock>, currentHoles: Set<string>): boolean => {
+  const canClearBlock = useCallback((block: SquareBlock, currentBlocks: Map<string, SquareBlock>, currentHoles: Set<string>): boolean => {
+    // Check if locked block still has neighbors
+    if (block.locked) {
+      const directions: SquareDirection[] = ['N', 'E', 'S', 'W'];
+      for (const dir of directions) {
+        const neighborCoord = gridAdd(block.coord, SQUARE_DIRECTIONS[dir]);
+        const neighborKey = gridKey(neighborCoord);
+        if (currentBlocks.has(neighborKey)) {
+          return false; // Still has neighbors, can't clear
+        }
+      }
+    }
+
+    // Check direction clearance
     if (isBidirectional(block.direction)) {
       const [dir1, dir2] = getAxisDirections(block.direction);
       return isDirectionClear(block.coord, dir1, currentBlocks, currentHoles) ||
              isDirectionClear(block.coord, dir2, currentBlocks, currentHoles);
     }
     return isDirectionClear(block.coord, block.direction as SquareDirection, currentBlocks, currentHoles);
-  };
+  }, [isDirectionClear]);
 
   // Solve level (greedy)
   const solveLevel = (
@@ -220,140 +268,173 @@ export function SquareBlockLevelDesigner({
 
   const solvability = solveLevel(blocks, holes);
 
-  // Get valid directions
-  const getValidDirections = useCallback(
-    (coord: GridCoord, currentBlocks: Map<string, SquareBlock>, currentHoles: Set<string>, mode: GameMode): BlockDirection[] => {
-      const validDirs: BlockDirection[] = [];
+  // Deep puzzle analysis for difficulty scoring
+  const puzzleAnalysis = useMemo(() => {
+    if (blocks.size === 0) return null;
+    return analyzePuzzle(blocks, holes, rows, cols);
+  }, [blocks, holes, rows, cols]);
 
-      for (const dir of DIRECTION_ORDER) {
-        if (isDirectionClear(coord, dir, currentBlocks, currentHoles)) {
-          validDirs.push(dir);
-        }
+  // Calculate difficulty from analysis
+  const difficultyBreakdown = useMemo(() => {
+    if (!puzzleAnalysis || !puzzleAnalysis.solvable) return null;
+    return calculateDifficultyScore(puzzleAnalysis);
+  }, [puzzleAnalysis]);
+
+  // Get direction preference based on difficulty target
+  const getDirectionPreference = useCallback((
+    coord: GridCoord,
+    difficulty: 'any' | DifficultyTier
+  ): BlockDirection[] => {
+    const allDirs: BlockDirection[] = [...DIRECTION_ORDER];
+    if (gameMode === 'push') {
+      allDirs.push(...AXIS_ORDER);
+    }
+
+    if (difficulty === 'any' || difficulty === 'medium') {
+      // Random shuffle
+      for (let i = allDirs.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [allDirs[i], allDirs[j]] = [allDirs[j], allDirs[i]];
+      }
+      return allDirs;
+    }
+
+    // Calculate distance to each edge
+    const distToNorth = coord.row;
+    const distToSouth = rows - 1 - coord.row;
+    const distToWest = coord.col;
+    const distToEast = cols - 1 - coord.col;
+
+    const scoreDirection = (dir: BlockDirection): number => {
+      if (isBidirectional(dir)) {
+        // For bidirectional, use shorter path
+        if (dir === 'N_S') return Math.min(distToNorth, distToSouth);
+        if (dir === 'E_W') return Math.min(distToWest, distToEast);
+        return 0;
       }
 
-      if (mode === 'push') {
-        for (const axis of AXIS_ORDER) {
-          const [dir1, dir2] = getAxisDirections(axis);
-          if (isDirectionClear(coord, dir1, currentBlocks, currentHoles) ||
-              isDirectionClear(coord, dir2, currentBlocks, currentHoles)) {
-            validDirs.push(axis);
-          }
-        }
-      }
+      // Score = distance to edge in that direction
+      // Lower distance = closer to edge = easier to clear
+      const dirVec = SQUARE_DIRECTIONS[dir as SquareDirection];
+      if (dirVec.row < 0) return distToNorth; // N
+      if (dirVec.row > 0) return distToSouth; // S
+      if (dirVec.col < 0) return distToWest;  // W
+      if (dirVec.col > 0) return distToEast;  // E
+      return 0;
+    };
 
-      return validDirs;
-    },
-    [rows, cols]
-  );
-
-  // Calculate clearability
-  const getInitialClearability = (blockMap: Map<string, SquareBlock>, levelHoles: Set<string>): number => {
-    if (blockMap.size === 0) return 0;
-    let clearable = 0;
-    for (const block of blockMap.values()) {
-      if (canClearBlock(block, blockMap, levelHoles)) clearable++;
-    }
-    return clearable / blockMap.size;
-  };
-
-  // Check difficulty match
-  const matchesDifficulty = (
-    blockMap: Map<string, SquareBlock>,
-    levelHoles: Set<string>,
-    difficulty: 'any' | 'easy' | 'medium' | 'hard'
-  ): boolean => {
-    if (difficulty === 'any') return true;
-    const ratio = getInitialClearability(blockMap, levelHoles);
-
-    switch (difficulty) {
-      case 'easy': return ratio >= 0.5;
-      case 'medium': return ratio >= 0.2 && ratio < 0.5;
-      case 'hard': return ratio > 0 && ratio < 0.2;
-      default: return true;
-    }
-  };
-
-  // Generate random level
-  const generateSingleLevel = (): Map<string, SquareBlock> => {
-    const newBlocks = new Map<string, SquareBlock>();
-    const availableCoords = gridCoords.filter(coord => !holes.has(gridKey(coord)));
-    const colors = Object.values(BLOCK_COLORS);
-
-    const shuffled = [...availableCoords];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    // Sort based on difficulty
+    if (difficulty === 'easy') {
+      // Prefer directions pointing toward CLOSEST edge (short clear path)
+      allDirs.sort((a, b) => scoreDirection(a) - scoreDirection(b));
+    } else {
+      // hard/superHard: Prefer directions pointing toward FARTHEST edge (long blocked path)
+      allDirs.sort((a, b) => scoreDirection(b) - scoreDirection(a));
     }
 
-    const count = Math.min(targetBlockCount, shuffled.length);
+    return allDirs;
+  }, [rows, cols, gameMode]);
 
-    for (let i = 0; i < count; i++) {
-      const coord = shuffled[i];
-      const key = gridKey(coord);
-      const validDirs = getValidDirections(coord, newBlocks, holes, gameMode);
+  // Smart Fill: Fill entire grid, GUARANTEED solvable
+  const smartFillLevel = useCallback(async () => {
+    setIsGenerating(true);
 
-      if (validDirs.length > 0) {
-        let direction: BlockDirection;
+    // Allow UI to update
+    await new Promise(resolve => setTimeout(resolve, 10));
 
-        if (targetDifficulty === 'hard' || targetDifficulty === 'medium') {
-          const centerDirs = validDirs.filter(d => {
-            if (isBidirectional(d)) return true;
-            const dirVec = SQUARE_DIRECTIONS[d as SquareDirection];
-            const nextCoord = gridAdd(coord, dirVec);
-            return isInBounds(nextCoord, rows, cols);
-          });
-          const dirsToUse = centerDirs.length > 0 ? centerDirs : validDirs;
-          direction = dirsToUse[Math.floor(Math.random() * dirsToUse.length)];
-        } else {
-          direction = validDirs[Math.floor(Math.random() * validDirs.length)];
-        }
+    try {
+      const colors = Object.values(BLOCK_COLORS);
+      const availableCoords = gridCoords.filter((coord) => !holes.has(gridKey(coord)));
 
-        const color = colors[Math.floor(Math.random() * colors.length)];
+      if (availableCoords.length === 0) return;
 
-        const block: SquareBlock = {
+      const newBlocks = new Map<string, SquareBlock>();
+      const allDirections: BlockDirection[] = gameMode === 'push'
+        ? [...DIRECTION_ORDER, ...AXIS_ORDER]
+        : [...DIRECTION_ORDER];
+
+      // STEP 1: Fill ALL cells pointing toward nearest edge (NO locks yet)
+      for (const coord of availableCoords) {
+        const key = gridKey(coord);
+        const easyDirs = getDirectionPreference(coord, 'easy');
+
+        newBlocks.set(key, {
           id: `block-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           coord,
-          direction,
-          color,
-        };
-
-        newBlocks.set(key, block);
+          direction: easyDirs[0],
+          color: colors[Math.floor(Math.random() * colors.length)],
+        });
       }
-    }
 
-    return newBlocks;
-  };
+      // STEP 2: Randomly flip some directions (while keeping solvable)
+      const blockList = Array.from(newBlocks.entries());
+      const blockCount = blockList.length;
 
-  const generateRandomLevel = useCallback(() => {
-    const maxAttempts = targetBlockCount > 50 ? 10 : 30;
-    let bestCandidate: Map<string, SquareBlock> | null = null;
-    let bestDiffMatch = false;
+      // Shuffle for random selection
+      for (let i = blockList.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [blockList[i], blockList[j]] = [blockList[j], blockList[i]];
+      }
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const candidateBlocks = generateSingleLevel();
-      const result = solveLevel(candidateBlocks, holes);
+      // Scale targets based on grid size to limit solvability checks
+      // Small grids: more flips/locks for variety
+      // Large grids: fewer flips but still decent locks for difficulty
+      const flipPercent = blockCount > 200 ? 0.25 : blockCount > 100 ? 0.35 : 0.5;
+      const lockPercent = blockCount > 200 ? 0.15 : blockCount > 100 ? 0.18 : 0.20;
 
-      if (result.solvable) {
-        const diffMatch = matchesDifficulty(candidateBlocks, holes, targetDifficulty);
+      const flipTarget = Math.floor(blockCount * flipPercent);
+      let flipped = 0;
 
-        if (diffMatch) {
-          setBlocks(candidateBlocks);
-          return;
-        }
+      for (const [key, block] of blockList) {
+        if (flipped >= flipTarget) break;
 
-        if (!bestCandidate || (diffMatch && !bestDiffMatch)) {
-          bestCandidate = candidateBlocks;
-          bestDiffMatch = diffMatch;
+        const otherDirs = allDirections.filter(d => d !== block.direction);
+        if (otherDirs.length === 0) continue;
+
+        const randomDir = otherDirs[Math.floor(Math.random() * otherDirs.length)];
+        const originalDir = block.direction;
+
+        newBlocks.set(key, { ...block, direction: randomDir });
+
+        if (quickSolve(newBlocks, holes, rows, cols).solvable) {
+          flipped++;
+        } else {
+          newBlocks.set(key, { ...block, direction: originalDir });
         }
       }
-    }
 
-    if (bestCandidate) {
-      setBlocks(bestCandidate);
-    } else {
-      setBlocks(generateSingleLevel());
+      // STEP 3: Add locks randomly (only if it keeps solvable)
+      const lockTarget = Math.floor(blockCount * lockPercent);
+      let locked = 0;
+
+      // Re-shuffle for lock selection
+      for (let i = blockList.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [blockList[i], blockList[j]] = [blockList[j], blockList[i]];
+      }
+
+      for (const [key] of blockList) {
+        if (locked >= lockTarget) break;
+
+        const block = newBlocks.get(key)!;
+        if (block.locked) continue;
+
+        // Try adding lock
+        newBlocks.set(key, { ...block, locked: true });
+
+        if (quickSolve(newBlocks, holes, rows, cols).solvable) {
+          locked++;
+        } else {
+          // Revert if not solvable
+          newBlocks.set(key, { ...block, locked: undefined });
+        }
+      }
+
+      setBlocks(newBlocks);
+    } finally {
+      setIsGenerating(false);
     }
-  }, [gridCoords, targetBlockCount, targetDifficulty, holes, rows, cols, gameMode]);
+  }, [gridCoords, holes, gameMode, getDirectionPreference, rows, cols]);
 
   // Handle cell click
   const handleCellClick = (coord: GridCoord) => {
@@ -407,6 +488,7 @@ export function SquareBlockLevelDesigner({
           coord,
           direction: selectedDirection,
           color: selectedColor,
+          locked: selectedLocked || undefined,
         };
         const newBlocks = new Map(blocks);
         newBlocks.set(key, newBlock);
@@ -438,14 +520,13 @@ export function SquareBlockLevelDesigner({
       gameMode,
       blocks: Array.from(blocks.values()),
       holes: holeCoords.length > 0 ? holeCoords : undefined,
-      parMoves: moveLimit,
     };
     onPlayLevel(level);
   };
 
   // Add to collection
   const handleAddToCollection = () => {
-    if (!onAddToCollection || !solvability.solvable) return;
+    if (!onAddToCollection || !solvability.solvable || !puzzleAnalysis || !difficultyBreakdown) return;
 
     const holeCoords: GridCoord[] = [];
     holes.forEach(key => {
@@ -453,21 +534,23 @@ export function SquareBlockLevelDesigner({
       holeCoords.push({ row, col });
     });
 
-    const optimalMoves = blocks.size;
-    const moveBufferPercent = optimalMoves > 0 ? (extraMoves / optimalMoves) * 100 : 0;
-    const difficulty = calculateDifficulty(currentClearability, blocks.size, moveBufferPercent);
     const sawtoothPosition = getSawtoothPosition(levelNumber);
-    const flowZone = calculateFlowZone(difficulty, levelNumber);
+    const flowZone = calculateFlowZone(difficultyBreakdown.tier, levelNumber);
+    const lockedCount = Array.from(blocks.values()).filter(b => b.locked).length;
 
     const metrics: LevelMetrics = {
       cellCount: blocks.size,
       holeCount: holes.size,
-      optimalMoves,
-      moveLimit: optimalMoves + extraMoves,
-      moveBuffer: extraMoves,
-      moveBufferPercent,
-      initialClearability: currentClearability,
-      difficulty,
+      lockedCount,
+      gridSize: rows * cols,
+      density: puzzleAnalysis.density,
+      initialClearability: puzzleAnalysis.initialClearability,
+      solutionCount: puzzleAnalysis.solutionCount,
+      avgBranchingFactor: puzzleAnalysis.avgBranchingFactor,
+      forcedMoveRatio: puzzleAnalysis.forcedMoveRatio,
+      solutionDepth: puzzleAnalysis.solutionDepth,
+      difficultyScore: difficultyBreakdown.score,
+      difficulty: difficultyBreakdown.tier,
       flowZone,
       sawtoothPosition,
     };
@@ -490,13 +573,6 @@ export function SquareBlockLevelDesigner({
     setBlocks(new Map());
     setHoles(new Set());
   };
-
-  // Metrics calculations
-  const currentClearability = getInitialClearability(blocks, holes);
-  const optimalMoves = blocks.size;
-  const moveLimit = optimalMoves + extraMoves;
-  const moveBufferPercent = optimalMoves > 0 ? (extraMoves / optimalMoves) * 100 : 0;
-  const currentDifficulty = blocks.size > 0 ? calculateDifficulty(currentClearability, blocks.size, moveBufferPercent) : null;
 
   // Handle grid size change
   const handleSizeChange = (newRows: number, newCols: number) => {
@@ -609,6 +685,28 @@ export function SquareBlockLevelDesigner({
                   ))}
                 </div>
               </div>
+              {/* Locked Toggle */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Locked Block</label>
+                <Button
+                  variant={selectedLocked ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setSelectedLocked(!selectedLocked)}
+                  className="w-full"
+                >
+                  {selectedLocked ? (
+                    <>
+                      <Lock className="h-4 w-4 mr-2" />
+                      Locked (needs neighbors cleared)
+                    </>
+                  ) : (
+                    <>
+                      <Unlock className="h-4 w-4 mr-2" />
+                      Normal Block
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
           )}
 
@@ -656,8 +754,8 @@ export function SquareBlockLevelDesigner({
               <rect
                 x={origin.x}
                 y={origin.y}
-                width={cols * CELL_SIZE}
-                height={rows * CELL_SIZE}
+                width={cols * cellSize}
+                height={rows * cellSize}
                 fill="rgba(0, 0, 0, 0.3)"
                 rx={4}
               />
@@ -665,7 +763,7 @@ export function SquareBlockLevelDesigner({
               {/* Grid cells */}
               {gridCoords.map((coord) => {
                 const key = gridKey(coord);
-                const pixel = gridToPixel(coord, CELL_SIZE, origin);
+                const pixel = gridToPixel(coord, cellSize, origin);
                 const hasBlock = blocks.has(key);
                 const hasHole = holes.has(key);
                 const isHovered = hoveredCell === key;
@@ -682,10 +780,10 @@ export function SquareBlockLevelDesigner({
                 return (
                   <g key={key}>
                     <rect
-                      x={pixel.x - CELL_SIZE / 2 + 2}
-                      y={pixel.y - CELL_SIZE / 2 + 2}
-                      width={CELL_SIZE - 4}
-                      height={CELL_SIZE - 4}
+                      x={pixel.x - cellSize / 2 + 2}
+                      y={pixel.y - cellSize / 2 + 2}
+                      width={cellSize - 4}
+                      height={cellSize - 4}
                       fill={fillColor}
                       stroke={hasHole ? 'rgba(139, 69, 19, 0.6)' : 'rgba(255, 255, 255, 0.15)'}
                       strokeWidth={hasHole ? 2 : 1}
@@ -699,8 +797,8 @@ export function SquareBlockLevelDesigner({
                     {/* Hole visual */}
                     {hasHole && (
                       <g pointerEvents="none">
-                        <circle cx={pixel.x} cy={pixel.y} r={CELL_SIZE * 0.3} fill="rgba(0, 0, 0, 0.9)" />
-                        <circle cx={pixel.x} cy={pixel.y} r={CELL_SIZE * 0.35} fill="none" stroke="rgba(60, 40, 20, 0.8)" strokeWidth={3} />
+                        <circle cx={pixel.x} cy={pixel.y} r={cellSize * 0.3} fill="rgba(0, 0, 0, 0.9)" />
+                        <circle cx={pixel.x} cy={pixel.y} r={cellSize * 0.35} fill="none" stroke="rgba(60, 40, 20, 0.8)" strokeWidth={3} />
                       </g>
                     )}
 
@@ -708,21 +806,28 @@ export function SquareBlockLevelDesigner({
                     {isHovered && !hasBlock && !hasHole && editMode === 'place' && placementMode === 'block' && (
                       <g opacity={0.5} pointerEvents="none">
                         <rect
-                          x={pixel.x - CELL_SIZE / 2 + 4}
-                          y={pixel.y - CELL_SIZE / 2 + 4}
-                          width={CELL_SIZE - 8}
-                          height={CELL_SIZE - 8}
+                          x={pixel.x - cellSize / 2 + 4}
+                          y={pixel.y - cellSize / 2 + 4}
+                          width={cellSize - 8}
+                          height={cellSize - 8}
                           fill={selectedColor}
                           rx={4}
                         />
-                        <DirectionArrow cx={pixel.x} cy={pixel.y} direction={selectedDirection} size={CELL_SIZE * 0.5} />
+                        <DirectionArrow cx={pixel.x} cy={pixel.y} direction={selectedDirection} size={cellSize * 0.5} />
+                        {/* Lock icon preview */}
+                        {selectedLocked && (
+                          <g transform={`translate(${pixel.x}, ${pixel.y})`}>
+                            <rect x={-6} y={-1} width={12} height={9} fill="rgba(0,0,0,0.7)" stroke="#fbbf24" strokeWidth={1} rx={1} />
+                            <path d="M -4 -1 L -4 -4 A 4 4 0 0 1 4 -4 L 4 -1" fill="none" stroke="#fbbf24" strokeWidth={1.5} />
+                          </g>
+                        )}
                       </g>
                     )}
 
                     {/* Preview hole */}
                     {isHovered && !hasBlock && !hasHole && editMode === 'place' && placementMode === 'hole' && (
                       <g opacity={0.6} pointerEvents="none">
-                        <circle cx={pixel.x} cy={pixel.y} r={CELL_SIZE * 0.25} fill="rgba(0, 0, 0, 0.7)" />
+                        <circle cx={pixel.x} cy={pixel.y} r={cellSize * 0.25} fill="rgba(0, 0, 0, 0.7)" />
                       </g>
                     )}
                   </g>
@@ -732,7 +837,7 @@ export function SquareBlockLevelDesigner({
               {/* Placed blocks */}
               {Array.from(blocks.values()).map((block) => {
                 const key = gridKey(block.coord);
-                const pixel = gridToPixel(block.coord, CELL_SIZE, origin);
+                const pixel = gridToPixel(block.coord, cellSize, origin);
                 const canClear = canClearBlock(block, blocks, holes);
                 const isBlockHovered = hoveredCell === key;
 
@@ -745,10 +850,10 @@ export function SquareBlockLevelDesigner({
                     style={{ cursor: 'pointer' }}
                   >
                     <rect
-                      x={pixel.x - CELL_SIZE / 2 + 4}
-                      y={pixel.y - CELL_SIZE / 2 + 4}
-                      width={CELL_SIZE - 8}
-                      height={CELL_SIZE - 8}
+                      x={pixel.x - cellSize / 2 + 4}
+                      y={pixel.y - cellSize / 2 + 4}
+                      width={cellSize - 8}
+                      height={cellSize - 8}
                       fill={block.color}
                       stroke={isBlockHovered && editMode === 'direction' ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.3)'}
                       strokeWidth={isBlockHovered && editMode === 'direction' ? 2 : 1.5}
@@ -758,15 +863,54 @@ export function SquareBlockLevelDesigner({
                       cx={pixel.x}
                       cy={pixel.y}
                       direction={block.direction}
-                      size={CELL_SIZE * 0.5}
-                      color={canClear ? '#ffffff' : 'rgba(255, 255, 255, 0.5)'}
+                      size={cellSize * 0.5}
+                      color={block.locked ? 'rgba(255, 255, 255, 0.3)' : canClear ? '#ffffff' : 'rgba(255, 255, 255, 0.5)'}
                     />
+                    {/* Lock icon for locked blocks */}
+                    {block.locked && (
+                      <g transform={`translate(${pixel.x}, ${pixel.y})`}>
+                        <rect x={-6} y={-1} width={12} height={9} fill="rgba(0,0,0,0.7)" stroke="#fbbf24" strokeWidth={1} rx={1} />
+                        <path d="M -4 -1 L -4 -4 A 4 4 0 0 1 4 -4 L 4 -1" fill="none" stroke="#fbbf24" strokeWidth={1.5} />
+                        <circle cx={0} cy={3} r={1.5} fill="#fbbf24" />
+                      </g>
+                    )}
+                    {/* Blocks ahead counter */}
+                    {showBlocksAhead && (() => {
+                      const blocksAhead = blocksAheadMap.get(key) ?? 0;
+                      const counterColor = getBlocksAheadColor(blocksAhead);
+                      const counterRadius = Math.max(6, cellSize * 0.2);
+                      const fontSize = Math.max(8, cellSize * 0.25);
+                      return (
+                        <g transform={`translate(${pixel.x + cellSize / 2 - counterRadius - 2}, ${pixel.y - cellSize / 2 + counterRadius + 2})`} pointerEvents="none">
+                          <circle
+                            cx={0}
+                            cy={0}
+                            r={counterRadius}
+                            fill={counterColor}
+                            stroke="rgba(0, 0, 0, 0.5)"
+                            strokeWidth={1}
+                          />
+                          <text
+                            x={0}
+                            y={0}
+                            textAnchor="middle"
+                            dominantBaseline="central"
+                            fill="white"
+                            fontSize={fontSize}
+                            fontWeight="bold"
+                            style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
+                          >
+                            {blocksAhead}
+                          </text>
+                        </g>
+                      );
+                    })()}
                     {canClear && editMode !== 'direction' && (
                       <rect
-                        x={pixel.x - CELL_SIZE / 2 + 2}
-                        y={pixel.y - CELL_SIZE / 2 + 2}
-                        width={CELL_SIZE - 4}
-                        height={CELL_SIZE - 4}
+                        x={pixel.x - cellSize / 2 + 2}
+                        y={pixel.y - cellSize / 2 + 2}
+                        width={cellSize - 4}
+                        height={cellSize - 4}
                         fill="none"
                         stroke="rgba(34, 197, 94, 0.5)"
                         strokeWidth={2}
@@ -781,6 +925,110 @@ export function SquareBlockLevelDesigner({
             </svg>
           </div>
 
+          {/* Difficulty Breakdown */}
+          {blocks.size > 0 && puzzleAnalysis && (
+            <div className="p-3 bg-muted/30 rounded-lg space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4" />
+                  Difficulty Analysis
+                </span>
+                {difficultyBreakdown && (
+                  <Badge className={`${
+                    difficultyBreakdown.tier === 'easy' ? 'bg-green-500' :
+                    difficultyBreakdown.tier === 'medium' ? 'bg-yellow-500 text-black' :
+                    difficultyBreakdown.tier === 'hard' ? 'bg-orange-500' :
+                    'bg-red-500'
+                  }`}>
+                    {difficultyBreakdown.score}/100 ({difficultyBreakdown.tier})
+                  </Badge>
+                )}
+              </div>
+
+              {difficultyBreakdown && (
+                <div className="space-y-2">
+                  {/* Progress bar */}
+                  <div className="h-2 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all ${
+                        difficultyBreakdown.tier === 'easy' ? 'bg-green-500' :
+                        difficultyBreakdown.tier === 'medium' ? 'bg-yellow-500' :
+                        difficultyBreakdown.tier === 'hard' ? 'bg-orange-500' :
+                        'bg-red-500'
+                      }`}
+                      style={{ width: `${difficultyBreakdown.score}%` }}
+                    />
+                  </div>
+
+                  {/* Score breakdown */}
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Blockers ({puzzleAnalysis.avgBlockers.toFixed(1)} avg)</span>
+                      <span className="font-mono">
+                        +{difficultyBreakdown.components.blockers.toFixed(0)}/50
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Locked ({puzzleAnalysis.lockedCount}/{puzzleAnalysis.blockCount} = {((puzzleAnalysis.lockedCount / puzzleAnalysis.blockCount) * 100).toFixed(0)}%)</span>
+                      <span className="font-mono">
+                        +{difficultyBreakdown.components.lockedPercent.toFixed(0)}/25
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Clearability ({(puzzleAnalysis.initialClearability * 100).toFixed(0)}% can clear first)</span>
+                      <span className="font-mono">
+                        +{difficultyBreakdown.components.clearability.toFixed(0)}/25
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Size Bonus ({puzzleAnalysis.blockCount} blocks)</span>
+                      <span className="font-mono text-green-500">
+                        {difficultyBreakdown.components.sizeBonus}/20
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Metric explanations */}
+                  <div className="pt-2 border-t border-muted text-xs text-muted-foreground space-y-1.5">
+                    <p><strong className="text-foreground">Blockers:</strong> Avg blocks in the way per block. (0 = 0pts, 5+ = 50pts)</p>
+                    <p><strong className="text-foreground">Locked %:</strong> % of blocks that are locked. (0% = 0pts, 30%+ = 25pts)</p>
+                    <p><strong className="text-foreground">Clearability:</strong> % you can tap first move. (100% = 0pts, 0% = 25pts)</p>
+                    <p><strong className="text-foreground">Size Bonus:</strong> Fewer blocks = easier. (&lt;10: -25, &lt;20: -20, &lt;30: -15, &lt;50: -10)</p>
+                  </div>
+
+                  {/* Formula */}
+                  <div className="pt-2 border-t border-muted text-xs space-y-1.5">
+                    <p className="font-medium text-foreground">Difficulty Score Formula:</p>
+                    <div className="font-mono text-muted-foreground bg-muted/50 p-2 rounded space-y-1">
+                      <p>blockers = min(avgBlockers/5, 1) × 50</p>
+                      <p>locked = min(lockedPct/30%, 1) × 25</p>
+                      <p>clearability = (1 - clearablePct) × 25</p>
+                      <p>sizeBonus = blocks&lt;10: -25, &lt;20: -20, &lt;30: -15, &lt;50: -10</p>
+                      <p className="pt-1 border-t border-muted">score = blockers + locked + clearability + sizeBonus</p>
+                    </div>
+                    <p className="text-muted-foreground">0-19 = Easy, 20-39 = Medium, 40-59 = Hard, 60+ = Super Hard</p>
+                  </div>
+
+                  {/* Generation algorithm explanation */}
+                  <div className="pt-2 border-t border-muted text-xs space-y-2">
+                    <p className="font-medium text-foreground">How "Fill Grid Randomly" works:</p>
+                    <div className="space-y-1.5 text-muted-foreground">
+                      <p>1. Fills every cell with a block pointing toward nearest edge</p>
+                      <p>2. Randomly flips ~50% of directions while keeping solvable</p>
+                      <p>3. Adds random locked blocks while keeping solvable</p>
+                      <p>4. Calculates difficulty based on blockers, locked %, and clearability</p>
+                    </div>
+                    <p className="text-muted-foreground italic">Click multiple times to get different configurations.</p>
+                  </div>
+                </div>
+              )}
+
+              {!puzzleAnalysis.solvable && (
+                <p className="text-xs text-amber-500">Level is not solvable - metrics unavailable</p>
+              )}
+            </div>
+          )}
+
           {/* Grid Size */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -794,7 +1042,7 @@ export function SquareBlockLevelDesigner({
                   value={[rows]}
                   onValueChange={([v]) => handleSizeChange(v, cols)}
                   min={3}
-                  max={10}
+                  max={20}
                   step={1}
                 />
               </div>
@@ -804,7 +1052,7 @@ export function SquareBlockLevelDesigner({
                   value={[cols]}
                   onValueChange={([v]) => handleSizeChange(rows, v)}
                   min={3}
-                  max={10}
+                  max={20}
                   step={1}
                 />
               </div>
@@ -848,44 +1096,47 @@ export function SquareBlockLevelDesigner({
       {/* Configuration Panel */}
       <Card>
         <CardContent className="pt-4 space-y-4">
-          {/* Random Generator */}
-          <div className="space-y-3 p-3 bg-muted/50 rounded-lg">
-            <div className="flex items-center gap-2">
-              <Dices className="h-4 w-4" />
-              <label className="text-sm font-medium">Random Generator</label>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Blocks</span>
-                <span className="text-sm font-medium">{targetBlockCount}</span>
-              </div>
-              <Slider
-                value={[targetBlockCount]}
-                onValueChange={([v]) => setTargetBlockCount(v)}
-                min={2}
-                max={Math.min(100, Math.floor(rows * cols * 0.8))}
-                step={1}
-              />
-            </div>
-            <div className="space-y-2">
-              <span className="text-xs text-muted-foreground">Target Difficulty</span>
-              <div className="flex gap-1">
-                {(['any', 'easy', 'medium', 'hard'] as const).map((diff) => (
-                  <Button
-                    key={diff}
-                    variant={targetDifficulty === diff ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setTargetDifficulty(diff)}
-                    className="flex-1 text-xs"
-                  >
-                    {diff.charAt(0).toUpperCase() + diff.slice(1)}
-                  </Button>
-                ))}
-              </div>
-            </div>
-            <Button variant="secondary" size="sm" onClick={generateRandomLevel} className="w-full">
-              <Shuffle className="h-4 w-4 mr-2" />
-              Generate Random Level
+          {/* Smart Fill */}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={smartFillLevel}
+            disabled={isGenerating}
+            className="w-full"
+            title="Fill entire grid with random solvable blocks"
+          >
+            {isGenerating ? (
+              <>
+                <span className="animate-spin mr-2">⏳</span>
+                Generating...
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4 mr-2" />
+                Fill Grid Randomly
+              </>
+            )}
+          </Button>
+
+          {/* View Options */}
+          <div className="flex gap-2">
+            <Button
+              variant={showBlocksAhead ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setShowBlocksAhead(!showBlocksAhead)}
+              className="flex-1"
+            >
+              {showBlocksAhead ? (
+                <>
+                  <Eye className="h-4 w-4 mr-2" />
+                  Hide Blockers
+                </>
+              ) : (
+                <>
+                  <EyeOff className="h-4 w-4 mr-2" />
+                  Show Blockers
+                </>
+              )}
             </Button>
           </div>
 
@@ -959,11 +1210,10 @@ export function SquareBlockLevelDesigner({
         <EmbeddedMetricsPanel
           blocks={blocks}
           holes={holes}
+          rows={rows}
+          cols={cols}
           levelNumber={levelNumber}
           solvable={solvability.solvable}
-          initialClearability={currentClearability}
-          extraMoves={extraMoves}
-          onExtraMovesChange={setExtraMoves}
         />
       )}
     </div>
@@ -977,32 +1227,40 @@ export function SquareBlockLevelDesigner({
 interface EmbeddedMetricsPanelProps {
   blocks: Map<string, SquareBlock>;
   holes: Set<string>;
+  rows: number;
+  cols: number;
   levelNumber: number;
   solvable: boolean;
-  initialClearability: number;
-  extraMoves: number;
-  onExtraMovesChange: (value: number) => void;
 }
 
 function EmbeddedMetricsPanel({
   blocks,
   holes,
+  rows,
+  cols,
   levelNumber,
   solvable,
-  initialClearability,
-  extraMoves,
-  onExtraMovesChange,
 }: EmbeddedMetricsPanelProps) {
   const cellCount = blocks.size;
   const holeCount = holes.size;
-  const optimalMoves = cellCount;
-  const moveLimit = optimalMoves + extraMoves;
-  const moveBufferPercent = optimalMoves > 0 ? (extraMoves / optimalMoves) * 100 : 0;
-  const difficulty = calculateDifficulty(initialClearability, cellCount, moveBufferPercent);
+  const lockedCount = Array.from(blocks.values()).filter(b => b.locked).length;
+
+  // Use new analyzer
+  const analysis = useMemo(() => {
+    if (cellCount === 0) return null;
+    return analyzePuzzle(blocks, holes, rows, cols);
+  }, [blocks, holes, rows, cols, cellCount]);
+
+  const breakdown = useMemo(() => {
+    if (!analysis || !analysis.solvable) return null;
+    return calculateDifficultyScore(analysis);
+  }, [analysis]);
+
+  const difficulty = breakdown?.tier ?? 'easy';
   const sawtoothPosition = getSawtoothPosition(levelNumber);
   const expectedDiff = getExpectedDifficulty(levelNumber);
   const flowZone = calculateFlowZone(difficulty, levelNumber);
-  const estimation = cellCount > 0 ? estimateLevel(moveLimit, difficulty, cellCount) : null;
+  const estimation = cellCount > 0 ? estimateLevel(difficulty, cellCount) : null;
 
   const flowColors = FLOW_ZONE_COLORS[flowZone];
   const diffColors = DIFFICULTY_BADGE_COLORS[difficulty];
@@ -1019,7 +1277,7 @@ function EmbeddedMetricsPanel({
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Basic Stats */}
-        <div className="grid grid-cols-4 gap-2 text-center">
+        <div className="grid grid-cols-3 gap-2 text-center">
           <div className="p-2 bg-muted/50 rounded-lg">
             <p className="text-2xl font-bold">{cellCount}</p>
             <p className="text-xs text-muted-foreground">Blocks</p>
@@ -1029,44 +1287,62 @@ function EmbeddedMetricsPanel({
             <p className="text-xs text-muted-foreground">Holes</p>
           </div>
           <div className="p-2 bg-muted/50 rounded-lg">
-            <p className="text-2xl font-bold">{optimalMoves}</p>
-            <p className="text-xs text-muted-foreground">Min Moves</p>
-          </div>
-          <div className="p-2 bg-muted/50 rounded-lg">
-            <p className="text-2xl font-bold text-primary">{moveLimit}</p>
-            <p className="text-xs text-muted-foreground">Move Limit</p>
+            <p className="text-2xl font-bold text-amber-400">{lockedCount}</p>
+            <p className="text-xs text-muted-foreground">Locked</p>
           </div>
         </div>
 
-        {/* Move Limit Slider */}
-        <div className="space-y-2 p-3 bg-muted/30 rounded-lg">
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium">Extra Moves Buffer</label>
-            <span className="text-sm">+{extraMoves} ({moveBufferPercent.toFixed(0)}%)</span>
-          </div>
-          <Slider
-            value={[extraMoves]}
-            onValueChange={([v]) => onExtraMovesChange(v)}
-            min={0}
-            max={Math.max(20, optimalMoves)}
-            step={1}
-          />
+        {/* Mistake Mechanic Info */}
+        <div className="p-3 bg-muted/30 rounded-lg text-center">
+          <p className="text-sm text-muted-foreground">
+            Players have <span className="font-bold text-red-500">3 chances</span> (❤️❤️❤️)
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Tapping a blocked block = lose a heart
+          </p>
         </div>
 
-        {/* Clearability */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Initial Clearability</span>
-            <span className="font-medium">{(initialClearability * 100).toFixed(0)}%</span>
-          </div>
-          <Progress value={initialClearability * 100} className="h-2" />
-        </div>
+        {/* Difficulty Score */}
+        {breakdown && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Difficulty Score</span>
+              <span className={`font-bold ${
+                breakdown.tier === 'easy' ? 'text-green-500' :
+                breakdown.tier === 'medium' ? 'text-yellow-500' :
+                breakdown.tier === 'hard' ? 'text-orange-500' :
+                'text-red-500'
+              }`}>{breakdown.score}/100</span>
+            </div>
+            <Progress value={breakdown.score} className="h-2" />
 
-        {/* Difficulty */}
+            {/* Breakdown Components */}
+            <div className="text-xs space-y-1 mt-2 p-2 bg-muted/30 rounded">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Blockers ({analysis?.avgBlockers?.toFixed(1) ?? 0} avg)</span>
+                <span>+{breakdown.components.blockers.toFixed(0)}/50</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Locked ({lockedCount} = {cellCount > 0 ? ((lockedCount / cellCount) * 100).toFixed(0) : 0}%)</span>
+                <span>+{breakdown.components.lockedPercent.toFixed(0)}/25</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Clearability ({((analysis?.initialClearability ?? 0) * 100).toFixed(0)}%)</span>
+                <span>+{breakdown.components.clearability.toFixed(0)}/25</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Size Bonus ({cellCount} blocks)</span>
+                <span className="text-green-500">{breakdown.components.sizeBonus}/20</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Difficulty Tier */}
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm">
             <Target className="h-4 w-4 text-muted-foreground" />
-            <span className="text-muted-foreground">Difficulty</span>
+            <span className="text-muted-foreground">Difficulty Tier</span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Actual</span>

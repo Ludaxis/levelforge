@@ -8,6 +8,7 @@ import {
   AnimationData,
   GameMode,
   BlockDirection,
+  MAX_MISTAKES,
 } from '@/types/squareBlock';
 import {
   GridCoord,
@@ -21,7 +22,15 @@ import {
   getAxisDirections,
 } from '@/lib/squareGrid';
 
-const CELL_SIZE = 50;
+const MAX_CANVAS_SIZE = 500;
+const MIN_CELL_SIZE = 10;
+const MAX_CELL_SIZE = 50;
+
+function calculateCellSize(rows: number, cols: number): number {
+  const maxDimension = Math.max(rows, cols);
+  const calculatedSize = Math.floor(MAX_CANVAS_SIZE / maxDimension);
+  return Math.max(MIN_CELL_SIZE, Math.min(MAX_CELL_SIZE, calculatedSize));
+}
 
 // ============================================================================
 // Hook
@@ -31,6 +40,12 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
   const [state, setState] = useState<SquareBlockState>(() => initializeState(initialLevel));
 
   const gameMode = state.level.gameMode || 'classic';
+
+  // Calculate dynamic cell size based on grid dimensions
+  const cellSize = useMemo(
+    () => calculateCellSize(state.level.rows, state.level.cols),
+    [state.level.rows, state.level.cols]
+  );
 
   // Get path info for a single direction
   const getDirectionPath = useCallback(
@@ -120,20 +135,51 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
     [getDirectionPath]
   );
 
+  // Check if a locked block has any orthogonal neighbors (4 directions)
+  const hasNeighbors = useCallback(
+    (coord: GridCoord): boolean => {
+      const directions: SquareDirection[] = ['N', 'E', 'S', 'W'];
+      for (const dir of directions) {
+        const neighborCoord = gridAdd(coord, SQUARE_DIRECTIONS[dir]);
+        const neighborKey = gridKey(neighborCoord);
+        if (state.blocks.has(neighborKey)) {
+          return true;
+        }
+      }
+      return false;
+    },
+    [state.blocks]
+  );
+
+  // Check if a locked block is currently unlocked (no neighbors)
+  const isBlockUnlocked = useCallback(
+    (block: SquareBlock): boolean => {
+      if (!block.locked) return true;  // Not locked, always unlocked
+      return !hasNeighbors(block.coord);  // Locked but no neighbors = unlocked
+    },
+    [hasNeighbors]
+  );
+
   // Check if a block can be cleared
   const canClearBlock = useCallback(
     (block: SquareBlock): boolean => {
+      // If block is locked and still has neighbors, it cannot be cleared
+      if (!isBlockUnlocked(block)) {
+        return false;
+      }
       const { blocked, holeCoord } = getBlockPath(block);
       return !blocked || holeCoord !== null;
     },
-    [getBlockPath]
+    [getBlockPath, isBlockUnlocked]
   );
 
-  // Check if out of moves
-  const checkLoseCondition = (newMoveCount: number, blocksRemaining: number, limit: number): boolean => {
-    if (limit === 0) return false;
-    return newMoveCount >= limit && blocksRemaining > 0;
-  };
+  // Clear mistake highlight after animation
+  const clearMistakeHighlight = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      lastMistakeBlockId: null,
+    }));
+  }, []);
 
   // Handle tapping a block
   const tapBlock = useCallback(
@@ -145,12 +191,48 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
         return;
       }
 
+      // Check if block is locked and still has neighbors - this is a mistake!
+      if (block.locked && hasNeighbors(block.coord)) {
+        const newMistakes = state.mistakes + 1;
+        const isLost = newMistakes >= MAX_MISTAKES;
+
+        setState((prev) => ({
+          ...prev,
+          mistakes: newMistakes,
+          isLost,
+          lastMistakeBlockId: block.id,
+          animatingBlock: block.id,
+          animationPhase: 'bouncing',
+          animationData: {
+            blockId: block.id,
+            phase: 'bouncing',
+            bounceOffset: { x: 0, y: 0 },
+            bouncePhase: 'out',
+          },
+        }));
+
+        setTimeout(() => {
+          setState((prev) => ({
+            ...prev,
+            animatingBlock: null,
+            animationPhase: 'idle',
+            animationData: null,
+          }));
+        }, 500);
+
+        setTimeout(() => {
+          clearMistakeHighlight();
+        }, 600);
+
+        return;
+      }
+
       const { blocked, path, blockerCoord, lastFreeCoord, chosenDirection, holeCoord } = getBlockPath(block);
 
       // If there's a hole in the path, block falls in!
       if (holeCoord) {
-        const startPixel = gridToPixel(block.coord, CELL_SIZE);
-        const holePixel = gridToPixel(holeCoord, CELL_SIZE);
+        const startPixel = gridToPixel(block.coord, cellSize);
+        const holePixel = gridToPixel(holeCoord, cellSize);
         const fallOffset = {
           x: holePixel.x - startPixel.x,
           y: holePixel.y - startPixel.y,
@@ -175,7 +257,6 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
             const newMoveCount = prev.moveCount + 1;
             const newHistory = [...prev.history, new Map(prev.blocks)];
             const isComplete = newBlocks.size === 0;
-            const isLost = !isComplete && checkLoseCondition(newMoveCount, newBlocks.size, prev.moveLimit);
 
             return {
               ...prev,
@@ -184,7 +265,6 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
               history: newHistory,
               isComplete,
               isWon: isComplete,
-              isLost,
               animatingBlock: null,
               animationPhase: 'idle',
               animationData: null,
@@ -198,8 +278,8 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
       if (blocked) {
         if (gameMode === 'push' && path.length > 0) {
           // Push mode: move to position before blocker (no fade, just slide)
-          const startPixel = gridToPixel(block.coord, CELL_SIZE);
-          const destPixel = gridToPixel(lastFreeCoord, CELL_SIZE);
+          const startPixel = gridToPixel(block.coord, cellSize);
+          const destPixel = gridToPixel(lastFreeCoord, cellSize);
           const moveOffset = {
             x: destPixel.x - startPixel.x,
             y: destPixel.y - startPixel.y,
@@ -225,14 +305,12 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
 
               const newMoveCount = prev.moveCount + 1;
               const newHistory = [...prev.history, new Map(prev.blocks)];
-              const isLost = checkLoseCondition(newMoveCount, newBlocks.size, prev.moveLimit);
 
               return {
                 ...prev,
                 blocks: newBlocks,
                 moveCount: newMoveCount,
                 history: newHistory,
-                isLost,
                 animatingBlock: null,
                 animationPhase: 'idle',
                 animationData: null,
@@ -240,66 +318,48 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
             });
           }, 400);
         } else {
-          // Classic mode (or push with no space): bounce back toward blocker then return
-          const startPixel = gridToPixel(block.coord, CELL_SIZE);
-          const dirVec = SQUARE_DIRECTIONS[chosenDirection];
-          // Calculate bounce direction even if no blocker (bounce toward edge)
-          const bounceTarget = blockerCoord || gridAdd(block.coord, dirVec);
-          const targetPixel = gridToPixel(bounceTarget, CELL_SIZE);
-          const bounceOffset = {
-            x: (targetPixel.x - startPixel.x) * 0.5,
-            y: (targetPixel.y - startPixel.y) * 0.5,
-          };
+          // Classic mode (or push with no space): MISTAKE - block is blocked
+          // Shake animation and increment mistake counter
+          const newMistakes = state.mistakes + 1;
+          const isLost = newMistakes >= MAX_MISTAKES;
 
-          // Phase 1: Move toward blocker
+          // Set mistake state and trigger shake animation
           setState((prev) => ({
             ...prev,
+            mistakes: newMistakes,
+            isLost,
+            lastMistakeBlockId: block.id,
             animatingBlock: block.id,
-            animationPhase: 'bouncing',
+            animationPhase: 'bouncing', // Using bouncing phase for shake
             animationData: {
               blockId: block.id,
               phase: 'bouncing',
-              bounceOffset,
-              bouncePhase: 'out', // Moving toward blocker
+              bounceOffset: { x: 0, y: 0 },
+              bouncePhase: 'out',
             },
           }));
 
-          // Phase 2: Return to original position
+          // Clear animation state after shake
           setTimeout(() => {
             setState((prev) => ({
               ...prev,
-              animationData: {
-                ...prev.animationData!,
-                bouncePhase: 'back', // Returning
-              },
+              animatingBlock: null,
+              animationPhase: 'idle',
+              animationData: null,
             }));
-          }, 200);
+          }, 500);
 
-          // Phase 3: Complete animation
+          // Clear mistake highlight after a delay
           setTimeout(() => {
-            setState((prev) => {
-              const newMoveCount = prev.moveCount + 1;
-              const newHistory = [...prev.history, new Map(prev.blocks)];
-              const isLost = checkLoseCondition(newMoveCount, prev.blocks.size, prev.moveLimit);
-
-              return {
-                ...prev,
-                moveCount: newMoveCount,
-                history: newHistory,
-                isLost,
-                animatingBlock: null,
-                animationPhase: 'idle',
-                animationData: null,
-              };
-            });
-          }, 450);
+            clearMistakeHighlight();
+          }, 600);
         }
 
         return;
       }
 
       // Block can exit - calculate exit position
-      const startPixel = gridToPixel(block.coord, CELL_SIZE);
+      const startPixel = gridToPixel(block.coord, cellSize);
       const dirVec = SQUARE_DIRECTIONS[chosenDirection];
 
       let exitCoord = block.coord;
@@ -309,7 +369,7 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
       exitCoord = gridAdd(exitCoord, dirVec);
       exitCoord = gridAdd(exitCoord, dirVec);
 
-      const exitPixel = gridToPixel(exitCoord, CELL_SIZE);
+      const exitPixel = gridToPixel(exitCoord, cellSize);
       const exitOffset = {
         x: exitPixel.x - startPixel.x,
         y: exitPixel.y - startPixel.y,
@@ -334,7 +394,6 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
           const newMoveCount = prev.moveCount + 1;
           const newHistory = [...prev.history, new Map(prev.blocks)];
           const isComplete = newBlocks.size === 0;
-          const isLost = !isComplete && checkLoseCondition(newMoveCount, newBlocks.size, prev.moveLimit);
 
           return {
             ...prev,
@@ -343,7 +402,6 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
             history: newHistory,
             isComplete,
             isWon: isComplete,
-            isLost,
             animatingBlock: null,
             animationPhase: 'idle',
             animationData: null,
@@ -351,7 +409,7 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
         });
       }, 600);
     },
-    [state.blocks, state.holes, state.isComplete, state.isLost, state.animatingBlock, getBlockPath, gameMode, state.level.rows, state.level.cols]
+    [state.blocks, state.holes, state.isComplete, state.isLost, state.animatingBlock, state.mistakes, getBlockPath, clearMistakeHighlight, gameMode, state.level.rows, state.level.cols]
   );
 
   // Undo last move
@@ -410,6 +468,7 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
     clearableBlocks,
     isSolvable,
     getBlockPath,
+    isBlockUnlocked,
   };
 }
 
@@ -437,7 +496,7 @@ function initializeState(level: SquareBlockLevel): SquareBlockState {
     blocks,
     holes,
     moveCount: 0,
-    moveLimit: level.parMoves || 0,
+    mistakes: 0,
     isComplete: false,
     isWon: false,
     isLost: false,
@@ -445,6 +504,7 @@ function initializeState(level: SquareBlockLevel): SquareBlockState {
     animatingBlock: null,
     animationPhase: 'idle',
     animationData: null,
+    lastMistakeBlockId: null,
   };
 }
 
