@@ -1045,7 +1045,7 @@ export function SquareBlockLevelDesigner({
                     <div className="flex justify-between items-center">
                       <span className="text-muted-foreground">Size Bonus ({puzzleAnalysis.blockCount} blocks)</span>
                       <span className="font-mono text-green-500">
-                        {difficultyBreakdown.components.sizeBonus}/20
+                        {difficultyBreakdown.components.sizeBonus}/40
                       </span>
                     </div>
                   </div>
@@ -1057,7 +1057,7 @@ export function SquareBlockLevelDesigner({
                     <p><strong className="text-foreground">Clearability:</strong> % clearable first move, sqrt curve. (100% = 0pts, 0% = 15pts)</p>
                     <p><strong className="text-foreground">Directions:</strong> More unique directions = harder. Bidirectional blocks reduce this. (max 15pts)</p>
                     <p><strong className="text-foreground">Density:</strong> How packed the grid is. (0% = 0pts, 100% = 10pts)</p>
-                    <p><strong className="text-foreground">Size Bonus:</strong> Fewer blocks = easier. (&lt;10: -20, &lt;30: -10, &lt;50: -5)</p>
+                    <p><strong className="text-foreground">Size Bonus:</strong> Fewer blocks = easier. (0 at 100+ blocks, up to -40 for tiny puzzles)</p>
                   </div>
 
                   {/* Formula */}
@@ -1070,7 +1070,7 @@ export function SquareBlockLevelDesigner({
                       <p>clearability = sqrt(1 - clearablePct) × 15</p>
                       <p>directions = (uniqueDirs/6) × (1 - bidirPct×0.5) × 15</p>
                       <p>density = densityPct × 10</p>
-                      <p>sizeBonus = blocks&lt;10: -20, &lt;30: -10, &lt;50: -5</p>
+                      <p>sizeBonus = 40 × (1 - blocks/100), min 0</p>
                       <p className="pt-1 border-t border-muted">score = blockers + locked + clear + dirs + density - sizeBonus</p>
                     </div>
                     <p className="text-muted-foreground">0-19 = Easy, 20-39 = Medium, 40-59 = Hard, 60+ = Super Hard</p>
@@ -1432,7 +1432,7 @@ function EmbeddedMetricsPanel({
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Size Bonus ({cellCount} blocks)</span>
-                <span className="text-green-500">{breakdown.components.sizeBonus}/20</span>
+                <span className="text-green-500">{breakdown.components.sizeBonus}/40</span>
               </div>
             </div>
           </div>

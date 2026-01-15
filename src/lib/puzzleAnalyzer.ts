@@ -445,11 +445,11 @@ export function calculateDifficultyScore(
   // We use logarithmic scaling to normalize across grid sizes
   const gridScale = Math.log10(Math.max(10, analysis.blockCount)) / Math.log10(10); // 1.0 at 10 blocks, ~2.4 at 229 blocks
 
-  // Size bonus: smaller puzzles get a difficulty reduction
-  // 1-9 blocks: -20 pts, 10-29: -10 pts, 30-49: -5 pts, 50+: 0 pts
-  const sizeBonus = analysis.blockCount < 10 ? 20 :
-                    analysis.blockCount < 30 ? 10 :
-                    analysis.blockCount < 50 ? 5 : 0;
+  // Size bonus: smaller puzzles get a significant difficulty reduction
+  // A 25-block puzzle is inherently much easier than a 229-block puzzle
+  // because it requires less time, less mental tracking, fewer chances for mistakes
+  // Formula: linear reduction from 40pts at 0 blocks to 0pts at 100+ blocks
+  const sizeBonus = Math.max(0, Math.round(40 * (1 - analysis.blockCount / 100)));
 
   // Density bonus: higher density = harder (blocks have fewer escape routes)
   // Max 10 pts at 100% density
