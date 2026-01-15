@@ -10,7 +10,9 @@ import {
   SquareBlockLevelCollection,
   CollectionCurveChart,
   useLevelCollection,
+  DEFAULT_SAWTOOTH_CONFIG,
 } from '@/components/games/square-block';
+import type { SawtoothConfig } from '@/components/games/square-block';
 import { SquareBlockLevel, DesignedLevel } from '@/types/squareBlock';
 import { useSquareBlockGame } from '@/lib/useSquareBlockGame';
 import { ArrowLeft, Undo2, RotateCcw, Trophy, XCircle, Palette, Layers, Play, BookOpen, Grid3X3 } from 'lucide-react';
@@ -175,6 +177,7 @@ export default function SquareBlockPage() {
   const [gameKey, setGameKey] = useState(0);
   const [levelNumber, setLevelNumber] = useState(1);
   const [editingLevel, setEditingLevel] = useState<DesignedLevel | null>(null);
+  const [sawtoothConfig, setSawtoothConfig] = useState<SawtoothConfig>(DEFAULT_SAWTOOTH_CONFIG);
 
   // Level collection state
   const { levels, setLevels, isLoaded, addLevel } = useLevelCollection();
@@ -296,13 +299,15 @@ export default function SquareBlockPage() {
             <CollectionCurveChart
               levels={levels}
               onLevelClick={handleCurveLevelClick}
-              maxLevels={100}
+              config={sawtoothConfig}
             />
             <SquareBlockLevelCollection
               levels={levels}
               onLevelsChange={setLevels}
               onEditLevel={handleEditLevel}
               onPlayLevel={handlePlayCollectionLevel}
+              sawtoothConfig={sawtoothConfig}
+              onSawtoothConfigChange={setSawtoothConfig}
             />
           </div>
         </TabsContent>

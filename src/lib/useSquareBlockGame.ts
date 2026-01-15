@@ -154,10 +154,14 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
   // Check if a locked block is currently unlocked (no neighbors)
   const isBlockUnlocked = useCallback(
     (block: SquareBlock): boolean => {
+      // Timed unlock: unlocked once moveCount meets threshold
+      if (block.unlockAfterMoves !== undefined && state.moveCount >= block.unlockAfterMoves) {
+        return true;
+      }
       if (!block.locked) return true;  // Not locked, always unlocked
       return !hasNeighbors(block.coord);  // Locked but no neighbors = unlocked
     },
-    [hasNeighbors]
+    [hasNeighbors, state.moveCount]
   );
 
   // Check if a block can be cleared
@@ -191,8 +195,8 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
         return;
       }
 
-      // Check if block is locked and still has neighbors - this is a mistake!
-      if (block.locked && hasNeighbors(block.coord)) {
+      // Check if block is currently locked - this is a mistake!
+      if (!isBlockUnlocked(block)) {
         const newMistakes = state.mistakes + 1;
         const isLost = newMistakes >= MAX_MISTAKES;
 

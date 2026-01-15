@@ -1013,67 +1013,44 @@ export function SquareBlockLevelDesigner({
                   {/* Score breakdown */}
                   <div className="space-y-2 text-xs">
                     <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Blockers ({puzzleAnalysis.avgBlockers.toFixed(1)} avg)</span>
-                      <span className="font-mono">
-                        +{difficultyBreakdown.components.blockers.toFixed(0)}/30
-                      </span>
+                      <span className="text-muted-foreground">Avg Blockers ({difficultyBreakdown.components.avgBlockers.toFixed(2)} × 4.5)</span>
+                      <span className="font-mono">+{(difficultyBreakdown.components.avgBlockers * 4.5).toFixed(1)}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Locked ({puzzleAnalysis.lockedCount}/{puzzleAnalysis.blockCount} = {((puzzleAnalysis.lockedCount / puzzleAnalysis.blockCount) * 100).toFixed(0)}%)</span>
-                      <span className="font-mono">
-                        +{difficultyBreakdown.components.lockedPercent.toFixed(0)}/30
-                      </span>
+                      <span className="text-muted-foreground">Clearability ({(difficultyBreakdown.components.clearability * 100).toFixed(1)}%)</span>
+                      <span className="font-mono">+{((1 - difficultyBreakdown.components.clearability) * 20).toFixed(1)}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Clearability ({(puzzleAnalysis.initialClearability * 100).toFixed(0)}% can clear first)</span>
-                      <span className="font-mono">
-                        +{difficultyBreakdown.components.clearability.toFixed(0)}/15
-                      </span>
+                      <span className="text-muted-foreground">Block Count ({difficultyBreakdown.components.blockCount})</span>
+                      <span className="font-mono">+{Math.min(difficultyBreakdown.components.blockCount / 40, 10).toFixed(1)}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Directions ({puzzleAnalysis.uniqueDirections}/6 types, {(puzzleAnalysis.bidirectionalRatio * 100).toFixed(0)}% bidir)</span>
-                      <span className="font-mono">
-                        +{difficultyBreakdown.components.directionVariety.toFixed(0)}/15
-                      </span>
+                      <span className="text-muted-foreground">Locked Blocks ({difficultyBreakdown.components.lockedCount})</span>
+                      <span className="font-mono">+{Math.min(difficultyBreakdown.components.lockedCount, 5)}</span>
                     </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Density ({(puzzleAnalysis.density * 100).toFixed(0)}% packed)</span>
-                      <span className="font-mono">
-                        +{difficultyBreakdown.components.densityBonus.toFixed(0)}/10
-                      </span>
+                    {difficultyBreakdown.components.sizeBonus > 0 && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted-foreground">Size Bonus (400+ blocks)</span>
+                        <span className="font-mono">+{difficultyBreakdown.components.sizeBonus.toFixed(1)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center pt-2 border-t border-muted font-medium">
+                      <span>Total Score</span>
+                      <span className="font-mono">{difficultyBreakdown.score}/100</span>
                     </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Size Bonus ({puzzleAnalysis.blockCount} blocks)</span>
-                      <span className="font-mono text-green-500">
-                        {difficultyBreakdown.components.sizeBonus}/40
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Metric explanations */}
-                  <div className="pt-2 border-t border-muted text-xs text-muted-foreground space-y-1.5">
-                    <p><strong className="text-foreground">Blockers:</strong> Avg blocks in the way, scaled by grid size. (max 30pts)</p>
-                    <p><strong className="text-foreground">Locked %:</strong> % of locked blocks. (0% = 0pts, 30%+ = 30pts)</p>
-                    <p><strong className="text-foreground">Clearability:</strong> % clearable first move, sqrt curve. (100% = 0pts, 0% = 15pts)</p>
-                    <p><strong className="text-foreground">Directions:</strong> More unique directions = harder. Bidirectional blocks reduce this. (max 15pts)</p>
-                    <p><strong className="text-foreground">Density:</strong> How packed the grid is. (0% = 0pts, 100% = 10pts)</p>
-                    <p><strong className="text-foreground">Size Bonus:</strong> Fewer blocks = easier. (0 at 100+ blocks, up to -40 for tiny puzzles)</p>
                   </div>
 
                   {/* Formula */}
                   <div className="pt-2 border-t border-muted text-xs space-y-1.5">
-                    <p className="font-medium text-foreground">Difficulty Score Formula:</p>
+                    <p className="font-medium text-foreground">Difficulty Formula:</p>
                     <div className="font-mono text-muted-foreground bg-muted/50 p-2 rounded space-y-1">
-                      <p>threshold = 2 + log10(blocks) × 3</p>
-                      <p>blockers = min(avgBlockers/threshold, 1) × 30</p>
-                      <p>locked = min(lockedPct/30%, 1) × 30</p>
-                      <p>clearability = sqrt(1 - clearablePct) × 15</p>
-                      <p>directions = (uniqueDirs/6) × (1 - bidirPct×0.5) × 15</p>
-                      <p>density = densityPct × 10</p>
-                      <p>sizeBonus = 40 × (1 - blocks/100), min 0</p>
-                      <p className="pt-1 border-t border-muted">score = blockers + locked + clear + dirs + density - sizeBonus</p>
+                      <p>avgBlockers × 4.5 (primary)</p>
+                      <p>+ (1 - clearability) × 20</p>
+                      <p>+ min(blocks/40, 10)</p>
+                      <p>+ min(locked, 5)</p>
+                      <p>+ sizeBonus (400+ blocks: up to +20)</p>
                     </div>
-                    <p className="text-muted-foreground">0-19 = Easy, 20-39 = Medium, 40-59 = Hard, 60+ = Super Hard</p>
+                    <p className="text-muted-foreground">0-24 = Easy, 25-49 = Medium, 50-74 = Hard, 75+ = Super Hard</p>
                   </div>
 
                   {/* Generation algorithm explanation */}
@@ -1411,28 +1388,30 @@ function EmbeddedMetricsPanel({
             {/* Breakdown Components */}
             <div className="text-xs space-y-1 mt-2 p-2 bg-muted/30 rounded">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Blockers ({analysis?.avgBlockers?.toFixed(1) ?? 0} avg)</span>
-                <span>+{breakdown.components.blockers.toFixed(0)}/30</span>
+                <span className="text-muted-foreground">Avg Blockers ({breakdown.components.avgBlockers.toFixed(1)}×4.5)</span>
+                <span>+{(breakdown.components.avgBlockers * 4.5).toFixed(1)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Locked ({lockedCount} = {cellCount > 0 ? ((lockedCount / cellCount) * 100).toFixed(0) : 0}%)</span>
-                <span>+{breakdown.components.lockedPercent.toFixed(0)}/30</span>
+                <span className="text-muted-foreground">Clearability ({(breakdown.components.clearability * 100).toFixed(0)}%)</span>
+                <span>+{((1 - breakdown.components.clearability) * 20).toFixed(1)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Clearability ({((analysis?.initialClearability ?? 0) * 100).toFixed(0)}%)</span>
-                <span>+{breakdown.components.clearability.toFixed(0)}/15</span>
+                <span className="text-muted-foreground">Blocks ({breakdown.components.blockCount})</span>
+                <span>+{Math.min(breakdown.components.blockCount / 40, 10).toFixed(1)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Directions ({analysis?.uniqueDirections ?? 0}/6, {((analysis?.bidirectionalRatio ?? 0) * 100).toFixed(0)}% bidir)</span>
-                <span>+{breakdown.components.directionVariety.toFixed(0)}/15</span>
+                <span className="text-muted-foreground">Locked ({breakdown.components.lockedCount})</span>
+                <span>+{Math.min(breakdown.components.lockedCount, 5)}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Density ({((analysis?.density ?? 0) * 100).toFixed(0)}%)</span>
-                <span>+{breakdown.components.densityBonus.toFixed(0)}/10</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Size Bonus ({cellCount} blocks)</span>
-                <span className="text-green-500">{breakdown.components.sizeBonus}/40</span>
+              {breakdown.components.sizeBonus > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Size Bonus (400+)</span>
+                  <span>+{breakdown.components.sizeBonus.toFixed(1)}</span>
+                </div>
+              )}
+              <div className="flex justify-between pt-1 border-t border-muted font-medium">
+                <span>Score</span>
+                <span>{breakdown.score}/100</span>
               </div>
             </div>
           </div>
