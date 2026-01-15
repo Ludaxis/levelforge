@@ -3,7 +3,6 @@ import { GridCoord, SquareDirection, SquareAxis } from '@/lib/squareGrid';
 // Re-export puzzle analysis types
 export type {
   PuzzleAnalysis,
-  DifficultyWeights,
   DifficultyBreakdown,
 } from '@/lib/puzzleAnalyzer';
 
@@ -11,7 +10,6 @@ export {
   analyzePuzzle,
   calculateDifficultyScore,
   quickSolve,
-  DEFAULT_WEIGHTS,
 } from '@/lib/puzzleAnalyzer';
 
 // ============================================================================
@@ -30,6 +28,10 @@ export interface SquareBlock {
   direction: BlockDirection;  // Can be single direction or bidirectional axis
   color: string;              // Color for the block
   locked?: boolean;           // If true, block can only be tapped when all neighbors are cleared
+  // Reference-format extras
+  mechanic?: number;          // Raw mechanic code from import/export (e.g., 3 = locked)
+  mechanicExtras?: string;    // Raw mechanic extras (e.g., "60" for timed unlock)
+  unlockAfterMoves?: number;  // Parsed timed-unlock threshold (moves)
 }
 
 export interface SquareBlockLevel {
@@ -182,6 +184,10 @@ export function calculateFlowZone(
   levelNumber: number
 ): FlowZone {
   const expected = getExpectedDifficulty(levelNumber);
+
+  // Exact match = flow
+  if (actualDifficulty === expected) return 'flow';
+
   const difficultyRank: Record<DifficultyTier, number> = {
     easy: 1,
     medium: 2,
@@ -191,11 +197,11 @@ export function calculateFlowZone(
 
   const actualRank = difficultyRank[actualDifficulty];
   const expectedRank = difficultyRank[expected];
-  const diff = actualRank - expectedRank;
 
-  if (diff > 1) return 'frustration';
-  if (diff < -1) return 'boredom';
-  return 'flow';
+  // Harder than expected = frustration (too hard)
+  if (actualRank > expectedRank) return 'frustration';
+  // Easier than expected = boredom (too easy)
+  return 'boredom';
 }
 
 export function getDifficultyFromClearability(clearability: number): DifficultyTier {

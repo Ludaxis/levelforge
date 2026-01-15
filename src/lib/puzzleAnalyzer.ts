@@ -183,6 +183,33 @@ function calculateSolutionDepth(
   return depth;
 }
 
+/**
+ * Greedy solve that also collects metrics (branching factors, forced moves)
+ */
+function greedySolveWithMetrics(
+  blocks: Map<string, SquareBlock>,
+  holes: Set<string>,
+  rows: number,
+  cols: number
+): { solvable: boolean; branchingFactors: number[]; forcedMoveCount: number } {
+  const remaining = new Map(blocks);
+  const branchingFactors: number[] = [];
+  let forcedMoveCount = 0;
+
+  while (remaining.size > 0) {
+    const clearable = getClearableBlocks(remaining, holes, rows, cols);
+    if (clearable.length === 0) {
+      return { solvable: false, branchingFactors, forcedMoveCount };
+    }
+    branchingFactors.push(clearable.length);
+    if (clearable.length === 1) forcedMoveCount++;
+    // Clear first available (greedy)
+    remaining.delete(gridKey(clearable[0].coord));
+  }
+
+  return { solvable: true, branchingFactors, forcedMoveCount };
+}
+
 // ============================================================================
 // Main Analysis Function
 // ============================================================================
@@ -265,37 +292,47 @@ export function analyzePuzzle(
   let forcedMoveCount = 0;
   let statesExplored = 0;
 
-  // For sampling mode, we'll do random path sampling instead
+  // For sampling mode, use greedy solve for solvability + sampling for metrics
   if (useSampling) {
-    // Sample 100 random complete paths
-    const sampleCount = 100;
-    let successfulPaths = 0;
+    // First, use greedy approach to check solvability (more reliable than random sampling)
+    const greedy = greedySolveWithMetrics(blocks, holes, rows, cols);
 
-    for (let sample = 0; sample < sampleCount; sample++) {
-      const remaining = new Map(blocks);
-      let pathValid = true;
+    if (greedy.solvable) {
+      solutionCount = 1; // At least one solution exists
+      branchingFactors.push(...greedy.branchingFactors);
+      forcedMoveCount = greedy.forcedMoveCount;
+    } else {
+      // Try a few random samples in case greedy path hits a dead end
+      const sampleCount = 50;
+      for (let sample = 0; sample < sampleCount && solutionCount === 0; sample++) {
+        const remaining = new Map(blocks);
+        let pathValid = true;
+        const sampleBranching: number[] = [];
+        let sampleForced = 0;
 
-      while (remaining.size > 0 && pathValid) {
-        const clearable = getClearableBlocks(remaining, holes, rows, cols);
+        while (remaining.size > 0 && pathValid) {
+          const clearable = getClearableBlocks(remaining, holes, rows, cols);
 
-        if (clearable.length === 0) {
-          pathValid = false;
-          bottleneckCount++;
-        } else {
-          branchingFactors.push(clearable.length);
-          if (clearable.length === 1) forcedMoveCount++;
+          if (clearable.length === 0) {
+            pathValid = false;
+            bottleneckCount++;
+          } else {
+            sampleBranching.push(clearable.length);
+            if (clearable.length === 1) sampleForced++;
 
-          // Random selection
-          const chosen = clearable[Math.floor(Math.random() * clearable.length)];
-          remaining.delete(gridKey(chosen.coord));
+            // Random selection
+            const chosen = clearable[Math.floor(Math.random() * clearable.length)];
+            remaining.delete(gridKey(chosen.coord));
+          }
+        }
+
+        if (pathValid) {
+          solutionCount = 1;
+          branchingFactors.push(...sampleBranching);
+          forcedMoveCount = sampleForced;
         }
       }
-
-      if (pathValid) successfulPaths++;
     }
-
-    // Estimate solution count from sample success rate
-    solutionCount = successfulPaths > 0 ? Math.max(1, Math.round(successfulPaths * 10)) : 0;
   } else {
     // Full BFS for smaller puzzles
     while (queue.length > 0 && solutionCount < MAX_SOLUTIONS && statesExplored < MAX_STATES) {
@@ -388,120 +425,104 @@ export function analyzePuzzle(
 // Difficulty Scoring
 // ============================================================================
 
-export interface DifficultyWeights {
-  blockers: number;
-  lockedPercent: number;
-  clearability: number;
-  directionVariety: number;
-}
-
-export const DEFAULT_WEIGHTS: DifficultyWeights = {
-  blockers: 30,           // Average blockers per block (more = harder)
-  lockedPercent: 30,      // Percentage of locked blocks (more = harder)
-  clearability: 15,       // Initial clearability inverted (less clearable = harder)
-  directionVariety: 15,   // More unique directions = harder to reason about
-};
-
 export interface DifficultyBreakdown {
-  score: number;
+  score: number;           // Normalized 0-100
+  rawScore: number;        // Raw sum before capping
   tier: 'easy' | 'medium' | 'hard' | 'superHard';
   components: {
-    blockers: number;
-    lockedPercent: number;
-    clearability: number;
-    directionVariety: number; // More directions = harder
-    densityBonus: number;     // Bonus for packed grids
-    sizeBonus: number;        // Reduction for smaller puzzles
+    avgBlockers: number;      // Average blockers per block (primary factor)
+    clearability: number;     // Initial clearability percentage
+    blockCount: number;       // Number of blocks
+    lockedCount: number;      // Number of locked blocks
+    sizeBonus: number;        // Extra points for large puzzles (400+ blocks)
   };
 }
 
 /**
  * Calculate difficulty score (0-100) from puzzle analysis
- * Based on: avg blockers, locked %, initial clearability
- * Uses ratios so it scales properly with grid size
+ *
+ * Based on analysis of real Unity game levels:
+ * - Level 1 (Easy): 34 blocks, 1.4 avg blockers, 41% clearability → ~19
+ * - Level 5 (Medium): 229 blocks, 4.7 avg blockers, 12% clearability → ~44
+ * - Level 35 (Hard): 644 blocks, 8.6 avg blockers, 6.5% clearability → ~73
+ *
+ * Formula:
+ *   avgBlockersScore = avgBlockers × 4.5           (primary factor, ~0-45 range)
+ *   clearabilityScore = (1 - clearability) × 20    (0-20 range)
+ *   blockCountScore = min(blockCount / 40, 10)     (0-10 range, capped)
+ *   lockedBonus = min(lockedCount, 5)              (0-5 range)
+ *   sizeBonus = (blockCount > 400) ? min((blockCount-400)/20, 20) : 0  (0-20 for large puzzles)
+ *
+ *   difficulty = min(sum of above, 100)
+ *
+ * Size bonus makes very large puzzles (400+ blocks) appropriately harder:
+ *   - 400 blocks: +0
+ *   - 600 blocks: +10
+ *   - 800 blocks: +20 (capped)
+ *
+ * Tiers: 0-24 Easy, 25-49 Medium, 50-74 Hard, 75+ Super Hard
  */
 export function calculateDifficultyScore(
-  analysis: PuzzleAnalysis,
-  weights: DifficultyWeights = DEFAULT_WEIGHTS
+  analysis: PuzzleAnalysis
 ): DifficultyBreakdown {
   if (!analysis.solvable || analysis.blockCount === 0) {
     return {
       score: 0,
+      rawScore: 0,
       tier: 'easy',
       components: {
-        blockers: 0,
-        lockedPercent: 0,
+        avgBlockers: 0,
         clearability: 0,
-        directionVariety: 0,
-        densityBonus: 0,
+        blockCount: 0,
+        lockedCount: 0,
         sizeBonus: 0,
       },
     };
   }
 
-  const lockedRatio = analysis.lockedCount / analysis.blockCount;
+  const { blockCount, lockedCount, initialClearability } = analysis;
+  const avgBlockers = analysis.avgBlockers;
 
-  // Size-aware scaling: larger puzzles naturally have higher avgBlockers and lower clearability
-  // We use logarithmic scaling to normalize across grid sizes
-  const gridScale = Math.log10(Math.max(10, analysis.blockCount)) / Math.log10(10); // 1.0 at 10 blocks, ~2.4 at 229 blocks
+  // Primary factor: average blockers per block (most important)
+  // Scales roughly 1.4 (easy) → 4.7 (medium) → 8.6 (hard)
+  const avgBlockersScore = avgBlockers * 4.5;
 
-  // Size bonus: smaller puzzles get a significant difficulty reduction
-  // A 25-block puzzle is inherently much easier than a 229-block puzzle
-  // because it requires less time, less mental tracking, fewer chances for mistakes
-  // Formula: linear reduction from 40pts at 0 blocks to 0pts at 100+ blocks
-  const sizeBonus = Math.max(0, Math.round(40 * (1 - analysis.blockCount / 100)));
+  // Clearability penalty: lower clearability = harder
+  // 0% clearable = 20 points, 100% clearable = 0 points
+  const clearabilityScore = (1 - initialClearability) * 20;
 
-  // Density bonus: higher density = harder (blocks have fewer escape routes)
-  // Max 10 pts at 100% density
-  const densityBonus = analysis.density * 10;
+  // Block count contribution (capped to prevent dominating)
+  const blockCountScore = Math.min(blockCount / 40, 10);
 
-  // Adjust blocker threshold based on grid size
-  // Small grids: avg 2 blockers = max, Large grids: avg 8 blockers = max
-  const blockerThreshold = 2 + (gridScale * 3); // ~2 for small, ~9.2 for 229 blocks
+  // Locked blocks bonus (capped)
+  const lockedBonus = Math.min(lockedCount, 5);
+
+  // Size bonus for large puzzles (400+ blocks)
+  // Very large puzzles are inherently harder due to more decisions & mistakes
+  const sizeBonus = blockCount > 400 ? Math.min((blockCount - 400) / 20, 20) : 0;
 
   const components = {
-    // Blockers: scale to grid size, capped at 1.0x weight
-    blockers: weights.blockers * Math.min(1.0, analysis.avgBlockers / blockerThreshold),
-
-    // Locked %: 30%+ locked = max pts, 0% = 0pts
-    // Locked blocks are the strongest difficulty indicator
-    lockedPercent: weights.lockedPercent * Math.min(1.0, lockedRatio / 0.30),
-
-    // Clearability: use square root to soften the curve
-    // 0% clearable = max pts, 100% = 0pts
-    // sqrt makes low clearability (common in large grids) less punishing
-    clearability: weights.clearability * Math.sqrt(1 - analysis.initialClearability),
-
-    // Direction variety: more unique directions = harder to reason about
-    // 1 direction = 0pts, 6 directions = max pts
-    // Also penalize puzzles with many bidirectional blocks (they're easier - more choices)
-    directionVariety: weights.directionVariety * analysis.directionVariety * (1 - analysis.bidirectionalRatio * 0.5),
-
-    // Density bonus (more packed = harder)
-    densityBonus,
-
-    // Size bonus (negative = reduces difficulty)
-    sizeBonus: -sizeBonus,
+    avgBlockers,
+    clearability: initialClearability,
+    blockCount,
+    lockedCount,
+    sizeBonus,
   };
 
-  const rawScore =
-    components.blockers +
-    components.lockedPercent +
-    components.clearability +
-    components.directionVariety +
-    components.densityBonus;
+  // Raw score = sum of all components
+  const rawScore = avgBlockersScore + clearabilityScore + blockCountScore + lockedBonus + sizeBonus;
 
-  // Apply size bonus (subtract from raw score, min 0, max 100)
-  const score = Math.round(Math.max(0, Math.min(100, rawScore - sizeBonus)));
+  // Cap at 100
+  const score = Math.round(Math.max(0, Math.min(100, rawScore)));
 
-  // Determine tier (adjusted thresholds for better distribution)
+  // Determine tier based on score
   let tier: 'easy' | 'medium' | 'hard' | 'superHard';
-  if (score < 20) tier = 'easy';
-  else if (score < 40) tier = 'medium';
-  else if (score < 60) tier = 'hard';
+  if (score < 25) tier = 'easy';
+  else if (score < 50) tier = 'medium';
+  else if (score < 75) tier = 'hard';
   else tier = 'superHard';
 
-  return { score, tier, components };
+  return { score, rawScore, tier, components };
 }
 
 /**

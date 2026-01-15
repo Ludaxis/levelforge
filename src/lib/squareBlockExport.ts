@@ -11,8 +11,8 @@ import { GridCoord } from '@/lib/squareGrid';
 export interface ReferenceCell {
   direction: number;      // 0=empty, 1=N, 2=E, 3=S, 4=W, 5=N_S, 6=E_W
   colorHex: string;       // 8-char hex with alpha (e.g., "#06B6D4FF")
-  mechanic: number;       // 0=normal, 2=locked
-  mechanicExtras: string; // Always empty string
+  mechanic?: number;      // 0=normal, 3=locked (optional for legacy files)
+  mechanicExtras?: string;// Optional extras (e.g., timed locks like "60")
 }
 
 export interface ReferenceFormat {
@@ -70,11 +70,17 @@ function convertColorToHex8(color: string): string {
  * Convert a SquareBlock to ReferenceCell format
  */
 function blockToReferenceCell(block: SquareBlock): ReferenceCell {
+  const mechanic = typeof block.mechanic === 'number' ? block.mechanic : block.locked ? 3 : 0;
+  const mechanicExtras =
+    block.unlockAfterMoves !== undefined
+      ? String(block.unlockAfterMoves)
+      : block.mechanicExtras || '';
+
   return {
     direction: DIRECTION_TO_NUMBER[block.direction],
     colorHex: convertColorToHex8(block.color),
-    mechanic: block.locked ? 2 : 0,
-    mechanicExtras: '',
+    mechanic,
+    mechanicExtras,
   };
 }
 
@@ -214,6 +220,13 @@ export function importFromReferenceFormat(data: ReferenceFormat): ExportableLeve
       continue;
     }
 
+    const mechanic = typeof cell.mechanic === 'number' ? cell.mechanic : 0;
+    const mechanicExtras = typeof cell.mechanicExtras === 'string' ? cell.mechanicExtras : '';
+    const unlockAfterMoves =
+      mechanic === 3 && mechanicExtras.trim() !== '' && !Number.isNaN(Number(mechanicExtras))
+        ? Number(mechanicExtras)
+        : undefined;
+
     const direction = NUMBER_TO_DIRECTION[cell.direction];
     if (!direction) continue;
 
@@ -222,7 +235,10 @@ export function importFromReferenceFormat(data: ReferenceFormat): ExportableLeve
       coord: { row, col },
       direction,
       color: convertHex8ToColor(cell.colorHex),
-      locked: cell.mechanic === 2 ? true : undefined,
+      locked: mechanic === 3 ? true : undefined,
+      mechanic,
+      mechanicExtras,
+      unlockAfterMoves,
     };
 
     blocks.push(block);
