@@ -53,6 +53,11 @@ export interface PuzzleAnalysis {
   // Blockers
   totalBlockers: number;      // Sum of all blocks ahead for each block
   avgBlockers: number;        // Average blocks ahead per block
+
+  // Direction Variety
+  uniqueDirections: number;   // Count of unique directions used (1-6)
+  directionVariety: number;   // uniqueDirections / 6 (normalized 0-1)
+  bidirectionalRatio: number; // % of blocks that are bidirectional (N_S or E_W)
 }
 
 interface AnalysisState {
@@ -219,6 +224,9 @@ export function analyzePuzzle(
       bottleneckCount: 0,
       totalBlockers: 0,
       avgBlockers: 0,
+      uniqueDirections: 0,
+      directionVariety: 0,
+      bidirectionalRatio: 0,
     };
   }
 
@@ -336,6 +344,19 @@ export function analyzePuzzle(
     : 0;
   const forcedMoveRatio = blockCount > 0 ? forcedMoveCount / branchingFactors.length : 0;
 
+  // Calculate direction variety
+  const directionSet = new Set<string>();
+  let bidirectionalCount = 0;
+  for (const block of blocks.values()) {
+    directionSet.add(block.direction);
+    if (block.direction === 'N_S' || block.direction === 'E_W') {
+      bidirectionalCount++;
+    }
+  }
+  const uniqueDirections = directionSet.size;
+  const directionVariety = uniqueDirections / 6; // 6 possible directions
+  const bidirectionalRatio = blockCount > 0 ? bidirectionalCount / blockCount : 0;
+
   return {
     solvable: solutionCount > 0,
     blockCount,
@@ -357,6 +378,9 @@ export function analyzePuzzle(
     bottleneckCount,
     totalBlockers,
     avgBlockers,
+    uniqueDirections,
+    directionVariety,
+    bidirectionalRatio,
   };
 }
 
@@ -368,12 +392,14 @@ export interface DifficultyWeights {
   blockers: number;
   lockedPercent: number;
   clearability: number;
+  directionVariety: number;
 }
 
 export const DEFAULT_WEIGHTS: DifficultyWeights = {
-  blockers: 50,       // Average blockers per block (more = harder)
-  lockedPercent: 25,  // Percentage of locked blocks (more = harder)
-  clearability: 25,   // Initial clearability inverted (less clearable = harder)
+  blockers: 30,           // Average blockers per block (more = harder)
+  lockedPercent: 30,      // Percentage of locked blocks (more = harder)
+  clearability: 15,       // Initial clearability inverted (less clearable = harder)
+  directionVariety: 15,   // More unique directions = harder to reason about
 };
 
 export interface DifficultyBreakdown {
@@ -383,7 +409,9 @@ export interface DifficultyBreakdown {
     blockers: number;
     lockedPercent: number;
     clearability: number;
-    sizeBonus: number;  // Reduction for smaller puzzles
+    directionVariety: number; // More directions = harder
+    densityBonus: number;     // Bonus for packed grids
+    sizeBonus: number;        // Reduction for smaller puzzles
   };
 }
 
@@ -404,6 +432,8 @@ export function calculateDifficultyScore(
         blockers: 0,
         lockedPercent: 0,
         clearability: 0,
+        directionVariety: 0,
+        densityBonus: 0,
         sizeBonus: 0,
       },
     };
@@ -411,34 +441,58 @@ export function calculateDifficultyScore(
 
   const lockedRatio = analysis.lockedCount / analysis.blockCount;
 
+  // Size-aware scaling: larger puzzles naturally have higher avgBlockers and lower clearability
+  // We use logarithmic scaling to normalize across grid sizes
+  const gridScale = Math.log10(Math.max(10, analysis.blockCount)) / Math.log10(10); // 1.0 at 10 blocks, ~2.4 at 229 blocks
+
   // Size bonus: smaller puzzles get a difficulty reduction
-  // 1-9 blocks: -25 pts, 10-19: -20 pts, 20-29: -15 pts, 30-49: -10 pts, 50+: 0 pts
-  const sizeBonus = analysis.blockCount < 10 ? 25 :
-                    analysis.blockCount < 20 ? 20 :
-                    analysis.blockCount < 30 ? 15 :
-                    analysis.blockCount < 50 ? 10 : 0;
+  // 1-9 blocks: -20 pts, 10-29: -10 pts, 30-49: -5 pts, 50+: 0 pts
+  const sizeBonus = analysis.blockCount < 10 ? 20 :
+                    analysis.blockCount < 30 ? 10 :
+                    analysis.blockCount < 50 ? 5 : 0;
+
+  // Density bonus: higher density = harder (blocks have fewer escape routes)
+  // Max 10 pts at 100% density
+  const densityBonus = analysis.density * 10;
+
+  // Adjust blocker threshold based on grid size
+  // Small grids: avg 2 blockers = max, Large grids: avg 8 blockers = max
+  const blockerThreshold = 2 + (gridScale * 3); // ~2 for small, ~9.2 for 229 blocks
 
   const components = {
-    // Blockers: avg 5+ blockers = max pts, 0 = 0pts (linear scale)
-    blockers: weights.blockers * Math.min(1, analysis.avgBlockers / 5),
+    // Blockers: scale to grid size, capped at 1.0x weight
+    blockers: weights.blockers * Math.min(1.0, analysis.avgBlockers / blockerThreshold),
 
     // Locked %: 30%+ locked = max pts, 0% = 0pts
-    lockedPercent: weights.lockedPercent * Math.min(1, lockedRatio / 0.30),
+    // Locked blocks are the strongest difficulty indicator
+    lockedPercent: weights.lockedPercent * Math.min(1.0, lockedRatio / 0.30),
 
-    // Clearability: 0% clearable = max pts, 100% = 0pts (inverted)
-    clearability: weights.clearability * (1 - analysis.initialClearability),
+    // Clearability: use square root to soften the curve
+    // 0% clearable = max pts, 100% = 0pts
+    // sqrt makes low clearability (common in large grids) less punishing
+    clearability: weights.clearability * Math.sqrt(1 - analysis.initialClearability),
 
-    // Size bonus (negative = reduces difficulty, use || 0 to avoid -0)
-    sizeBonus: -sizeBonus || 0,
+    // Direction variety: more unique directions = harder to reason about
+    // 1 direction = 0pts, 6 directions = max pts
+    // Also penalize puzzles with many bidirectional blocks (they're easier - more choices)
+    directionVariety: weights.directionVariety * analysis.directionVariety * (1 - analysis.bidirectionalRatio * 0.5),
+
+    // Density bonus (more packed = harder)
+    densityBonus,
+
+    // Size bonus (negative = reduces difficulty)
+    sizeBonus: -sizeBonus,
   };
 
   const rawScore =
     components.blockers +
     components.lockedPercent +
-    components.clearability;
+    components.clearability +
+    components.directionVariety +
+    components.densityBonus;
 
-  // Apply size bonus (subtract from raw score, min 0)
-  const score = Math.round(Math.max(0, rawScore - sizeBonus));
+  // Apply size bonus (subtract from raw score, min 0, max 100)
+  const score = Math.round(Math.max(0, Math.min(100, rawScore - sizeBonus)));
 
   // Determine tier (adjusted thresholds for better distribution)
   let tier: 'easy' | 'medium' | 'hard' | 'superHard';

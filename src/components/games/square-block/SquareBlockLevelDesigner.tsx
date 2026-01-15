@@ -45,8 +45,9 @@ import {
 import {
   Settings, Play, Trash2, CheckCircle, AlertTriangle,
   Circle, Plus, BarChart3, Target, Activity,
-  TrendingUp, Clock, Percent, Lock, Unlock, Eye, EyeOff, Sparkles
+  TrendingUp, Clock, Percent, Lock, Unlock, Eye, EyeOff, Sparkles, Download, Upload
 } from 'lucide-react';
+import { downloadLevelAsJSON, parseAndImportLevel } from '@/lib/squareBlockExport';
 
 // ============================================================================
 // Constants
@@ -524,6 +525,55 @@ export function SquareBlockLevelDesigner({
     onPlayLevel(level);
   };
 
+  // Export level as JSON
+  const handleExportJSON = () => {
+    if (blocks.size === 0) return;
+
+    const levelData = {
+      rows,
+      cols,
+      blocks: Array.from(blocks.values()),
+    };
+
+    const filename = `grid_Level${levelNumber}.json`;
+    downloadLevelAsJSON(levelData, filename);
+  };
+
+  // Import level from JSON
+  const handleImportJSON = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const content = event.target?.result as string;
+          const imported = parseAndImportLevel(content);
+          if (imported) {
+            // Update grid size
+            setRows(imported.rows);
+            setCols(imported.cols);
+
+            // Convert blocks array to Map
+            const newBlocks = new Map<string, SquareBlock>();
+            for (const block of imported.blocks) {
+              const key = gridKey(block.coord);
+              newBlocks.set(key, block);
+            }
+            setBlocks(newBlocks);
+            setHoles(new Set()); // Clear holes (not supported in reference format)
+          } else {
+            alert('Failed to import level. Invalid format.');
+          }
+        };
+        reader.readAsText(file);
+      }
+    };
+    input.click();
+  };
+
   // Add to collection
   const handleAddToCollection = () => {
     if (!onAddToCollection || !solvability.solvable || !puzzleAnalysis || !difficultyBreakdown) return;
@@ -965,19 +1015,31 @@ export function SquareBlockLevelDesigner({
                     <div className="flex justify-between items-center">
                       <span className="text-muted-foreground">Blockers ({puzzleAnalysis.avgBlockers.toFixed(1)} avg)</span>
                       <span className="font-mono">
-                        +{difficultyBreakdown.components.blockers.toFixed(0)}/50
+                        +{difficultyBreakdown.components.blockers.toFixed(0)}/30
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-muted-foreground">Locked ({puzzleAnalysis.lockedCount}/{puzzleAnalysis.blockCount} = {((puzzleAnalysis.lockedCount / puzzleAnalysis.blockCount) * 100).toFixed(0)}%)</span>
                       <span className="font-mono">
-                        +{difficultyBreakdown.components.lockedPercent.toFixed(0)}/25
+                        +{difficultyBreakdown.components.lockedPercent.toFixed(0)}/30
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-muted-foreground">Clearability ({(puzzleAnalysis.initialClearability * 100).toFixed(0)}% can clear first)</span>
                       <span className="font-mono">
-                        +{difficultyBreakdown.components.clearability.toFixed(0)}/25
+                        +{difficultyBreakdown.components.clearability.toFixed(0)}/15
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Directions ({puzzleAnalysis.uniqueDirections}/6 types, {(puzzleAnalysis.bidirectionalRatio * 100).toFixed(0)}% bidir)</span>
+                      <span className="font-mono">
+                        +{difficultyBreakdown.components.directionVariety.toFixed(0)}/15
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Density ({(puzzleAnalysis.density * 100).toFixed(0)}% packed)</span>
+                      <span className="font-mono">
+                        +{difficultyBreakdown.components.densityBonus.toFixed(0)}/10
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
@@ -990,21 +1052,26 @@ export function SquareBlockLevelDesigner({
 
                   {/* Metric explanations */}
                   <div className="pt-2 border-t border-muted text-xs text-muted-foreground space-y-1.5">
-                    <p><strong className="text-foreground">Blockers:</strong> Avg blocks in the way per block. (0 = 0pts, 5+ = 50pts)</p>
-                    <p><strong className="text-foreground">Locked %:</strong> % of blocks that are locked. (0% = 0pts, 30%+ = 25pts)</p>
-                    <p><strong className="text-foreground">Clearability:</strong> % you can tap first move. (100% = 0pts, 0% = 25pts)</p>
-                    <p><strong className="text-foreground">Size Bonus:</strong> Fewer blocks = easier. (&lt;10: -25, &lt;20: -20, &lt;30: -15, &lt;50: -10)</p>
+                    <p><strong className="text-foreground">Blockers:</strong> Avg blocks in the way, scaled by grid size. (max 30pts)</p>
+                    <p><strong className="text-foreground">Locked %:</strong> % of locked blocks. (0% = 0pts, 30%+ = 30pts)</p>
+                    <p><strong className="text-foreground">Clearability:</strong> % clearable first move, sqrt curve. (100% = 0pts, 0% = 15pts)</p>
+                    <p><strong className="text-foreground">Directions:</strong> More unique directions = harder. Bidirectional blocks reduce this. (max 15pts)</p>
+                    <p><strong className="text-foreground">Density:</strong> How packed the grid is. (0% = 0pts, 100% = 10pts)</p>
+                    <p><strong className="text-foreground">Size Bonus:</strong> Fewer blocks = easier. (&lt;10: -20, &lt;30: -10, &lt;50: -5)</p>
                   </div>
 
                   {/* Formula */}
                   <div className="pt-2 border-t border-muted text-xs space-y-1.5">
                     <p className="font-medium text-foreground">Difficulty Score Formula:</p>
                     <div className="font-mono text-muted-foreground bg-muted/50 p-2 rounded space-y-1">
-                      <p>blockers = min(avgBlockers/5, 1) × 50</p>
-                      <p>locked = min(lockedPct/30%, 1) × 25</p>
-                      <p>clearability = (1 - clearablePct) × 25</p>
-                      <p>sizeBonus = blocks&lt;10: -25, &lt;20: -20, &lt;30: -15, &lt;50: -10</p>
-                      <p className="pt-1 border-t border-muted">score = blockers + locked + clearability + sizeBonus</p>
+                      <p>threshold = 2 + log10(blocks) × 3</p>
+                      <p>blockers = min(avgBlockers/threshold, 1) × 30</p>
+                      <p>locked = min(lockedPct/30%, 1) × 30</p>
+                      <p>clearability = sqrt(1 - clearablePct) × 15</p>
+                      <p>directions = (uniqueDirs/6) × (1 - bidirPct×0.5) × 15</p>
+                      <p>density = densityPct × 10</p>
+                      <p>sizeBonus = blocks&lt;10: -20, &lt;30: -10, &lt;50: -5</p>
+                      <p className="pt-1 border-t border-muted">score = blockers + locked + clear + dirs + density - sizeBonus</p>
                     </div>
                     <p className="text-muted-foreground">0-19 = Easy, 20-39 = Medium, 40-59 = Hard, 60+ = Super Hard</p>
                   </div>
@@ -1042,7 +1109,7 @@ export function SquareBlockLevelDesigner({
                   value={[rows]}
                   onValueChange={([v]) => handleSizeChange(v, cols)}
                   min={3}
-                  max={20}
+                  max={50}
                   step={1}
                 />
               </div>
@@ -1052,7 +1119,7 @@ export function SquareBlockLevelDesigner({
                   value={[cols]}
                   onValueChange={([v]) => handleSizeChange(rows, v)}
                   min={3}
-                  max={20}
+                  max={50}
                   step={1}
                 />
               </div>
@@ -1202,6 +1269,31 @@ export function SquareBlockLevelDesigner({
               </Button>
             </div>
           )}
+
+          {/* Import/Export JSON */}
+          <div className="pt-3 border-t space-y-2">
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleImportJSON}
+                className="flex-1"
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Import JSON
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleExportJSON}
+                disabled={blocks.size === 0}
+                className="flex-1"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export JSON
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -1320,15 +1412,23 @@ function EmbeddedMetricsPanel({
             <div className="text-xs space-y-1 mt-2 p-2 bg-muted/30 rounded">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Blockers ({analysis?.avgBlockers?.toFixed(1) ?? 0} avg)</span>
-                <span>+{breakdown.components.blockers.toFixed(0)}/50</span>
+                <span>+{breakdown.components.blockers.toFixed(0)}/30</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Locked ({lockedCount} = {cellCount > 0 ? ((lockedCount / cellCount) * 100).toFixed(0) : 0}%)</span>
-                <span>+{breakdown.components.lockedPercent.toFixed(0)}/25</span>
+                <span>+{breakdown.components.lockedPercent.toFixed(0)}/30</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Clearability ({((analysis?.initialClearability ?? 0) * 100).toFixed(0)}%)</span>
-                <span>+{breakdown.components.clearability.toFixed(0)}/25</span>
+                <span>+{breakdown.components.clearability.toFixed(0)}/15</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Directions ({analysis?.uniqueDirections ?? 0}/6, {((analysis?.bidirectionalRatio ?? 0) * 100).toFixed(0)}% bidir)</span>
+                <span>+{breakdown.components.directionVariety.toFixed(0)}/15</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Density ({((analysis?.density ?? 0) * 100).toFixed(0)}%)</span>
+                <span>+{breakdown.components.densityBonus.toFixed(0)}/10</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Size Bonus ({cellCount} blocks)</span>

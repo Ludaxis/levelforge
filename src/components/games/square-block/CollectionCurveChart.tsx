@@ -48,11 +48,17 @@ interface ChartDataPoint {
 // Constants
 // ============================================================================
 
+// Map difficulty tiers to chart values (for ideal curve)
 const DIFFICULTY_TO_VALUE: Record<DifficultyTier, number> = {
   easy: 2.5,
   medium: 5,
   hard: 7.5,
   superHard: 9,
+};
+
+// Scale actual difficulty score (0-100) to chart range (0-12)
+const scoreToChartValue = (score: number): number => {
+  return (score / 100) * 12;
 };
 
 const TIER_COLORS: Record<string, string> = {
@@ -99,7 +105,8 @@ export function CollectionCurveChart({
         let flowZone: FlowZone | undefined;
 
         if (actualLevel) {
-          actualDifficulty = DIFFICULTY_TO_VALUE[actualLevel.metrics.difficulty] + baselineOffset;
+          // Use actual difficulty score (0-100) scaled to chart range (0-12)
+          actualDifficulty = scoreToChartValue(actualLevel.metrics.difficultyScore) + baselineOffset;
           flowZone = actualLevel.metrics.flowZone;
         }
 
@@ -146,6 +153,9 @@ export function CollectionCurveChart({
                 Actual: <Badge className={`ml-1 ${TIER_COLORS[data.actualLevel.metrics.difficulty]}`}>
                   {data.actualLevel.metrics.difficulty}
                 </Badge>
+                <span className="ml-2 font-mono text-xs">
+                  ({data.actualLevel.metrics.difficultyScore}/100)
+                </span>
               </p>
               <p className="text-sm mt-1">
                 <span className={`font-medium`} style={{ color: FLOW_ZONE_COLORS[data.flowZone!] }}>
