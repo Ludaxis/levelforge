@@ -22,6 +22,7 @@ import {
   DifficultyTier,
   FlowZone,
   SAWTOOTH_EXPECTED,
+  calculateFlowZone,
 } from '@/types/squareBlock';
 import { SAWTOOTH_CYCLE, DIFFICULTY_TIERS } from '@/lib/constants';
 
@@ -107,7 +108,8 @@ export function CollectionCurveChart({
         if (actualLevel) {
           // Use actual difficulty score (0-100) scaled to chart range (0-12)
           actualDifficulty = scoreToChartValue(actualLevel.metrics.difficultyScore) + baselineOffset;
-          flowZone = actualLevel.metrics.flowZone;
+          // Recalculate flow zone based on current difficulty tier (not stored value)
+          flowZone = calculateFlowZone(actualLevel.metrics.difficulty, levelNum);
         }
 
         data.push({
@@ -124,11 +126,19 @@ export function CollectionCurveChart({
     return data;
   }, [levels, maxLevels]);
 
-  // Stats
+  // Stats - recalculate flow zones based on current difficulty
   const stats = useMemo(() => {
-    const inFlow = levels.filter((l) => l.metrics.flowZone === 'flow').length;
-    const inBoredom = levels.filter((l) => l.metrics.flowZone === 'boredom').length;
-    const inFrustration = levels.filter((l) => l.metrics.flowZone === 'frustration').length;
+    let inFlow = 0;
+    let inBoredom = 0;
+    let inFrustration = 0;
+
+    levels.forEach((l) => {
+      const flowZone = calculateFlowZone(l.metrics.difficulty, l.levelNumber);
+      if (flowZone === 'flow') inFlow++;
+      else if (flowZone === 'boredom') inBoredom++;
+      else inFrustration++;
+    });
+
     const coverage = (levels.length / maxLevels) * 100;
 
     return { inFlow, inBoredom, inFrustration, coverage };
