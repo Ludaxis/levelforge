@@ -517,14 +517,42 @@ export function CollectionCurveChart({
                           }
                         }}
                       >
+                        <defs>
+                          <linearGradient id="flowZoneGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#22c55e" stopOpacity={0.15} />
+                            <stop offset="50%" stopColor="#22c55e" stopOpacity={0.25} />
+                            <stop offset="100%" stopColor="#22c55e" stopOpacity={0.15} />
+                          </linearGradient>
+                        </defs>
+
                         <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
 
-                        {/* Perfect match diagonal (expected = actual) */}
+                        {/* Flow zone - shaded area between boundaries */}
+                        {/* This is the acceptable range where actual ≈ expected */}
                         <ReferenceLine
                           segment={[{ x: minVal, y: minVal }, { x: maxVal, y: maxVal }]}
                           stroke="#22c55e"
                           strokeWidth={2}
                           strokeDasharray="5 5"
+                          label={{ value: 'Flow', position: 'insideTopLeft', fill: '#22c55e', fontSize: 10 }}
+                        />
+
+                        {/* Upper boundary - above this is frustration (actual > expected by more than 1 tier) */}
+                        <ReferenceLine
+                          segment={[{ x: minVal, y: minVal + 2.5 }, { x: maxVal - 2.5, y: maxVal }]}
+                          stroke="#f97316"
+                          strokeWidth={1}
+                          strokeOpacity={0.6}
+                          strokeDasharray="3 3"
+                        />
+
+                        {/* Lower boundary - below this is boredom (actual < expected by more than 1 tier) */}
+                        <ReferenceLine
+                          segment={[{ x: minVal + 2.5, y: minVal }, { x: maxVal, y: maxVal - 2.5 }]}
+                          stroke="#06b6d4"
+                          strokeWidth={1}
+                          strokeOpacity={0.6}
+                          strokeDasharray="3 3"
                         />
 
                         <XAxis
