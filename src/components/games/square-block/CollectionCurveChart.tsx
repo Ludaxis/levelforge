@@ -14,6 +14,8 @@ import {
   ReferenceLine,
   Cell,
   Tooltip,
+  LabelList,
+  ZAxis,
 } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -472,8 +474,41 @@ export function CollectionCurveChart({
                 else if (diff < -1.5) diagramFlowZone = 'boredom';
                 else diagramFlowZone = 'flow';
 
-                return { skill, difficulty, flowZone: diagramFlowZone, level: d.level };
+                return {
+                  skill,
+                  difficulty,
+                  flowZone: diagramFlowZone,
+                  level: d.level,
+                  score: d.actualLevel!.metrics.difficultyScore,
+                  tier: d.actualLevel!.metrics.difficulty,
+                  name: d.actualLevel!.name,
+                };
               });
+
+              // Custom tooltip for flow state diagram
+              const FlowTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ payload: typeof flowData[0] }> }) => {
+                if (active && payload && payload.length > 0) {
+                  const data = payload[0].payload;
+                  const zoneColor = FLOW_ZONE_COLORS[data.flowZone];
+                  const tierColor = TIER_COLORS[data.tier];
+                  return (
+                    <div className="bg-popover border rounded-lg p-2 shadow-lg text-xs">
+                      <p className="font-medium">Level {data.level}</p>
+                      <p className="text-muted-foreground">{data.name}</p>
+                      <p className="mt-1">
+                        Difficulty: <span className="font-mono">{data.score}</span>
+                        <Badge className={`ml-1 scale-75 ${tierColor}`}>{data.tier}</Badge>
+                      </p>
+                      <p style={{ color: zoneColor }}>
+                        {data.flowZone === 'flow' && '✓ In Flow'}
+                        {data.flowZone === 'boredom' && '↓ Too Easy'}
+                        {data.flowZone === 'frustration' && '↑ Too Hard'}
+                      </p>
+                    </div>
+                  );
+                }
+                return null;
+              };
 
               const skills = flowData.map(d => d.skill);
               const minSkill = Math.min(...skills);
@@ -487,7 +522,15 @@ export function CollectionCurveChart({
                 <>
                   <div className="h-[200px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <ScatterChart margin={{ top: 10, right: 20, bottom: 30, left: 40 }}>
+                      <ScatterChart
+                        margin={{ top: 15, right: 20, bottom: 30, left: 40 }}
+                        onClick={(e) => {
+                          if (e && e.activePayload && e.activePayload[0] && onLevelClick) {
+                            const data = e.activePayload[0].payload;
+                            onLevelClick(data.level);
+                          }
+                        }}
+                      >
                         <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
 
                         {/* Flow channel (diagonal) - skill = difficulty */}
@@ -528,21 +571,32 @@ export function CollectionCurveChart({
                           tick={{ fontSize: 10 }}
                           label={{ value: 'Difficulty', angle: -90, position: 'insideLeft', offset: 5, fontSize: 11 }}
                         />
+                        <ZAxis range={[60, 60]} />
 
-                        <Scatter data={flowData}>
+                        <Tooltip content={<FlowTooltip />} />
+
+                        <Scatter data={flowData} cursor="pointer">
                           {flowData.map((entry, index) => (
                             <Cell
                               key={`flow-cell-${index}`}
                               fill={FLOW_ZONE_COLORS[entry.flowZone]}
                               stroke="#ffffff"
-                              strokeWidth={1}
+                              strokeWidth={2}
                             />
                           ))}
+                          <LabelList
+                            dataKey="level"
+                            position="top"
+                            offset={8}
+                            fontSize={9}
+                            fontWeight="bold"
+                            fill="#ffffff"
+                          />
                         </Scatter>
                       </ScatterChart>
                     </ResponsiveContainer>
                   </div>
-                  <div className="flex gap-4 justify-center mt-2 text-xs">
+                  <div className="flex flex-wrap gap-3 justify-center mt-2 text-xs">
                     <span className="flex items-center gap-1">
                       <div className="w-3 h-3 rounded-full bg-green-500" />
                       Flow
@@ -555,6 +609,7 @@ export function CollectionCurveChart({
                       <div className="w-3 h-3 rounded-full bg-orange-500" />
                       Frustration
                     </span>
+                    <span className="text-muted-foreground">• Click to edit</span>
                   </div>
                 </>
               );
