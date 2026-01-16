@@ -425,12 +425,12 @@ export function CollectionCurveChart({
 
       {/* Flow State Diagram & Best Practices */}
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* Flow State Diagram */}
+        {/* Flow State Diagram - Expected vs Actual */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Flow State Diagram</CardTitle>
+            <CardTitle className="text-sm">Expected vs Actual Difficulty</CardTitle>
             <CardDescription className="text-xs">
-              Skill vs Difficulty - dots should cluster near the diagonal for optimal flow
+              Dots on diagonal = perfect match. Above = too hard, below = too easy.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -441,46 +441,29 @@ export function CollectionCurveChart({
               if (actualLevels.length === 0) {
                 return (
                   <div className="h-[200px] flex items-center justify-center text-muted-foreground text-sm">
-                    Add levels to see flow state distribution
+                    Add levels to see expected vs actual comparison
                   </div>
                 );
               }
 
-              // Calculate difficulty range from actual levels
-              const difficulties = actualLevels.map(d =>
-                scoreToChartValue(d.actualLevel!.metrics.difficultyScore)
-              );
-              const levelNums = actualLevels.map(d => d.level);
-
-              const minDiff = Math.min(...difficulties);
-              const maxDiff = Math.max(...difficulties);
-              const minLevel = Math.min(...levelNums);
-              const maxLevel = Math.max(...levelNums);
-              const levelRange = maxLevel - minLevel || 1;
-
-              // Auto-calculate skill to align with difficulty range
-              // Skill starts at minDiff and grows to maxDiff over the level range
-              const autoSkillRate = (maxDiff - minDiff) / levelRange;
-
+              // Build flow data comparing expected (from sawtooth) vs actual difficulty
               const flowData = actualLevels.map(d => {
-                const difficulty = scoreToChartValue(d.actualLevel!.metrics.difficultyScore);
-                // Skill aligned with difficulty range
-                const skill = minDiff + (d.level - minLevel) * autoSkillRate;
-                const diff = difficulty - skill;
+                const actualDiff = scoreToChartValue(d.actualLevel!.metrics.difficultyScore);
+                // Expected difficulty from sawtooth position (idealDifficulty already calculated)
+                const expectedDiff = d.idealDifficulty || DIFFICULTY_TO_VALUE[d.tier];
 
-                // Flow zone based on distance from diagonal (skill = difficulty line)
-                let diagramFlowZone: FlowZone;
-                if (diff > 1.5) diagramFlowZone = 'frustration';
-                else if (diff < -1.5) diagramFlowZone = 'boredom';
-                else diagramFlowZone = 'flow';
+                // Use the SAME flow zone as the main chart (tier-based comparison)
+                // This ensures consistency between the two visualizations
+                const flowZone = d.flowZone!;
 
                 return {
-                  skill,
-                  difficulty,
-                  flowZone: diagramFlowZone,
+                  expected: expectedDiff,
+                  actual: actualDiff,
+                  flowZone,
                   level: d.level,
                   score: d.actualLevel!.metrics.difficultyScore,
-                  tier: d.actualLevel!.metrics.difficulty,
+                  expectedTier: d.tier,
+                  actualTier: d.actualLevel!.metrics.difficulty,
                   name: d.actualLevel!.name,
                 };
               });
@@ -490,19 +473,23 @@ export function CollectionCurveChart({
                 if (active && payload && payload.length > 0) {
                   const data = payload[0].payload;
                   const zoneColor = FLOW_ZONE_COLORS[data.flowZone];
-                  const tierColor = TIER_COLORS[data.tier];
+                  const expectedTierColor = TIER_COLORS[data.expectedTier];
+                  const actualTierColor = TIER_COLORS[data.actualTier];
                   return (
                     <div className="bg-popover border rounded-lg p-2 shadow-lg text-xs">
                       <p className="font-medium">Level {data.level}</p>
                       <p className="text-muted-foreground">{data.name}</p>
                       <p className="mt-1">
-                        Difficulty: <span className="font-mono">{data.score}</span>
-                        <Badge className={`ml-1 scale-75 ${tierColor}`}>{data.tier}</Badge>
+                        Expected: <Badge className={`scale-75 ${expectedTierColor}`}>{data.expectedTier}</Badge>
                       </p>
-                      <p style={{ color: zoneColor }}>
-                        {data.flowZone === 'flow' && '✓ In Flow'}
-                        {data.flowZone === 'boredom' && '↓ Too Easy'}
-                        {data.flowZone === 'frustration' && '↑ Too Hard'}
+                      <p>
+                        Actual: <span className="font-mono">{data.score}</span>
+                        <Badge className={`ml-1 scale-75 ${actualTierColor}`}>{data.actualTier}</Badge>
+                      </p>
+                      <p className="mt-1 font-medium" style={{ color: zoneColor }}>
+                        {data.flowZone === 'flow' && '✓ In Flow (matches expected)'}
+                        {data.flowZone === 'boredom' && '↓ Too Easy (below expected)'}
+                        {data.flowZone === 'frustration' && '↑ Too Hard (above expected)'}
                       </p>
                     </div>
                   );
@@ -510,13 +497,12 @@ export function CollectionCurveChart({
                 return null;
               };
 
-              const skills = flowData.map(d => d.skill);
-              const minSkill = Math.min(...skills);
-              const maxSkill = Math.max(...skills);
+              const expectedVals = flowData.map(d => d.expected);
+              const actualVals = flowData.map(d => d.actual);
 
               // Use the larger range for both axes to maintain aspect ratio
-              const minVal = Math.floor(Math.min(minSkill, minDiff) - 0.5);
-              const maxVal = Math.ceil(Math.max(maxSkill, maxDiff) + 0.5);
+              const minVal = Math.floor(Math.min(...expectedVals, ...actualVals) - 0.5);
+              const maxVal = Math.ceil(Math.max(...expectedVals, ...actualVals) + 0.5);
 
               return (
                 <>
@@ -533,7 +519,7 @@ export function CollectionCurveChart({
                       >
                         <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
 
-                        {/* Flow channel (diagonal) - skill = difficulty */}
+                        {/* Perfect match diagonal (expected = actual) */}
                         <ReferenceLine
                           segment={[{ x: minVal, y: minVal }, { x: maxVal, y: maxVal }]}
                           stroke="#22c55e"
@@ -541,35 +527,19 @@ export function CollectionCurveChart({
                           strokeDasharray="5 5"
                         />
 
-                        {/* Frustration boundary (difficulty > skill + 1.5) */}
-                        <ReferenceLine
-                          segment={[{ x: minVal, y: minVal + 1.5 }, { x: maxVal - 1.5, y: maxVal }]}
-                          stroke="#f97316"
-                          strokeWidth={1}
-                          strokeOpacity={0.5}
-                        />
-
-                        {/* Boredom boundary (skill > difficulty + 1.5) */}
-                        <ReferenceLine
-                          segment={[{ x: minVal + 1.5, y: minVal }, { x: maxVal, y: maxVal - 1.5 }]}
-                          stroke="#06b6d4"
-                          strokeWidth={1}
-                          strokeOpacity={0.5}
-                        />
-
                         <XAxis
                           type="number"
-                          dataKey="skill"
+                          dataKey="expected"
                           domain={[minVal, maxVal]}
                           tick={{ fontSize: 10 }}
-                          label={{ value: 'Player Skill', position: 'bottom', offset: 15, fontSize: 11 }}
+                          label={{ value: 'Expected Difficulty', position: 'bottom', offset: 15, fontSize: 11 }}
                         />
                         <YAxis
                           type="number"
-                          dataKey="difficulty"
+                          dataKey="actual"
                           domain={[minVal, maxVal]}
                           tick={{ fontSize: 10 }}
-                          label={{ value: 'Difficulty', angle: -90, position: 'insideLeft', offset: 5, fontSize: 11 }}
+                          label={{ value: 'Actual Difficulty', angle: -90, position: 'insideLeft', offset: 5, fontSize: 11 }}
                         />
                         <ZAxis range={[60, 60]} />
 
@@ -599,15 +569,15 @@ export function CollectionCurveChart({
                   <div className="flex flex-wrap gap-3 justify-center mt-2 text-xs">
                     <span className="flex items-center gap-1">
                       <div className="w-3 h-3 rounded-full bg-green-500" />
-                      Flow
+                      Flow (match)
                     </span>
                     <span className="flex items-center gap-1">
                       <div className="w-3 h-3 rounded-full bg-cyan-500" />
-                      Boredom
+                      Too Easy
                     </span>
                     <span className="flex items-center gap-1">
                       <div className="w-3 h-3 rounded-full bg-orange-500" />
-                      Frustration
+                      Too Hard
                     </span>
                     <span className="text-muted-foreground">• Click to edit</span>
                   </div>
