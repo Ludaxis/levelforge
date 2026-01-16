@@ -22,8 +22,6 @@ import {
   DesignedLevel,
   DifficultyTier,
   FlowZone,
-  SAWTOOTH_EXPECTED,
-  calculateFlowZone,
 } from '@/types/squareBlock';
 import { SAWTOOTH_CYCLE, DIFFICULTY_TIERS } from '@/lib/constants';
 
@@ -47,7 +45,7 @@ export const DEFAULT_SAWTOOTH_CONFIG: SawtoothConfig = {
   hardMax: 74,
   expectedPattern: ['easy', 'easy', 'medium', 'medium', 'hard', 'medium', 'medium', 'hard', 'hard', 'superHard'],
   totalLevels: 100,
-  skillGrowthRate: 0.15,
+  skillGrowthRate: 0.10,  // Aligned with difficulty scale: skill reaches ~12 at level 100
   baselineIncrease: 0.3,
 };
 
@@ -156,13 +154,15 @@ export function CollectionCurveChart({
 
         if (actualLevel) {
           // Use actual difficulty score (0-100) scaled to chart range (0-12)
-          actualDifficulty = scoreToChartValue(actualLevel.metrics.difficultyScore) + baselineOffset;
+          // NOTE: Do NOT add baselineOffset - actual scores are absolute, not relative to theoretical baseline
+          actualDifficulty = scoreToChartValue(actualLevel.metrics.difficultyScore);
           // Recalculate flow zone using config thresholds
           flowZone = getFlowZoneFromConfig(actualLevel.metrics.difficultyScore, levelNum);
         }
 
         // Skill grows linearly with level
-        const skillLevel = 1 + (levelNum - 1) * config.skillGrowthRate;
+        // Start at 2 to align with difficulty scale (easy tier starts at ~2)
+        const skillLevel = 2 + (levelNum - 1) * config.skillGrowthRate;
 
         data.push({
           level: levelNum,
@@ -423,93 +423,142 @@ export function CollectionCurveChart({
 
       {/* Flow State Diagram & Best Practices */}
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* Mini Flow State Diagram */}
+        {/* Flow State Diagram */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              Flow State Diagram
-            </CardTitle>
+            <CardTitle className="text-sm">Flow State Diagram</CardTitle>
+            <CardDescription className="text-xs">
+              Skill vs Difficulty - dots should cluster near the diagonal for optimal flow
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="h-[200px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart margin={{ top: 10, right: 20, bottom: 30, left: 40 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+            {(() => {
+              // Get actual level data for flow state diagram
+              const actualLevels = chartData.filter(d => d.actualLevel);
 
-                  {/* Flow channel (diagonal) */}
-                  <ReferenceLine
-                    segment={[{ x: 0, y: 0 }, { x: 12, y: 12 }]}
-                    stroke="#22c55e"
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                  />
+              if (actualLevels.length === 0) {
+                return (
+                  <div className="h-[200px] flex items-center justify-center text-muted-foreground text-sm">
+                    Add levels to see flow state distribution
+                  </div>
+                );
+              }
 
-                  {/* Frustration boundary */}
-                  <ReferenceLine
-                    segment={[{ x: 0, y: 2 }, { x: 10, y: 12 }]}
-                    stroke="#f97316"
-                    strokeWidth={1}
-                    strokeOpacity={0.5}
-                  />
+              // Calculate difficulty range from actual levels
+              const difficulties = actualLevels.map(d =>
+                scoreToChartValue(d.actualLevel!.metrics.difficultyScore)
+              );
+              const levelNums = actualLevels.map(d => d.level);
 
-                  {/* Boredom boundary */}
-                  <ReferenceLine
-                    segment={[{ x: 2, y: 0 }, { x: 12, y: 10 }]}
-                    stroke="#06b6d4"
-                    strokeWidth={1}
-                    strokeOpacity={0.5}
-                  />
+              const minDiff = Math.min(...difficulties);
+              const maxDiff = Math.max(...difficulties);
+              const minLevel = Math.min(...levelNums);
+              const maxLevel = Math.max(...levelNums);
+              const levelRange = maxLevel - minLevel || 1;
 
-                  <XAxis
-                    type="number"
-                    dataKey="skill"
-                    domain={[0, 'auto']}
-                    tick={{ fontSize: 10 }}
-                    label={{ value: 'Player Skill', position: 'bottom', offset: 15, fontSize: 11 }}
-                  />
-                  <YAxis
-                    type="number"
-                    dataKey="difficulty"
-                    domain={[0, 'auto']}
-                    tick={{ fontSize: 10 }}
-                    label={{ value: 'Difficulty', angle: -90, position: 'insideLeft', offset: 5, fontSize: 11 }}
-                  />
+              // Auto-calculate skill to align with difficulty range
+              // Skill starts at minDiff and grows to maxDiff over the level range
+              const autoSkillRate = (maxDiff - minDiff) / levelRange;
 
-                  {/* Plot actual levels on flow diagram */}
-                  <Scatter
-                    data={chartData.filter(d => d.actualLevel).map(d => ({
-                      skill: d.skillLevel,
-                      difficulty: scoreToChartValue(d.actualLevel!.metrics.difficultyScore),
-                      flowZone: d.flowZone,
-                      level: d.level,
-                    }))}
-                  >
-                    {chartData.filter(d => d.actualLevel).map((entry, index) => (
-                      <Cell
-                        key={`flow-cell-${index}`}
-                        fill={FLOW_ZONE_COLORS[entry.flowZone!]}
-                        stroke="#ffffff"
-                        strokeWidth={1}
-                      />
-                    ))}
-                  </Scatter>
-                </ScatterChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="flex gap-4 justify-center mt-2 text-xs">
-              <span className="flex items-center gap-1">
-                <div className="w-3 h-3 rounded-full bg-green-500" />
-                Flow
-              </span>
-              <span className="flex items-center gap-1">
-                <div className="w-3 h-3 rounded-full bg-cyan-500" />
-                Boredom
-              </span>
-              <span className="flex items-center gap-1">
-                <div className="w-3 h-3 rounded-full bg-orange-500" />
-                Frustration
-              </span>
-            </div>
+              const flowData = actualLevels.map(d => {
+                const difficulty = scoreToChartValue(d.actualLevel!.metrics.difficultyScore);
+                // Skill aligned with difficulty range
+                const skill = minDiff + (d.level - minLevel) * autoSkillRate;
+                const diff = difficulty - skill;
+
+                // Flow zone based on distance from diagonal (skill = difficulty line)
+                let diagramFlowZone: FlowZone;
+                if (diff > 1.5) diagramFlowZone = 'frustration';
+                else if (diff < -1.5) diagramFlowZone = 'boredom';
+                else diagramFlowZone = 'flow';
+
+                return { skill, difficulty, flowZone: diagramFlowZone, level: d.level };
+              });
+
+              const skills = flowData.map(d => d.skill);
+              const minSkill = Math.min(...skills);
+              const maxSkill = Math.max(...skills);
+
+              // Use the larger range for both axes to maintain aspect ratio
+              const minVal = Math.floor(Math.min(minSkill, minDiff) - 0.5);
+              const maxVal = Math.ceil(Math.max(maxSkill, maxDiff) + 0.5);
+
+              return (
+                <>
+                  <div className="h-[200px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ScatterChart margin={{ top: 10, right: 20, bottom: 30, left: 40 }}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+
+                        {/* Flow channel (diagonal) - skill = difficulty */}
+                        <ReferenceLine
+                          segment={[{ x: minVal, y: minVal }, { x: maxVal, y: maxVal }]}
+                          stroke="#22c55e"
+                          strokeWidth={2}
+                          strokeDasharray="5 5"
+                        />
+
+                        {/* Frustration boundary (difficulty > skill + 1.5) */}
+                        <ReferenceLine
+                          segment={[{ x: minVal, y: minVal + 1.5 }, { x: maxVal - 1.5, y: maxVal }]}
+                          stroke="#f97316"
+                          strokeWidth={1}
+                          strokeOpacity={0.5}
+                        />
+
+                        {/* Boredom boundary (skill > difficulty + 1.5) */}
+                        <ReferenceLine
+                          segment={[{ x: minVal + 1.5, y: minVal }, { x: maxVal, y: maxVal - 1.5 }]}
+                          stroke="#06b6d4"
+                          strokeWidth={1}
+                          strokeOpacity={0.5}
+                        />
+
+                        <XAxis
+                          type="number"
+                          dataKey="skill"
+                          domain={[minVal, maxVal]}
+                          tick={{ fontSize: 10 }}
+                          label={{ value: 'Player Skill', position: 'bottom', offset: 15, fontSize: 11 }}
+                        />
+                        <YAxis
+                          type="number"
+                          dataKey="difficulty"
+                          domain={[minVal, maxVal]}
+                          tick={{ fontSize: 10 }}
+                          label={{ value: 'Difficulty', angle: -90, position: 'insideLeft', offset: 5, fontSize: 11 }}
+                        />
+
+                        <Scatter data={flowData}>
+                          {flowData.map((entry, index) => (
+                            <Cell
+                              key={`flow-cell-${index}`}
+                              fill={FLOW_ZONE_COLORS[entry.flowZone]}
+                              stroke="#ffffff"
+                              strokeWidth={1}
+                            />
+                          ))}
+                        </Scatter>
+                      </ScatterChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="flex gap-4 justify-center mt-2 text-xs">
+                    <span className="flex items-center gap-1">
+                      <div className="w-3 h-3 rounded-full bg-green-500" />
+                      Flow
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <div className="w-3 h-3 rounded-full bg-cyan-500" />
+                      Boredom
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <div className="w-3 h-3 rounded-full bg-orange-500" />
+                      Frustration
+                    </span>
+                  </div>
+                </>
+              );
+            })()}
           </CardContent>
         </Card>
 
@@ -546,27 +595,36 @@ export function CollectionCurveChart({
             {/* Parameter Guidelines */}
             <div className="space-y-3 text-xs">
               <div className="space-y-1">
+                <p className="font-medium text-foreground">Connecting the Parameters</p>
+                <p className="text-muted-foreground">
+                  For balanced flow, skill growth should match difficulty progression:<br/>
+                  <span className="text-green-400">• Skill at level 100 ≈ Peak difficulty at level 100</span><br/>
+                  <span className="text-muted-foreground">• Formula: skillRate ≈ (9 + baselineIncrease × 10 - 2) / 100</span>
+                </p>
+              </div>
+
+              <div className="space-y-1">
                 <p className="font-medium text-foreground">Skill Growth Rate</p>
                 <p className="text-muted-foreground">
-                  <span className="text-cyan-400">0.10-0.15:</span> Casual players, longer games (100+ levels)<br/>
-                  <span className="text-cyan-400">0.15-0.20:</span> Standard progression (recommended)<br/>
-                  <span className="text-cyan-400">0.20-0.30:</span> Fast learners, shorter games (30-50 levels)
+                  <span className="text-cyan-400">0.05-0.08:</span> Slow mastery, more challenge<br/>
+                  <span className="text-cyan-400">0.08-0.12:</span> Balanced progression (recommended)<br/>
+                  <span className="text-cyan-400">0.12-0.20:</span> Fast mastery, easier late game
                 </p>
               </div>
 
               <div className="space-y-1">
                 <p className="font-medium text-foreground">Baseline Increase</p>
                 <p className="text-muted-foreground">
-                  <span className="text-purple-400">0.1-0.2:</span> Gentle progression, casual feel<br/>
-                  <span className="text-purple-400">0.2-0.4:</span> Standard difficulty ramp (recommended)<br/>
-                  <span className="text-purple-400">0.4-0.6:</span> Aggressive ramp, hardcore feel
+                  <span className="text-purple-400">0.1-0.2:</span> Gentle ramp (+1-2 per 10 cycles)<br/>
+                  <span className="text-purple-400">0.2-0.4:</span> Standard ramp (recommended)<br/>
+                  <span className="text-purple-400">0.4-0.8:</span> Aggressive ramp, hardcore feel
                 </p>
               </div>
 
               <div className="space-y-1">
                 <p className="font-medium text-foreground">Key Principle</p>
                 <p className="text-muted-foreground">
-                  The skill line should weave through the sawtooth peaks and valleys. If skill stays below difficulty → frustration. If skill stays above → boredom.
+                  Skill line should weave through the sawtooth. Watch the Flow State Diagram - adjust until most dots are green (in flow channel).
                 </p>
               </div>
             </div>
