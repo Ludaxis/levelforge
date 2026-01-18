@@ -12,6 +12,7 @@ import {
   isBidirectional,
   getAxisDirections,
   getMinBlocksAhead,
+  getOppositeDirection,
 } from './squareGrid';
 import { SquareBlock, BlockDirection } from '@/types/squareBlock';
 
@@ -25,6 +26,9 @@ export interface PuzzleAnalysis {
   blockCount: number;
   holeCount: number;
   lockedCount: number;
+  icedCount: number;          // Number of iced blocks
+  totalIceCount: number;      // Sum of all iceCount values
+  mirrorCount: number;        // Number of mirror blocks
   gridSize: number;           // rows * cols
   density: number;            // blockCount / gridSize
 
@@ -78,7 +82,7 @@ const SAMPLING_THRESHOLD = 25;    // Use sampling for puzzles with more blocks
 // ============================================================================
 
 /**
- * Check if a direction is clear (block can exit or fall into hole)
+ * Check if a direction is clear (block can exit the grid or fall into hole)
  */
 function isDirectionClear(
   startCoord: GridCoord,
@@ -94,55 +98,84 @@ function isDirectionClear(
   while (isInBounds(current, rows, cols)) {
     const key = gridKey(current);
     if (holes.has(key)) return true;  // Can fall into hole
-    if (blocks.has(key)) return false; // Blocked
+    if (blocks.has(key)) return false; // Blocked by another block
     current = gridAdd(current, dirVec);
   }
   return true; // Reaches edge
 }
 
 /**
- * Check if a block can be cleared (considering locked status and neighbors)
+ * Check if a block can be cleared (considering locked status, ice, and neighbors)
+ * @param moveCount - Number of moves already made (for ice and timed gate mechanics)
  */
 function canClearBlock(
   block: SquareBlock,
   blocks: Map<string, SquareBlock>,
   holes: Set<string>,
   rows: number,
-  cols: number
+  cols: number,
+  moveCount: number = 0
 ): boolean {
-  // Check if locked block still has neighbors
+  // Check if iced block is still frozen
+  if (block.iceCount !== undefined && block.iceCount > 0) {
+    const remainingIce = block.iceCount - moveCount;
+    if (remainingIce > 0) return false; // Still frozen
+  }
+
+  // Check if locked/gate block
   if (block.locked) {
-    const directions: SquareDirection[] = ['N', 'E', 'S', 'W'];
-    for (const dir of directions) {
-      const neighborCoord = gridAdd(block.coord, SQUARE_DIRECTIONS[dir]);
-      const neighborKey = gridKey(neighborCoord);
-      if (blocks.has(neighborKey)) {
-        return false; // Still has neighbors, can't clear
+    // Timed gate: unlocks after a certain number of moves
+    if (block.unlockAfterMoves !== undefined && block.unlockAfterMoves > 0) {
+      if (moveCount < block.unlockAfterMoves) {
+        return false; // Still locked by timer
+      }
+      // Timer expired, treat as normal block (no neighbor check)
+    } else {
+      // Neighbor-based gate: must have all neighbors cleared first
+      const directions: SquareDirection[] = ['N', 'E', 'S', 'W'];
+      for (const dir of directions) {
+        const neighborCoord = gridAdd(block.coord, SQUARE_DIRECTIONS[dir]);
+        const neighborKey = gridKey(neighborCoord);
+        if (blocks.has(neighborKey)) {
+          return false; // Still has neighbors, can't clear
+        }
       }
     }
   }
 
-  // Check direction clearance
+  // Check direction clearance (mirror blocks move in opposite direction)
+  const isMirror = block.mirror === true;
+
   if (isBidirectional(block.direction)) {
     const [dir1, dir2] = getAxisDirections(block.direction as SquareAxis);
-    return isDirectionClear(block.coord, dir1, blocks, holes, rows, cols) ||
-           isDirectionClear(block.coord, dir2, blocks, holes, rows, cols);
+    // Mirror reverses both directions of bidirectional blocks
+    const actualDir1 = isMirror ? getOppositeDirection(dir1) : dir1;
+    const actualDir2 = isMirror ? getOppositeDirection(dir2) : dir2;
+    return isDirectionClear(block.coord, actualDir1, blocks, holes, rows, cols) ||
+           isDirectionClear(block.coord, actualDir2, blocks, holes, rows, cols);
   }
-  return isDirectionClear(block.coord, block.direction as SquareDirection, blocks, holes, rows, cols);
+
+  // Single direction - mirror reverses it
+  const actualDirection = isMirror
+    ? getOppositeDirection(block.direction as SquareDirection)
+    : block.direction as SquareDirection;
+  return isDirectionClear(block.coord, actualDirection, blocks, holes, rows, cols);
 }
 
 /**
  * Get all clearable blocks in current state
+ * @param moveCount - Number of moves already made (for ice mechanic)
  */
 function getClearableBlocks(
   blocks: Map<string, SquareBlock>,
   holes: Set<string>,
   rows: number,
-  cols: number
+  cols: number,
+  moveCount: number = 0
 ): SquareBlock[] {
   const clearable: SquareBlock[] = [];
   for (const block of blocks.values()) {
-    if (canClearBlock(block, blocks, holes, rows, cols)) {
+    if (canClearBlock(block, blocks, holes, rows, cols, moveCount)) {
       clearable.push(block);
     }
   }
@@ -167,15 +200,17 @@ function calculateSolutionDepth(
   cols: number
 ): number {
   let depth = 0;
+  let moveCount = 0;
   const remaining = new Map(initialBlocks);
 
   while (remaining.size > 0) {
-    const clearable = getClearableBlocks(remaining, holes, rows, cols);
+    const clearable = getClearableBlocks(remaining, holes, rows, cols, moveCount);
     if (clearable.length === 0) break; // Unsolvable
 
     // Remove all clearable blocks in this wave
     for (const block of clearable) {
       remaining.delete(gridKey(block.coord));
+      moveCount++;
     }
     depth++;
   }
@@ -195,9 +230,10 @@ function greedySolveWithMetrics(
   const remaining = new Map(blocks);
   const branchingFactors: number[] = [];
   let forcedMoveCount = 0;
+  let moveCount = 0;
 
   while (remaining.size > 0) {
-    const clearable = getClearableBlocks(remaining, holes, rows, cols);
+    const clearable = getClearableBlocks(remaining, holes, rows, cols, moveCount);
     if (clearable.length === 0) {
       return { solvable: false, branchingFactors, forcedMoveCount };
     }
@@ -205,6 +241,7 @@ function greedySolveWithMetrics(
     if (clearable.length === 1) forcedMoveCount++;
     // Clear first available (greedy)
     remaining.delete(gridKey(clearable[0].coord));
+    moveCount++;
   }
 
   return { solvable: true, branchingFactors, forcedMoveCount };
@@ -228,6 +265,19 @@ export function analyzePuzzle(
   const gridSize = rows * cols;
   const lockedCount = Array.from(blocks.values()).filter(b => b.locked).length;
 
+  // Count iced blocks and total ice
+  let icedCount = 0;
+  let totalIceCount = 0;
+  for (const block of blocks.values()) {
+    if (block.iceCount !== undefined && block.iceCount > 0) {
+      icedCount++;
+      totalIceCount += block.iceCount;
+    }
+  }
+
+  // Count mirror blocks
+  const mirrorCount = Array.from(blocks.values()).filter(b => b.mirror === true).length;
+
   // Empty puzzle
   if (blockCount === 0) {
     return {
@@ -235,6 +285,9 @@ export function analyzePuzzle(
       blockCount: 0,
       holeCount,
       lockedCount: 0,
+      icedCount: 0,
+      totalIceCount: 0,
+      mirrorCount: 0,
       gridSize,
       density: 0,
       solutionCount: 0,
@@ -309,9 +362,10 @@ export function analyzePuzzle(
         let pathValid = true;
         const sampleBranching: number[] = [];
         let sampleForced = 0;
+        let sampleMoveCount = 0;
 
         while (remaining.size > 0 && pathValid) {
-          const clearable = getClearableBlocks(remaining, holes, rows, cols);
+          const clearable = getClearableBlocks(remaining, holes, rows, cols, sampleMoveCount);
 
           if (clearable.length === 0) {
             pathValid = false;
@@ -323,6 +377,7 @@ export function analyzePuzzle(
             // Random selection
             const chosen = clearable[Math.floor(Math.random() * clearable.length)];
             remaining.delete(gridKey(chosen.coord));
+            sampleMoveCount++;
           }
         }
 
@@ -349,7 +404,9 @@ export function analyzePuzzle(
         continue;
       }
 
-      const clearable = getClearableBlocks(current.blocks, holes, rows, cols);
+      // Move count = number of blocks cleared so far
+      const moveCount = blockCount - current.blocks.size;
+      const clearable = getClearableBlocks(current.blocks, holes, rows, cols, moveCount);
 
       // Deadlock
       if (clearable.length === 0) {
@@ -399,6 +456,9 @@ export function analyzePuzzle(
     blockCount,
     holeCount,
     lockedCount,
+    icedCount,
+    totalIceCount,
+    mirrorCount,
     gridSize,
     density: blockCount / gridSize,
     solutionCount,
@@ -434,6 +494,9 @@ export interface DifficultyBreakdown {
     clearability: number;     // Initial clearability percentage
     blockCount: number;       // Number of blocks
     lockedCount: number;      // Number of locked blocks
+    icedCount: number;        // Number of iced blocks
+    avgIceCount: number;      // Average ice count per iced block
+    mirrorCount: number;      // Number of mirror blocks
     sizeBonus: number;        // Extra points for large puzzles (400+ blocks)
   };
 }
@@ -451,6 +514,9 @@ export interface DifficultyBreakdown {
  *   clearabilityScore = (1 - clearability) × 20    (0-20 range)
  *   blockCountScore = min(blockCount / 40, 10)     (0-10 range, capped)
  *   lockedBonus = min(lockedCount, 5)              (0-5 range)
+ *   icedBonus = min(icedCount, 5)                  (0-5 range)
+ *   avgIceBonus = min(avgIceCount * 0.5, 5)        (0-5 range, based on avg ice per iced block)
+ *   mirrorBonus = min(mirrorCount, 5)              (0-5 range, mirror blocks add cognitive load)
  *   sizeBonus = (blockCount > 400) ? min((blockCount-400)/20, 20) : 0  (0-20 for large puzzles)
  *
  *   difficulty = min(sum of above, 100)
@@ -475,13 +541,19 @@ export function calculateDifficultyScore(
         clearability: 0,
         blockCount: 0,
         lockedCount: 0,
+        icedCount: 0,
+        avgIceCount: 0,
+        mirrorCount: 0,
         sizeBonus: 0,
       },
     };
   }
 
-  const { blockCount, lockedCount, initialClearability } = analysis;
+  const { blockCount, lockedCount, initialClearability, icedCount, totalIceCount, mirrorCount } = analysis;
   const avgBlockers = analysis.avgBlockers;
+
+  // Calculate average ice count per iced block
+  const avgIceCount = icedCount > 0 ? totalIceCount / icedCount : 0;
 
   // Primary factor: average blockers per block (most important)
   // Scales roughly 1.4 (easy) → 4.7 (medium) → 8.6 (hard)
@@ -497,6 +569,16 @@ export function calculateDifficultyScore(
   // Locked blocks bonus (capped)
   const lockedBonus = Math.min(lockedCount, 5);
 
+  // Iced blocks bonus (capped) - having iced blocks adds difficulty
+  const icedBonus = Math.min(icedCount, 5);
+
+  // Average ice count bonus - higher ice counts mean longer waits, more difficulty
+  // avgIceCount of 10 = 5 points
+  const avgIceBonus = Math.min(avgIceCount * 0.5, 5);
+
+  // Mirror blocks bonus (capped) - mirror blocks add cognitive load (reversed directions)
+  const mirrorBonus = Math.min(mirrorCount, 5);
+
   // Size bonus for large puzzles (400+ blocks)
   // Very large puzzles are inherently harder due to more decisions & mistakes
   const sizeBonus = blockCount > 400 ? Math.min((blockCount - 400) / 20, 20) : 0;
@@ -506,11 +588,14 @@ export function calculateDifficultyScore(
     clearability: initialClearability,
     blockCount,
     lockedCount,
+    icedCount,
+    avgIceCount,
+    mirrorCount,
     sizeBonus,
   };
 
   // Raw score = sum of all components
-  const rawScore = avgBlockersScore + clearabilityScore + blockCountScore + lockedBonus + sizeBonus;
+  const rawScore = avgBlockersScore + clearabilityScore + blockCountScore + lockedBonus + icedBonus + avgIceBonus + mirrorBonus + sizeBonus;
 
   // Cap at 100
   const score = Math.round(Math.max(0, Math.min(100, rawScore)));
@@ -538,7 +623,7 @@ export function quickSolve(
   let moves = 0;
 
   while (remaining.size > 0) {
-    const clearable = getClearableBlocks(remaining, holes, rows, cols);
+    const clearable = getClearableBlocks(remaining, holes, rows, cols, moves);
     if (clearable.length === 0) {
       return { solvable: false, moves };
     }

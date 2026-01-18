@@ -68,6 +68,8 @@ function GameContainer({ level, onBack }: { level: SquareBlockLevel; onBack?: ()
               clearableBlocks={game.clearableBlocks}
               canClearBlock={game.canClearBlock}
               isBlockUnlocked={game.isBlockUnlocked}
+              getRemainingIce={game.getRemainingIce}
+              isBlockMirror={game.isBlockMirror}
             />
           </CardContent>
         </Card>

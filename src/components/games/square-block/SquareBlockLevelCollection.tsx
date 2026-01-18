@@ -31,7 +31,7 @@ import {
   Download,
   Upload,
   Trash2,
-  Edit,
+  Pencil,
   Play,
   Copy,
   ChevronUp,
@@ -422,11 +422,15 @@ export function SquareBlockLevelCollection({
     const sawtoothPosition = getSawtoothPosition(levelNumber);
     const flowZone = breakdown ? calculateFlowZone(breakdown.tier, levelNumber) : 'flow';
     const lockedCount = levelData.blocks.filter(b => b.locked).length;
+    const icedCount = levelData.blocks.filter(b => b.iceCount && b.iceCount > 0).length;
+    const mirrorCount = levelData.blocks.filter(b => b.mirror === true).length;
 
     const metrics: LevelMetrics = {
       cellCount: levelData.blocks.length,
       holeCount: 0,
       lockedCount,
+      icedCount,
+      mirrorCount,
       gridSize: levelData.rows * levelData.cols,
       density: analysis?.density ?? 0,
       initialClearability: analysis?.initialClearability ?? 0,
@@ -970,7 +974,17 @@ export function SquareBlockLevelCollection({
                       variant="ghost"
                       size="sm"
                       className="h-6 w-6 p-0 text-white hover:bg-white/20"
+                      onClick={(e) => { e.stopPropagation(); onEditLevel(level); }}
+                      title="Edit level"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 text-white hover:bg-white/20"
                       onClick={(e) => { e.stopPropagation(); onPlayLevel(level); }}
+                      title="Play level"
                     >
                       <Play className="h-3.5 w-3.5" />
                     </Button>
@@ -979,6 +993,7 @@ export function SquareBlockLevelCollection({
                       size="sm"
                       className="h-6 w-6 p-0 text-white hover:bg-white/20"
                       onClick={(e) => { e.stopPropagation(); handleExportLevel(level); }}
+                      title="Export level"
                     >
                       <Download className="h-3.5 w-3.5" />
                     </Button>
@@ -987,6 +1002,7 @@ export function SquareBlockLevelCollection({
                       size="sm"
                       className="h-6 w-6 p-0 text-red-400 hover:bg-red-500/20"
                       onClick={(e) => { e.stopPropagation(); handleDelete(level.id); }}
+                      title="Delete level"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
@@ -1054,13 +1070,16 @@ export function SquareBlockLevelCollection({
 
                   {/* Actions */}
                   <div className="flex items-center gap-1 shrink-0">
-                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => { e.stopPropagation(); onPlayLevel(level); }}>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => { e.stopPropagation(); onEditLevel(level); }} title="Edit level">
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => { e.stopPropagation(); onPlayLevel(level); }} title="Play level">
                       <Play className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => { e.stopPropagation(); handleExportLevel(level); }}>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => { e.stopPropagation(); handleExportLevel(level); }} title="Export level">
                       <Download className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive" onClick={(e) => { e.stopPropagation(); handleDelete(level.id); }}>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive" onClick={(e) => { e.stopPropagation(); handleDelete(level.id); }} title="Delete level">
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>

@@ -11,8 +11,8 @@ import { GridCoord } from '@/lib/squareGrid';
 export interface ReferenceCell {
   direction: number;      // 0=empty, 1=N, 2=E, 3=S, 4=W, 5=N_S, 6=E_W
   colorHex: string;       // 8-char hex with alpha (e.g., "#06B6D4FF")
-  mechanic?: number;      // 0=normal, 3=locked (optional for legacy files)
-  mechanicExtras?: string;// Optional extras (e.g., timed locks like "60")
+  mechanic?: number;      // 0=normal, 1=gate (neighbor-based), 2=timed gate, 3=mirror, 4=iced
+  mechanicExtras?: string;// Optional extras (e.g., timed gate unlock moves, ice count)
 }
 
 export interface ReferenceFormat {
@@ -50,35 +50,56 @@ const EMPTY_CELL: ReferenceCell = {
 // ============================================================================
 
 /**
- * Convert a 6-char hex color to 8-char with alpha
- * e.g., "#06b6d4" -> "#06B6D4FF"
+ * Convert color to 6-char uppercase hex (no alpha)
+ * Reference format uses 6-char for blocks, 8-char only for transparent empty cells
+ * e.g., "#06b6d4" -> "#06B6D4"
  */
-function convertColorToHex8(color: string): string {
+function convertColorToHex6(color: string): string {
   // Remove # if present
   const hex = color.startsWith('#') ? color.slice(1) : color;
 
-  // If already 8 chars (with alpha), just uppercase and return
+  // If 8 chars, take first 6 (remove alpha)
   if (hex.length === 8) {
-    return '#' + hex.toUpperCase();
+    return '#' + hex.slice(0, 6).toUpperCase();
   }
 
-  // Add FF alpha and uppercase
-  return '#' + hex.toUpperCase() + 'FF';
+  // Already 6 chars, just uppercase
+  return '#' + hex.toUpperCase();
 }
 
 /**
  * Convert a SquareBlock to ReferenceCell format
+ * Mechanic codes: 0=normal, 1=gate (neighbor-based), 2=timed gate, 3=mirror, 4=iced
  */
 function blockToReferenceCell(block: SquareBlock): ReferenceCell {
-  const mechanic = typeof block.mechanic === 'number' ? block.mechanic : block.locked ? 3 : 0;
-  const mechanicExtras =
-    block.unlockAfterMoves !== undefined
-      ? String(block.unlockAfterMoves)
-      : block.mechanicExtras || '';
+  let mechanic = 0;
+  let mechanicExtras = '';
+
+  if (block.iceCount !== undefined && block.iceCount > 0) {
+    // Iced block: mechanic 4
+    mechanic = 4;
+    mechanicExtras = String(block.iceCount);
+  } else if (block.locked) {
+    // Gate block: mechanic 1 (neighbor-based) or 2 (timed)
+    if (block.unlockAfterMoves !== undefined && block.unlockAfterMoves > 0) {
+      mechanic = 2; // Timed gate
+      mechanicExtras = String(block.unlockAfterMoves);
+    } else {
+      mechanic = 1; // Neighbor-based gate
+    }
+  } else if (block.mirror) {
+    // Mirror block: mechanic 3
+    mechanic = 3;
+    mechanicExtras = '';
+  } else if (typeof block.mechanic === 'number') {
+    // Preserve original mechanic if set
+    mechanic = block.mechanic;
+    mechanicExtras = block.mechanicExtras || '';
+  }
 
   return {
     direction: DIRECTION_TO_NUMBER[block.direction],
-    colorHex: convertColorToHex8(block.color),
+    colorHex: convertColorToHex6(block.color),
     mechanic,
     mechanicExtras,
   };
@@ -222,9 +243,26 @@ export function importFromReferenceFormat(data: ReferenceFormat): ExportableLeve
 
     const mechanic = typeof cell.mechanic === 'number' ? cell.mechanic : 0;
     const mechanicExtras = typeof cell.mechanicExtras === 'string' ? cell.mechanicExtras : '';
+
+    // Mechanic codes: 0=normal, 1=gate (neighbor-based), 2=timed gate, 3=mirror, 4=iced
+    // Mirror: mechanic 3 OR extras contains "M"
+    const hasMirror = mechanic === 3 || mechanicExtras.includes('M');
+    const extrasWithoutMirror = mechanicExtras.replace(/,?M/g, '').trim();
+
+    // Gate: mechanic 1 (neighbor-based) or 2 (timed)
+    const isGate = mechanic === 1 || mechanic === 2;
+
+    // Parse mechanic-specific properties
+    // Timed gate (mechanic 2): extras contains unlock moves count
     const unlockAfterMoves =
-      mechanic === 3 && mechanicExtras.trim() !== '' && !Number.isNaN(Number(mechanicExtras))
-        ? Number(mechanicExtras)
+      mechanic === 2 && extrasWithoutMirror !== '' && !Number.isNaN(Number(extrasWithoutMirror))
+        ? Number(extrasWithoutMirror)
+        : undefined;
+
+    // Iced blocks (mechanic 4): extras contains ice count
+    const iceCount =
+      mechanic === 4 && extrasWithoutMirror !== '' && !Number.isNaN(Number(extrasWithoutMirror))
+        ? Number(extrasWithoutMirror)
         : undefined;
 
     const direction = NUMBER_TO_DIRECTION[cell.direction];
@@ -235,7 +273,9 @@ export function importFromReferenceFormat(data: ReferenceFormat): ExportableLeve
       coord: { row, col },
       direction,
       color: convertHex8ToColor(cell.colorHex),
-      locked: mechanic === 3 ? true : undefined,
+      locked: isGate ? true : undefined,
+      iceCount,
+      mirror: hasMirror ? true : undefined,
       mechanic,
       mechanicExtras,
       unlockAfterMoves,

@@ -20,6 +20,7 @@ import {
   gridToPixel,
   isBidirectional,
   getAxisDirections,
+  getOppositeDirection,
 } from '@/lib/squareGrid';
 
 const MAX_CANVAS_SIZE = 500;
@@ -106,30 +107,41 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
       chosenDirection: SquareDirection;
       holeCoord: GridCoord | null;
     } => {
+      // For mirror blocks, reverse the direction (block moves opposite to arrow)
+      const isMirror = block.mirror === true;
+
       if (isBidirectional(block.direction)) {
         const [dir1, dir2] = getAxisDirections(block.direction);
-        const path1 = getDirectionPath(block.coord, dir1);
-        const path2 = getDirectionPath(block.coord, dir2);
+        // For mirror blocks, reverse both directions (effectively the same for bidirectional)
+        const actualDir1 = isMirror ? getOppositeDirection(dir1) : dir1;
+        const actualDir2 = isMirror ? getOppositeDirection(dir2) : dir2;
+
+        const path1 = getDirectionPath(block.coord, actualDir1);
+        const path2 = getDirectionPath(block.coord, actualDir2);
 
         const canExit1 = !path1.blocked || path1.holeCoord !== null;
         const canExit2 = !path2.blocked || path2.holeCoord !== null;
 
         if (canExit1 && !canExit2) {
-          return { ...path1, chosenDirection: dir1 };
+          return { ...path1, chosenDirection: actualDir1 };
         } else if (!canExit1 && canExit2) {
-          return { ...path2, chosenDirection: dir2 };
+          return { ...path2, chosenDirection: actualDir2 };
         } else if (canExit1 && canExit2) {
           return path1.path.length <= path2.path.length
-            ? { ...path1, chosenDirection: dir1 }
-            : { ...path2, chosenDirection: dir2 };
+            ? { ...path1, chosenDirection: actualDir1 }
+            : { ...path2, chosenDirection: actualDir2 };
         } else {
           return path1.path.length >= path2.path.length
-            ? { ...path1, chosenDirection: dir1 }
-            : { ...path2, chosenDirection: dir2 };
+            ? { ...path1, chosenDirection: actualDir1 }
+            : { ...path2, chosenDirection: actualDir2 };
         }
       } else {
-        const pathInfo = getDirectionPath(block.coord, block.direction as SquareDirection);
-        return { ...pathInfo, chosenDirection: block.direction as SquareDirection };
+        // For mirror blocks, use opposite direction
+        const actualDirection = isMirror
+          ? getOppositeDirection(block.direction as SquareDirection)
+          : block.direction as SquareDirection;
+        const pathInfo = getDirectionPath(block.coord, actualDirection);
+        return { ...pathInfo, chosenDirection: actualDirection };
       }
     },
     [getDirectionPath]
@@ -151,17 +163,45 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
     [state.blocks]
   );
 
-  // Check if a locked block is currently unlocked (no neighbors)
+  // Check if a locked/iced block is currently unlocked
   const isBlockUnlocked = useCallback(
     (block: SquareBlock): boolean => {
-      // Timed unlock: unlocked once moveCount meets threshold
-      if (block.unlockAfterMoves !== undefined && state.moveCount >= block.unlockAfterMoves) {
-        return true;
+      // Ice mechanic: unlocked when moveCount >= iceCount
+      if (block.iceCount !== undefined && block.iceCount > 0) {
+        const remainingIce = block.iceCount - state.moveCount;
+        if (remainingIce > 0) return false;  // Still frozen
       }
-      if (!block.locked) return true;  // Not locked, always unlocked
-      return !hasNeighbors(block.coord);  // Locked but no neighbors = unlocked
+
+      // Not a gate block - always unlocked (after ice check)
+      if (!block.locked) return true;
+
+      // Gate block - check type
+      if (block.unlockAfterMoves !== undefined && block.unlockAfterMoves > 0) {
+        // Timed gate: unlocked once moveCount meets threshold
+        return state.moveCount >= block.unlockAfterMoves;
+      } else {
+        // Neighbor-based gate: unlocked when no neighbors remain
+        return !hasNeighbors(block.coord);
+      }
     },
     [hasNeighbors, state.moveCount]
+  );
+
+  // Get remaining ice count for a block (null if not iced)
+  const getRemainingIce = useCallback(
+    (block: SquareBlock): number | null => {
+      if (block.iceCount === undefined) return null;
+      return Math.max(0, block.iceCount - state.moveCount);
+    },
+    [state.moveCount]
+  );
+
+  // Check if a block is a mirror block
+  const isBlockMirror = useCallback(
+    (block: SquareBlock): boolean => {
+      return block.mirror === true;
+    },
+    []
   );
 
   // Check if a block can be cleared
@@ -473,6 +513,8 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
     isSolvable,
     getBlockPath,
     isBlockUnlocked,
+    getRemainingIce,
+    isBlockMirror,
   };
 }
 

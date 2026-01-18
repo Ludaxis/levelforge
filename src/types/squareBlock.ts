@@ -28,6 +28,8 @@ export interface SquareBlock {
   direction: BlockDirection;  // Can be single direction or bidirectional axis
   color: string;              // Color for the block
   locked?: boolean;           // If true, block can only be tapped when all neighbors are cleared
+  iceCount?: number;          // Number of clears needed to unfreeze (e.g., 10). Mutually exclusive with locked.
+  mirror?: boolean;           // If true, block moves in OPPOSITE direction of arrow. Can combine with locked/iced.
   // Reference-format extras
   mechanic?: number;          // Raw mechanic code from import/export (e.g., 3 = locked)
   mechanicExtras?: string;    // Raw mechanic extras (e.g., "60" for timed unlock)
@@ -122,6 +124,8 @@ export interface LevelMetrics {
   cellCount: number;
   holeCount: number;
   lockedCount: number;
+  icedCount: number;              // Number of iced blocks
+  mirrorCount: number;            // Number of mirror blocks
   gridSize: number;
   density: number;
   initialClearability: number;

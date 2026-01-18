@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
@@ -21,7 +21,7 @@ import {
   estimateLevel,
   analyzePuzzle,
   calculateDifficultyScore,
-  quickSolve,
+  quickSolve as analyzerQuickSolve,
 } from '@/types/squareBlock';
 import {
   GridCoord,
@@ -44,8 +44,9 @@ import {
 } from '@/lib/squareGrid';
 import {
   Settings, Play, Trash2, CheckCircle, AlertTriangle,
-  Circle, Plus, BarChart3, Target, Activity,
-  TrendingUp, Clock, Percent, Lock, Unlock, Eye, EyeOff, Sparkles, Download, Upload
+  Plus, BarChart3, Target, Activity,
+  TrendingUp, Clock, Percent, Lock, Unlock, Eye, EyeOff, Sparkles, Download, Upload, Snowflake, FlipHorizontal,
+  ZoomIn, ZoomOut, Maximize, Move
 } from 'lucide-react';
 import { downloadLevelAsJSON, parseAndImportLevel } from '@/lib/squareBlockExport';
 
@@ -53,18 +54,10 @@ import { downloadLevelAsJSON, parseAndImportLevel } from '@/lib/squareBlockExpor
 // Constants
 // ============================================================================
 
-const MAX_CANVAS_SIZE = 400; // Maximum canvas width/height in pixels
-const MIN_CELL_SIZE = 8;    // Minimum cell size for very large grids
-const MAX_CELL_SIZE = 40;   // Maximum cell size for small grids
+// Fixed cell size for readability - grid scrolls instead of shrinking
+const FIXED_CELL_SIZE = 32;
 
-// Calculate optimal cell size based on grid dimensions
-function calculateCellSize(rows: number, cols: number): number {
-  const maxDimension = Math.max(rows, cols);
-  const calculatedSize = Math.floor(MAX_CANVAS_SIZE / maxDimension);
-  return Math.max(MIN_CELL_SIZE, Math.min(MAX_CELL_SIZE, calculatedSize));
-}
-
-const BLOCK_COLOR_OPTIONS = Object.entries(BLOCK_COLORS);
+const DEFAULT_BLOCK_COLOR = BLOCK_COLORS.cyan;
 
 const DIRECTION_LABELS: Record<BlockDirection, string> = {
   N: '↑',
@@ -124,22 +117,46 @@ export function SquareBlockLevelDesigner({
   const [rows, setRows] = useState(5);
   const [cols, setCols] = useState(5);
 
-  // Game mode
-  const [gameMode, setGameMode] = useState<GameMode>('classic');
 
 
   // Current tool settings
   const [selectedDirection, setSelectedDirection] = useState<BlockDirection>('E');
-  const [selectedColor, setSelectedColor] = useState<string>(BLOCK_COLORS.cyan);
   const [selectedLocked, setSelectedLocked] = useState(false);
+  const [selectedIceCount, setSelectedIceCount] = useState<number>(0);
+  const [selectedMirror, setSelectedMirror] = useState(false);
 
-  // Edit mode
-  const [editMode, setEditMode] = useState<'place' | 'direction'>('place');
-  const [placementMode, setPlacementMode] = useState<'block' | 'hole'>('block');
 
   // Placed blocks and holes
   const [blocks, setBlocks] = useState<Map<string, SquareBlock>>(new Map());
   const [holes, setHoles] = useState<Set<string>>(new Set());
+
+  // Load editing level when it changes
+  useEffect(() => {
+    if (editingLevel) {
+      // Load level data into designer
+      setRows(editingLevel.rows);
+      setCols(editingLevel.cols);
+
+      // Convert blocks array to Map
+      const blockMap = new Map<string, SquareBlock>();
+      for (const block of editingLevel.blocks) {
+        const key = gridKey(block.coord);
+        blockMap.set(key, block);
+      }
+      setBlocks(blockMap);
+
+      // Load holes if any
+      if (editingLevel.holes) {
+        const holeSet = new Set<string>();
+        for (const hole of editingLevel.holes) {
+          holeSet.add(gridKey(hole));
+        }
+        setHoles(holeSet);
+      } else {
+        setHoles(new Set());
+      }
+    }
+  }, [editingLevel]);
 
   // Hover state
   const [hoveredCell, setHoveredCell] = useState<string | null>(null);
@@ -150,8 +167,58 @@ export function SquareBlockLevelDesigner({
   // Loading state
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Calculate dynamic cell size based on grid dimensions
-  const cellSize = useMemo(() => calculateCellSize(rows, cols), [rows, cols]);
+  // Zoom and pan state
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const svgContainerRef = useRef<HTMLDivElement>(null);
+
+  // Zoom controls
+  const handleZoomIn = useCallback(() => {
+    setZoom(z => Math.min(z * 1.25, 5));
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setZoom(z => Math.max(z / 1.25, 0.25));
+  }, []);
+
+  const handleZoomReset = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
+  // Ctrl + Mouse wheel zoom
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      setZoom(z => Math.max(0.5, Math.min(3, z * delta)));
+    }
+    // Without Ctrl, allow normal scrolling
+  }, []);
+
+  // Pan handlers
+  const handlePanStart = useCallback((e: React.MouseEvent) => {
+    if (e.button === 1 || (e.button === 0 && e.altKey)) { // Middle click or Alt+click
+      e.preventDefault();
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    }
+  }, [pan]);
+
+  const handlePanMove = useCallback((e: React.MouseEvent) => {
+    if (isPanning) {
+      setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
+    }
+  }, [isPanning, panStart]);
+
+  const handlePanEnd = useCallback(() => {
+    setIsPanning(false);
+  }, []);
+
+  // Fixed cell size for readability
+  const cellSize = FIXED_CELL_SIZE;
 
   // Generate grid coordinates
   const gridCoords = useMemo(() => createRectangularGrid(rows, cols), [rows, cols]);
@@ -198,11 +265,11 @@ export function SquareBlockLevelDesigner({
 
     while (isInBounds(current, rows, cols)) {
       const key = gridKey(current);
-      if (currentHoles.has(key)) return true;
-      if (currentBlocks.has(key)) return false;
+      if (currentHoles.has(key)) return true;  // Can fall into hole
+      if (currentBlocks.has(key)) return false; // Blocked
       current = gridAdd(current, dirVec);
     }
-    return true;
+    return true; // Reaches edge
   }, [rows, cols]);
 
   // Check if block can be cleared
@@ -228,46 +295,28 @@ export function SquareBlockLevelDesigner({
     return isDirectionClear(block.coord, block.direction as SquareDirection, currentBlocks, currentHoles);
   }, [isDirectionClear]);
 
-  // Solve level (greedy)
-  const solveLevel = (
-    initialBlocks: Map<string, SquareBlock>,
-    levelHoles: Set<string>
-  ): { solvable: boolean; optimalMoves: number; message: string } => {
-    if (initialBlocks.size === 0) {
+  // Solve level using analyzer's quickSolve (handles ice, mirror, gate properly)
+  const solvability = useMemo(() => {
+    if (blocks.size === 0) {
       return { solvable: false, optimalMoves: 0, message: 'Add at least one block' };
     }
 
-    const totalCells = initialBlocks.size;
-    const remaining = new Map(initialBlocks);
+    const result = analyzerQuickSolve(blocks, holes, rows, cols);
 
-    while (remaining.size > 0) {
-      let clearedAny = false;
-
-      for (const [key, block] of remaining) {
-        if (canClearBlock(block, remaining, levelHoles)) {
-          remaining.delete(key);
-          clearedAny = true;
-          break;
-        }
-      }
-
-      if (!clearedAny) {
-        return {
-          solvable: false,
-          optimalMoves: 0,
-          message: `Deadlock: ${remaining.size} blocks stuck`,
-        };
-      }
+    if (result.solvable) {
+      return {
+        solvable: true,
+        optimalMoves: result.moves,
+        message: `Solvable: ${result.moves} moves`,
+      };
+    } else {
+      return {
+        solvable: false,
+        optimalMoves: 0,
+        message: `Deadlock: some blocks stuck`,
+      };
     }
-
-    return {
-      solvable: true,
-      optimalMoves: totalCells,
-      message: `Solvable: ${totalCells} moves`,
-    };
-  };
-
-  const solvability = solveLevel(blocks, holes);
+  }, [blocks, holes, rows, cols]);
 
   // Deep puzzle analysis for difficulty scoring
   const puzzleAnalysis = useMemo(() => {
@@ -287,9 +336,6 @@ export function SquareBlockLevelDesigner({
     difficulty: 'any' | DifficultyTier
   ): BlockDirection[] => {
     const allDirs: BlockDirection[] = [...DIRECTION_ORDER];
-    if (gameMode === 'push') {
-      allDirs.push(...AXIS_ORDER);
-    }
 
     if (difficulty === 'any' || difficulty === 'medium') {
       // Random shuffle
@@ -334,7 +380,7 @@ export function SquareBlockLevelDesigner({
     }
 
     return allDirs;
-  }, [rows, cols, gameMode]);
+  }, [rows, cols]);
 
   // Smart Fill: Fill entire grid, GUARANTEED solvable
   const smartFillLevel = useCallback(async () => {
@@ -350,9 +396,7 @@ export function SquareBlockLevelDesigner({
       if (availableCoords.length === 0) return;
 
       const newBlocks = new Map<string, SquareBlock>();
-      const allDirections: BlockDirection[] = gameMode === 'push'
-        ? [...DIRECTION_ORDER, ...AXIS_ORDER]
-        : [...DIRECTION_ORDER];
+      const allDirections: BlockDirection[] = [...DIRECTION_ORDER];
 
       // STEP 1: Fill ALL cells pointing toward nearest edge (NO locks yet)
       for (const coord of availableCoords) {
@@ -397,7 +441,7 @@ export function SquareBlockLevelDesigner({
 
         newBlocks.set(key, { ...block, direction: randomDir });
 
-        if (quickSolve(newBlocks, holes, rows, cols).solvable) {
+        if (analyzerQuickSolve(newBlocks, holes, rows, cols).solvable) {
           flipped++;
         } else {
           newBlocks.set(key, { ...block, direction: originalDir });
@@ -423,7 +467,7 @@ export function SquareBlockLevelDesigner({
         // Try adding lock
         newBlocks.set(key, { ...block, locked: true });
 
-        if (quickSolve(newBlocks, holes, rows, cols).solvable) {
+        if (analyzerQuickSolve(newBlocks, holes, rows, cols).solvable) {
           locked++;
         } else {
           // Revert if not solvable
@@ -435,66 +479,31 @@ export function SquareBlockLevelDesigner({
     } finally {
       setIsGenerating(false);
     }
-  }, [gridCoords, holes, gameMode, getDirectionPreference, rows, cols]);
+  }, [gridCoords, holes, getDirectionPreference, rows, cols]);
 
-  // Handle cell click
+  // Handle cell click - always in block placement mode
   const handleCellClick = (coord: GridCoord) => {
     const key = gridKey(coord);
 
-    if (editMode === 'direction') {
-      if (blocks.has(key)) {
-        const block = blocks.get(key)!;
-        let newDirection: BlockDirection;
-
-        if (gameMode === 'classic') {
-          if (isBidirectional(block.direction)) {
-            const [dir1] = getAxisDirections(block.direction);
-            newDirection = dir1;
-          } else {
-            const currentIndex = DIRECTION_ORDER.indexOf(block.direction as SquareDirection);
-            newDirection = DIRECTION_ORDER[(currentIndex + 1) % DIRECTION_ORDER.length];
-          }
-        } else {
-          if (isBidirectional(block.direction)) {
-            const currentIndex = AXIS_ORDER.indexOf(block.direction as SquareAxis);
-            newDirection = AXIS_ORDER[(currentIndex + 1) % AXIS_ORDER.length];
-          } else {
-            const currentIndex = DIRECTION_ORDER.indexOf(block.direction as SquareDirection);
-            newDirection = DIRECTION_ORDER[(currentIndex + 1) % DIRECTION_ORDER.length];
-          }
-        }
-
-        const newBlocks = new Map(blocks);
-        newBlocks.set(key, { ...block, direction: newDirection });
-        setBlocks(newBlocks);
-      }
-    } else if (placementMode === 'hole') {
-      if (holes.has(key)) {
-        const newHoles = new Set(holes);
-        newHoles.delete(key);
-        setHoles(newHoles);
-      } else if (!blocks.has(key)) {
-        const newHoles = new Set(holes);
-        newHoles.add(key);
-        setHoles(newHoles);
-      }
-    } else {
-      if (blocks.has(key)) {
-        const newBlocks = new Map(blocks);
-        newBlocks.delete(key);
-        setBlocks(newBlocks);
-      } else if (!holes.has(key)) {
-        const newBlock: SquareBlock = {
-          id: `block-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          coord,
-          direction: selectedDirection,
-          color: selectedColor,
-          locked: selectedLocked || undefined,
-        };
-        const newBlocks = new Map(blocks);
-        newBlocks.set(key, newBlock);
-        setBlocks(newBlocks);
-      }
+    if (blocks.has(key)) {
+      // Remove existing block
+      const newBlocks = new Map(blocks);
+      newBlocks.delete(key);
+      setBlocks(newBlocks);
+    } else if (!holes.has(key)) {
+      // Place new block
+      const newBlock: SquareBlock = {
+        id: `block-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        coord,
+        direction: selectedDirection,
+        color: DEFAULT_BLOCK_COLOR,
+        locked: selectedLocked || undefined,
+        iceCount: selectedIceCount > 0 ? selectedIceCount : undefined,
+        mirror: selectedMirror || undefined,
+      };
+      const newBlocks = new Map(blocks);
+      newBlocks.set(key, newBlock);
+      setBlocks(newBlocks);
     }
   };
 
@@ -518,7 +527,7 @@ export function SquareBlockLevelDesigner({
       rows,
       cols,
       difficulty: 'medium',
-      gameMode,
+      gameMode: 'classic',
       blocks: Array.from(blocks.values()),
       holes: holeCoords.length > 0 ? holeCoords : undefined,
     };
@@ -587,11 +596,15 @@ export function SquareBlockLevelDesigner({
     const sawtoothPosition = getSawtoothPosition(levelNumber);
     const flowZone = calculateFlowZone(difficultyBreakdown.tier, levelNumber);
     const lockedCount = Array.from(blocks.values()).filter(b => b.locked).length;
+    const icedCount = Array.from(blocks.values()).filter(b => b.iceCount && b.iceCount > 0).length;
+    const mirrorCount = Array.from(blocks.values()).filter(b => b.mirror).length;
 
     const metrics: LevelMetrics = {
       cellCount: blocks.size,
       holeCount: holes.size,
       lockedCount,
+      icedCount,
+      mirrorCount,
       gridSize: rows * cols,
       density: puzzleAnalysis.density,
       initialClearability: puzzleAnalysis.initialClearability,
@@ -613,7 +626,7 @@ export function SquareBlockLevelDesigner({
       cols,
       blocks: Array.from(blocks.values()),
       holes: holeCoords.length > 0 ? holeCoords : undefined,
-      gameMode,
+      gameMode: 'classic',
       metrics,
       createdAt: editingLevel?.createdAt || Date.now(),
     };
@@ -682,13 +695,12 @@ export function SquareBlockLevelDesigner({
             Level Designer
           </CardTitle>
           <CardDescription>
-            {editMode === 'place' ? 'Click cells to place/remove blocks' : 'Click blocks to change arrow direction'}
+            Click cells to place/remove blocks
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Direction & Color Selectors */}
-          {editMode === 'place' && placementMode === 'block' && (
-            <div className="space-y-3">
+          <div className="space-y-3">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Direction</label>
                 <div className="flex flex-wrap gap-1">
@@ -704,50 +716,25 @@ export function SquareBlockLevelDesigner({
                     </Button>
                   ))}
                 </div>
-                {gameMode === 'push' && (
-                  <div className="flex flex-wrap gap-1">
-                    {AXIS_ORDER.map((axis) => (
-                      <Button
-                        key={axis}
-                        variant={selectedDirection === axis ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setSelectedDirection(axis)}
-                        className="w-12 h-10 text-lg"
-                      >
-                        {DIRECTION_LABELS[axis]}
-                      </Button>
-                    ))}
-                  </div>
-                )}
               </div>
+              {/* Gate Toggle */}
               <div className="space-y-2">
-                <label className="text-sm font-medium">Color</label>
-                <div className="flex flex-wrap gap-2">
-                  {BLOCK_COLOR_OPTIONS.map(([name, color]) => (
-                    <button
-                      key={name}
-                      onClick={() => setSelectedColor(color)}
-                      className={`w-8 h-8 rounded-full transition-transform ${
-                        selectedColor === color ? 'ring-2 ring-white scale-110' : ''
-                      }`}
-                      style={{ backgroundColor: color }}
-                    />
-                  ))}
-                </div>
-              </div>
-              {/* Locked Toggle */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Locked Block</label>
+                <label className="text-sm font-medium">Gate Block</label>
                 <Button
                   variant={selectedLocked ? 'default' : 'outline'}
                   size="sm"
-                  onClick={() => setSelectedLocked(!selectedLocked)}
+                  onClick={() => {
+                    setSelectedLocked(!selectedLocked);
+                    // Mutual exclusion: clear ice count when enabling gate
+                    if (!selectedLocked) setSelectedIceCount(0);
+                  }}
+                  disabled={selectedIceCount > 0}
                   className="w-full"
                 >
                   {selectedLocked ? (
                     <>
                       <Lock className="h-4 w-4 mr-2" />
-                      Locked (needs neighbors cleared)
+                      Gate (needs neighbors cleared)
                     </>
                   ) : (
                     <>
@@ -757,48 +744,101 @@ export function SquareBlockLevelDesigner({
                   )}
                 </Button>
               </div>
-            </div>
-          )}
 
-          {/* Game Mode */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Game Mode</label>
-            <div className="flex gap-2">
-              <Button
-                variant={gameMode === 'classic' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => {
-                  setGameMode('classic');
-                  if (isBidirectional(selectedDirection)) {
-                    setSelectedDirection('E');
-                  }
-                }}
-                className="flex-1"
-              >
-                Classic
-              </Button>
-              <Button
-                variant={gameMode === 'push' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setGameMode('push')}
-                className="flex-1"
-              >
-                Push
-              </Button>
+              {/* Ice Count */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-2">
+                  <Snowflake className="h-4 w-4 text-cyan-400" />
+                  Ice Count
+                </label>
+                <div className="flex items-center gap-2">
+                  <Slider
+                    value={[selectedIceCount]}
+                    onValueChange={([v]) => {
+                      setSelectedIceCount(v);
+                      // Mutual exclusion: clear locked when setting ice count
+                      if (v > 0) setSelectedLocked(false);
+                    }}
+                    min={0}
+                    max={100}
+                    step={1}
+                    disabled={selectedLocked}
+                  />
+                  <Badge variant="outline" className="min-w-[50px] justify-center">
+                    {selectedIceCount || 'None'}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Block unfreezes after this many clears
+                </p>
+              </div>
+
+              {/* Mirror Toggle */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-2">
+                  <FlipHorizontal className="h-4 w-4 text-purple-400" />
+                  Mirror Block
+                </label>
+                <Button
+                  variant={selectedMirror ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setSelectedMirror(!selectedMirror)}
+                  className="w-full"
+                >
+                  {selectedMirror ? (
+                    <>
+                      <FlipHorizontal className="h-4 w-4 mr-2" />
+                      Mirror (moves opposite)
+                    </>
+                  ) : (
+                    <>
+                      <FlipHorizontal className="h-4 w-4 mr-2 opacity-50" />
+                      Normal Direction
+                    </>
+                  )}
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Block moves opposite to arrow direction
+                </p>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              {gameMode === 'classic'
-                ? 'Blocked blocks bounce back to original position'
-                : 'Blocked blocks slide and stop next to the blocker. Bidirectional arrows available.'}
-            </p>
+
+          {/* Zoom Controls */}
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Button variant="outline" size="sm" onClick={handleZoomOut} title="Zoom Out">
+              <ZoomOut className="h-4 w-4" />
+            </Button>
+            <span className="text-xs text-muted-foreground w-16 text-center">{Math.round(zoom * 100)}%</span>
+            <Button variant="outline" size="sm" onClick={handleZoomIn} title="Zoom In">
+              <ZoomIn className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleZoomReset} title="Reset View">
+              <Maximize className="h-4 w-4" />
+            </Button>
+            <span className="text-xs text-muted-foreground ml-2">
+              Ctrl+scroll to zoom
+            </span>
           </div>
 
-          {/* Grid SVG */}
-          <div className="flex justify-center">
+          {/* Grid SVG - Scrollable container */}
+          <div
+            ref={svgContainerRef}
+            className="overflow-auto border border-muted rounded-lg bg-muted/20"
+            style={{ maxHeight: '500px', cursor: isPanning ? 'grabbing' : 'default' }}
+            onWheel={handleWheel}
+            onMouseDown={handlePanStart}
+            onMouseMove={handlePanMove}
+            onMouseUp={handlePanEnd}
+            onMouseLeave={handlePanEnd}
+          >
             <svg
               viewBox={viewBox}
-              className="w-full max-w-sm mx-auto"
-              style={{ aspectRatio: `${width} / ${height}` }}
+              style={{
+                width: width * zoom,
+                height: height * zoom,
+                minWidth: width * zoom,
+                minHeight: height * zoom,
+              }}
             >
               {/* Background */}
               <rect
@@ -824,7 +864,7 @@ export function SquareBlockLevelDesigner({
                 } else if (hasBlock) {
                   fillColor = 'transparent';
                 } else if (isHovered) {
-                  fillColor = placementMode === 'hole' ? 'rgba(0, 0, 0, 0.4)' : 'rgba(255, 255, 255, 0.1)';
+                  fillColor = 'rgba(255, 255, 255, 0.1)';
                 }
 
                 return (
@@ -853,14 +893,14 @@ export function SquareBlockLevelDesigner({
                     )}
 
                     {/* Preview block */}
-                    {isHovered && !hasBlock && !hasHole && editMode === 'place' && placementMode === 'block' && (
+                    {isHovered && !hasBlock && !hasHole && (
                       <g opacity={0.5} pointerEvents="none">
                         <rect
                           x={pixel.x - cellSize / 2 + 4}
                           y={pixel.y - cellSize / 2 + 4}
                           width={cellSize - 8}
                           height={cellSize - 8}
-                          fill={selectedColor}
+                          fill={DEFAULT_BLOCK_COLOR}
                           rx={4}
                         />
                         <DirectionArrow cx={pixel.x} cy={pixel.y} direction={selectedDirection} size={cellSize * 0.5} />
@@ -871,15 +911,51 @@ export function SquareBlockLevelDesigner({
                             <path d="M -4 -1 L -4 -4 A 4 4 0 0 1 4 -4 L 4 -1" fill="none" stroke="#fbbf24" strokeWidth={1.5} />
                           </g>
                         )}
+                        {/* Ice preview */}
+                        {selectedIceCount > 0 && (
+                          <g>
+                            <rect
+                              x={pixel.x - cellSize / 2 + 4}
+                              y={pixel.y - cellSize / 2 + 4}
+                              width={cellSize - 8}
+                              height={cellSize - 8}
+                              fill="rgba(135, 206, 250, 0.4)"
+                              stroke="rgba(173, 216, 230, 0.8)"
+                              strokeWidth={2}
+                              rx={4}
+                            />
+                            <text
+                              x={pixel.x}
+                              y={pixel.y + 4}
+                              textAnchor="middle"
+                              dominantBaseline="middle"
+                              fill="#ffffff"
+                              fontSize={cellSize * 0.35}
+                              fontWeight="bold"
+                            >
+                              {selectedIceCount}
+                            </text>
+                          </g>
+                        )}
+                        {/* Mirror preview */}
+                        {selectedMirror && (
+                          <g>
+                            <rect
+                              x={pixel.x - cellSize / 2 + 2}
+                              y={pixel.y - cellSize / 2 + 2}
+                              width={cellSize - 4}
+                              height={cellSize - 4}
+                              fill="none"
+                              stroke="rgba(168, 85, 247, 0.8)"
+                              strokeWidth={2}
+                              strokeDasharray="4 2"
+                              rx={4}
+                            />
+                          </g>
+                        )}
                       </g>
                     )}
 
-                    {/* Preview hole */}
-                    {isHovered && !hasBlock && !hasHole && editMode === 'place' && placementMode === 'hole' && (
-                      <g opacity={0.6} pointerEvents="none">
-                        <circle cx={pixel.x} cy={pixel.y} r={cellSize * 0.25} fill="rgba(0, 0, 0, 0.7)" />
-                      </g>
-                    )}
                   </g>
                 );
               })}
@@ -905,8 +981,8 @@ export function SquareBlockLevelDesigner({
                       width={cellSize - 8}
                       height={cellSize - 8}
                       fill={block.color}
-                      stroke={isBlockHovered && editMode === 'direction' ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.3)'}
-                      strokeWidth={isBlockHovered && editMode === 'direction' ? 2 : 1.5}
+                      stroke={isBlockHovered ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.3)'}
+                      strokeWidth={isBlockHovered ? 2 : 1.5}
                       rx={4}
                     />
                     <DirectionArrow
@@ -914,14 +990,62 @@ export function SquareBlockLevelDesigner({
                       cy={pixel.y}
                       direction={block.direction}
                       size={cellSize * 0.5}
-                      color={block.locked ? 'rgba(255, 255, 255, 0.3)' : canClear ? '#ffffff' : 'rgba(255, 255, 255, 0.5)'}
+                      color={block.locked || block.iceCount ? 'rgba(255, 255, 255, 0.3)' : canClear ? '#ffffff' : 'rgba(255, 255, 255, 0.5)'}
                     />
-                    {/* Lock icon for locked blocks */}
+                    {/* Lock icon for gate blocks */}
                     {block.locked && (
                       <g transform={`translate(${pixel.x}, ${pixel.y})`}>
                         <rect x={-6} y={-1} width={12} height={9} fill="rgba(0,0,0,0.7)" stroke="#fbbf24" strokeWidth={1} rx={1} />
                         <path d="M -4 -1 L -4 -4 A 4 4 0 0 1 4 -4 L 4 -1" fill="none" stroke="#fbbf24" strokeWidth={1.5} />
                         <circle cx={0} cy={3} r={1.5} fill="#fbbf24" />
+                      </g>
+                    )}
+                    {/* Ice overlay for iced blocks */}
+                    {block.iceCount && block.iceCount > 0 && (
+                      <g pointerEvents="none">
+                        <rect
+                          x={pixel.x - cellSize / 2 + 4}
+                          y={pixel.y - cellSize / 2 + 4}
+                          width={cellSize - 8}
+                          height={cellSize - 8}
+                          fill="rgba(135, 206, 250, 0.4)"
+                          stroke="rgba(173, 216, 230, 0.8)"
+                          strokeWidth={2}
+                          rx={4}
+                        />
+                        <text
+                          x={pixel.x}
+                          y={pixel.y + 4}
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                          fill="#ffffff"
+                          fontSize={cellSize * 0.35}
+                          fontWeight="bold"
+                          style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)' }}
+                        >
+                          {block.iceCount}
+                        </text>
+                      </g>
+                    )}
+                    {/* Mirror overlay for mirror blocks */}
+                    {block.mirror && (
+                      <g pointerEvents="none">
+                        <rect
+                          x={pixel.x - cellSize / 2 + 2}
+                          y={pixel.y - cellSize / 2 + 2}
+                          width={cellSize - 4}
+                          height={cellSize - 4}
+                          fill="none"
+                          stroke="rgba(168, 85, 247, 0.8)"
+                          strokeWidth={2}
+                          strokeDasharray="4 2"
+                          rx={4}
+                        />
+                        {/* Small mirror icon in corner */}
+                        <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
+                          <circle cx={0} cy={0} r={5} fill="rgba(168, 85, 247, 0.9)" />
+                          <path d="M -2 0 L 0 -1.5 L 0 -0.5 L 1.5 -0.5 L 1.5 -1.5 L 2 0 L 1.5 1.5 L 1.5 0.5 L 0 0.5 L 0 1.5 Z" fill="white" transform="scale(0.6)" />
+                        </g>
                       </g>
                     )}
                     {/* Blocks ahead counter */}
@@ -955,7 +1079,7 @@ export function SquareBlockLevelDesigner({
                         </g>
                       );
                     })()}
-                    {canClear && editMode !== 'direction' && (
+                    {canClear && (
                       <rect
                         x={pixel.x - cellSize / 2 + 2}
                         y={pixel.y - cellSize / 2 + 2}
@@ -974,6 +1098,13 @@ export function SquareBlockLevelDesigner({
               })}
             </svg>
           </div>
+
+          {/* Scroll hint for large grids */}
+          {(rows > 10 || cols > 10) && (
+            <p className="text-xs text-center text-muted-foreground mt-1">
+              Scroll to navigate, Ctrl+scroll to zoom
+            </p>
+          )}
 
           {/* Difficulty Breakdown */}
           {blocks.size > 0 && puzzleAnalysis && (
@@ -1025,8 +1156,16 @@ export function SquareBlockLevelDesigner({
                       <span className="font-mono">+{Math.min(difficultyBreakdown.components.blockCount / 40, 10).toFixed(1)}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Locked Blocks ({difficultyBreakdown.components.lockedCount})</span>
+                      <span className="text-muted-foreground">Gate Blocks ({difficultyBreakdown.components.lockedCount})</span>
                       <span className="font-mono">+{Math.min(difficultyBreakdown.components.lockedCount, 5)}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Ice Blocks ({difficultyBreakdown.components.icedCount}{difficultyBreakdown.components.icedCount > 0 ? `, avg ${difficultyBreakdown.components.avgIceCount.toFixed(1)}` : ''})</span>
+                      <span className="font-mono">+{(Math.min(difficultyBreakdown.components.icedCount, 5) + Math.min(difficultyBreakdown.components.avgIceCount * 0.5, 5)).toFixed(1)}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Mirror Blocks ({difficultyBreakdown.components.mirrorCount})</span>
+                      <span className="font-mono">+{Math.min(difficultyBreakdown.components.mirrorCount, 5)}</span>
                     </div>
                     {difficultyBreakdown.components.sizeBonus > 0 && (
                       <div className="flex justify-between items-center">
@@ -1047,7 +1186,9 @@ export function SquareBlockLevelDesigner({
                       <p>avgBlockers × 4.5 (primary)</p>
                       <p>+ (1 - clearability) × 20</p>
                       <p>+ min(blocks/40, 10)</p>
-                      <p>+ min(locked, 5)</p>
+                      <p>+ min(gate, 5)</p>
+                      <p>+ min(ice, 5) + min(avgIce × 0.5, 5)</p>
+                      <p>+ min(mirror, 5)</p>
                       <p>+ sizeBonus (400+ blocks: up to +20)</p>
                     </div>
                     <p className="text-muted-foreground">0-24 = Easy, 25-49 = Medium, 50-74 = Hard, 75+ = Super Hard</p>
@@ -1059,8 +1200,8 @@ export function SquareBlockLevelDesigner({
                     <div className="space-y-1.5 text-muted-foreground">
                       <p>1. Fills every cell with a block pointing toward nearest edge</p>
                       <p>2. Randomly flips ~50% of directions while keeping solvable</p>
-                      <p>3. Adds random locked blocks while keeping solvable</p>
-                      <p>4. Calculates difficulty based on blockers, locked %, and clearability</p>
+                      <p>3. Adds random gate blocks while keeping solvable</p>
+                      <p>4. Calculates difficulty based on blockers, gate %, and clearability</p>
                     </div>
                     <p className="text-muted-foreground italic">Click multiple times to get different configurations.</p>
                   </div>
@@ -1103,37 +1244,6 @@ export function SquareBlockLevelDesigner({
             </div>
           </div>
 
-          {/* Edit Mode Toggle */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Edit Mode</label>
-            <div className="flex gap-1">
-              <Button
-                variant={editMode === 'place' && placementMode === 'block' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => { setEditMode('place'); setPlacementMode('block'); }}
-                className="flex-1"
-              >
-                Blocks
-              </Button>
-              <Button
-                variant={editMode === 'place' && placementMode === 'hole' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => { setEditMode('place'); setPlacementMode('hole'); }}
-                className="flex-1"
-              >
-                <Circle className="h-3 w-3 mr-1" />
-                Holes
-              </Button>
-              <Button
-                variant={editMode === 'direction' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setEditMode('direction')}
-                className="flex-1"
-              >
-                Arrows
-              </Button>
-            </div>
-          </div>
         </CardContent>
       </Card>
 
@@ -1313,6 +1423,8 @@ function EmbeddedMetricsPanel({
   const cellCount = blocks.size;
   const holeCount = holes.size;
   const lockedCount = Array.from(blocks.values()).filter(b => b.locked).length;
+  const icedCount = Array.from(blocks.values()).filter(b => b.iceCount && b.iceCount > 0).length;
+  const mirrorCount = Array.from(blocks.values()).filter(b => b.mirror).length;
 
   // Use new analyzer
   const analysis = useMemo(() => {
@@ -1346,7 +1458,7 @@ function EmbeddedMetricsPanel({
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Basic Stats */}
-        <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="grid grid-cols-5 gap-2 text-center">
           <div className="p-2 bg-muted/50 rounded-lg">
             <p className="text-2xl font-bold">{cellCount}</p>
             <p className="text-xs text-muted-foreground">Blocks</p>
@@ -1357,7 +1469,15 @@ function EmbeddedMetricsPanel({
           </div>
           <div className="p-2 bg-muted/50 rounded-lg">
             <p className="text-2xl font-bold text-amber-400">{lockedCount}</p>
-            <p className="text-xs text-muted-foreground">Locked</p>
+            <p className="text-xs text-muted-foreground">Gate</p>
+          </div>
+          <div className="p-2 bg-muted/50 rounded-lg">
+            <p className="text-2xl font-bold text-cyan-400">{icedCount}</p>
+            <p className="text-xs text-muted-foreground">Iced</p>
+          </div>
+          <div className="p-2 bg-muted/50 rounded-lg">
+            <p className="text-2xl font-bold text-purple-400">{mirrorCount}</p>
+            <p className="text-xs text-muted-foreground">Mirror</p>
           </div>
         </div>
 
@@ -1400,7 +1520,7 @@ function EmbeddedMetricsPanel({
                 <span>+{Math.min(breakdown.components.blockCount / 40, 10).toFixed(1)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Locked ({breakdown.components.lockedCount})</span>
+                <span className="text-muted-foreground">Gate ({breakdown.components.lockedCount})</span>
                 <span>+{Math.min(breakdown.components.lockedCount, 5)}</span>
               </div>
               {breakdown.components.sizeBonus > 0 && (

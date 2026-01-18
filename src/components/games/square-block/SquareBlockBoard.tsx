@@ -1,6 +1,8 @@
 'use client';
 
-import { useMemo, useEffect, useState } from 'react';
+import { useMemo, useEffect, useState, useCallback, useRef } from 'react';
+import { Button } from '@/components/ui/button';
+import { ZoomIn, ZoomOut, Maximize, Move } from 'lucide-react';
 import { SquareBlockState, SquareBlock, BlockDirection, MAX_MISTAKES } from '@/types/squareBlock';
 import {
   GridCoord,
@@ -24,22 +26,16 @@ interface SquareBlockBoardProps {
   clearableBlocks: string[];
   canClearBlock: (block: SquareBlock) => boolean;
   isBlockUnlocked: (block: SquareBlock) => boolean;
+  getRemainingIce: (block: SquareBlock) => number | null;
+  isBlockMirror: (block: SquareBlock) => boolean;
 }
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-const MAX_CANVAS_SIZE = 500; // Maximum canvas size for game board
-const MIN_CELL_SIZE = 10;
-const MAX_CELL_SIZE = 50;
-
-// Calculate optimal cell size based on grid dimensions
-function calculateCellSize(rows: number, cols: number): number {
-  const maxDimension = Math.max(rows, cols);
-  const calculatedSize = Math.floor(MAX_CANVAS_SIZE / maxDimension);
-  return Math.max(MIN_CELL_SIZE, Math.min(MAX_CELL_SIZE, calculatedSize));
-}
+// Fixed cell size for readability - grid scrolls instead of shrinking
+const FIXED_CELL_SIZE = 36;
 
 // ============================================================================
 // Component
@@ -51,6 +47,8 @@ export function SquareBlockBoard({
   clearableBlocks,
   canClearBlock,
   isBlockUnlocked,
+  getRemainingIce,
+  isBlockMirror,
 }: SquareBlockBoardProps) {
   const { level, blocks, holes, animatingBlock, animationPhase, animationData, mistakes, lastMistakeBlockId } = state;
   const { rows, cols } = level;
@@ -67,9 +65,59 @@ export function SquareBlockBoard({
     }
   }, [lastMistakeBlockId]);
 
-  // Calculate dynamic cell size
-  const cellSize = useMemo(() => calculateCellSize(rows, cols), [rows, cols]);
-  const padding = useMemo(() => Math.max(10, Math.min(20, cellSize / 2)), [cellSize]);
+  // Zoom and pan state
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const svgContainerRef = useRef<HTMLDivElement>(null);
+
+  // Zoom controls
+  const handleZoomIn = useCallback(() => {
+    setZoom(z => Math.min(z * 1.25, 5));
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setZoom(z => Math.max(z / 1.25, 0.25));
+  }, []);
+
+  const handleZoomReset = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
+  // Ctrl + Mouse wheel zoom
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      setZoom(z => Math.max(0.5, Math.min(3, z * delta)));
+    }
+    // Without Ctrl, allow normal scrolling
+  }, []);
+
+  // Pan handlers
+  const handlePanStart = useCallback((e: React.MouseEvent) => {
+    if (e.button === 1 || (e.button === 0 && e.altKey)) { // Middle click or Alt+click
+      e.preventDefault();
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    }
+  }, [pan]);
+
+  const handlePanMove = useCallback((e: React.MouseEvent) => {
+    if (isPanning) {
+      setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
+    }
+  }, [isPanning, panStart]);
+
+  const handlePanEnd = useCallback(() => {
+    setIsPanning(false);
+  }, []);
+
+  // Fixed cell size for readability
+  const cellSize = FIXED_CELL_SIZE;
+  const padding = 16;
 
   // Calculate SVG dimensions
   const { viewBox, origin, width, height } = useMemo(() => {
@@ -116,6 +164,23 @@ export function SquareBlockBoard({
         {hearts}
       </div>
 
+      {/* Zoom Controls */}
+      <div className="flex items-center justify-center gap-2 mb-2">
+        <Button variant="outline" size="sm" onClick={handleZoomOut} title="Zoom Out">
+          <ZoomOut className="h-4 w-4" />
+        </Button>
+        <span className="text-xs text-muted-foreground w-16 text-center">{Math.round(zoom * 100)}%</span>
+        <Button variant="outline" size="sm" onClick={handleZoomIn} title="Zoom In">
+          <ZoomIn className="h-4 w-4" />
+        </Button>
+        <Button variant="outline" size="sm" onClick={handleZoomReset} title="Reset View">
+          <Maximize className="h-4 w-4" />
+        </Button>
+        <span className="text-xs text-muted-foreground ml-2">
+          Ctrl+scroll to zoom
+        </span>
+      </div>
+
       {/* CSS keyframes for shake animation */}
       <style jsx>{`
         @keyframes shake {
@@ -125,11 +190,26 @@ export function SquareBlockBoard({
         }
       `}</style>
 
-      <svg
-        viewBox={viewBox}
-        className="w-full max-w-md mx-auto"
-        style={{ aspectRatio: `${width} / ${height}` }}
+      {/* SVG Container - Scrollable */}
+      <div
+        ref={svgContainerRef}
+        className="overflow-auto border border-muted rounded-lg bg-muted/20"
+        style={{ maxHeight: '500px', cursor: isPanning ? 'grabbing' : 'default' }}
+        onWheel={handleWheel}
+        onMouseDown={handlePanStart}
+        onMouseMove={handlePanMove}
+        onMouseUp={handlePanEnd}
+        onMouseLeave={handlePanEnd}
       >
+        <svg
+          viewBox={viewBox}
+          style={{
+            width: width * zoom,
+            height: height * zoom,
+            minWidth: width * zoom,
+            minHeight: height * zoom,
+          }}
+        >
         {/* Background */}
         <rect
           x={origin.x}
@@ -196,6 +276,8 @@ export function SquareBlockBoard({
           const isClearable = clearableBlocks.includes(key);
           const isAnimating = animatingBlock === block.id;
           const isLocked = block.locked && !isBlockUnlocked(block);
+          const isFrozen = getRemainingIce(block) !== null && (getRemainingIce(block) ?? 0) > 0;
+          const isMirror = isBlockMirror(block);
 
           // Calculate animation transform
           let animationStyle: React.CSSProperties = {};
@@ -265,7 +347,7 @@ export function SquareBlockBoard({
                 <DirectionArrow
                   direction={block.direction}
                   size={cellSize * 0.5}
-                  color={isLocked ? 'rgba(255, 255, 255, 0.3)' : isClearable ? '#ffffff' : 'rgba(255, 255, 255, 0.5)'}
+                  color={isLocked || isFrozen ? 'rgba(255, 255, 255, 0.3)' : isClearable ? '#ffffff' : 'rgba(255, 255, 255, 0.5)'}
                 />
               </g>
 
@@ -296,6 +378,76 @@ export function SquareBlockBoard({
                 </g>
               )}
 
+              {/* Ice overlay for frozen blocks */}
+              {(() => {
+                const remainingIce = getRemainingIce(block);
+                if (remainingIce === null || remainingIce <= 0) return null;
+
+                return (
+                  <g>
+                    {/* Ice crystal overlay */}
+                    <rect
+                      x={pixel.x - cellSize / 2 + 4}
+                      y={pixel.y - cellSize / 2 + 4}
+                      width={cellSize - 8}
+                      height={cellSize - 8}
+                      fill="rgba(135, 206, 250, 0.4)"
+                      stroke="rgba(173, 216, 230, 0.8)"
+                      strokeWidth={2}
+                      rx={6}
+                      pointerEvents="none"
+                    />
+                    {/* Ice count number */}
+                    <text
+                      x={pixel.x}
+                      y={pixel.y + 4}
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                      fill="#ffffff"
+                      fontSize={cellSize * 0.4}
+                      fontWeight="bold"
+                      style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)' }}
+                      pointerEvents="none"
+                    >
+                      {remainingIce}
+                    </text>
+                  </g>
+                );
+              })()}
+
+              {/* Mirror indicator for mirror blocks */}
+              {isMirror && (
+                <g pointerEvents="none">
+                  {/* Mirror border effect - purple dashed */}
+                  <rect
+                    x={pixel.x - cellSize / 2 + 2}
+                    y={pixel.y - cellSize / 2 + 2}
+                    width={cellSize - 4}
+                    height={cellSize - 4}
+                    fill="none"
+                    stroke="rgba(168, 85, 247, 0.8)"
+                    strokeWidth={2}
+                    strokeDasharray="4 2"
+                    rx={6}
+                  />
+                  {/* Small mirror icon in corner */}
+                  <g transform={`translate(${pixel.x + cellSize / 2 - 10}, ${pixel.y - cellSize / 2 + 10})`}>
+                    <circle
+                      cx={0}
+                      cy={0}
+                      r={6}
+                      fill="rgba(168, 85, 247, 0.9)"
+                    />
+                    {/* Flip arrows icon */}
+                    <path
+                      d="M -3 0 L 0 -2 L 0 -1 L 2 -1 L 2 -2 L 3 0 L 2 2 L 2 1 L 0 1 L 0 2 Z"
+                      fill="white"
+                      transform="scale(0.7)"
+                    />
+                  </g>
+                </g>
+              )}
+
               {/* Clearable indicator */}
               {isClearable && (
                 <rect
@@ -315,7 +467,15 @@ export function SquareBlockBoard({
             </g>
           );
         })}
-      </svg>
+        </svg>
+      </div>
+
+      {/* Scroll hint for large grids */}
+      {(rows > 10 || cols > 10) && (
+        <p className="text-xs text-center text-muted-foreground mt-1">
+          Scroll to navigate, Ctrl+scroll to zoom
+        </p>
+      )}
     </div>
   );
 }
