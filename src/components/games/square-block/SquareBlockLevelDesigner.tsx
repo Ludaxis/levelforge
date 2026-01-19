@@ -45,7 +45,7 @@ import {
 import {
   Settings, Play, Trash2, CheckCircle, AlertTriangle,
   Plus, BarChart3, Target, Activity,
-  TrendingUp, Clock, Percent, Lock, Unlock, Eye, EyeOff, Sparkles, Download, Upload, Snowflake, FlipHorizontal,
+  TrendingUp, TrendingDown, Clock, Percent, Lock, Unlock, Eye, EyeOff, Sparkles, Download, Upload, Snowflake, FlipHorizontal,
   ZoomIn, ZoomOut, Maximize, Move
 } from 'lucide-react';
 import { downloadLevelAsJSON, parseAndImportLevel } from '@/lib/squareBlockExport';
@@ -166,6 +166,23 @@ export function SquareBlockLevelDesigner({
 
   // Loading state
   const [isGenerating, setIsGenerating] = useState(false);
+
+  // Difficulty adjustment state
+  const [isAdjusting, setIsAdjusting] = useState(false);
+  const [lastAdjustmentResult, setLastAdjustmentResult] = useState<{
+    success: boolean;
+    scoreBefore: number;
+    scoreAfter: number;
+    action: string;
+  } | null>(null);
+
+  // Auto-clear adjustment feedback after 3 seconds
+  useEffect(() => {
+    if (lastAdjustmentResult) {
+      const timer = setTimeout(() => setLastAdjustmentResult(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [lastAdjustmentResult]);
 
   // Zoom and pan state
   const [zoom, setZoom] = useState(1);
@@ -330,6 +347,14 @@ export function SquareBlockLevelDesigner({
     return calculateDifficultyScore(puzzleAnalysis);
   }, [puzzleAnalysis]);
 
+  // Helper function to shuffle an array in place
+  function shuffleArray<T>(array: T[]): void {
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+  }
+
   // Get direction preference based on difficulty target
   const getDirectionPreference = useCallback((
     coord: GridCoord,
@@ -480,6 +505,317 @@ export function SquareBlockLevelDesigner({
       setIsGenerating(false);
     }
   }, [gridCoords, holes, getDirectionPreference, rows, cols]);
+
+  // Increase difficulty - try modifications that make the puzzle harder
+  const increaseDifficulty = useCallback(async () => {
+    if (!difficultyBreakdown || blocks.size === 0) return;
+
+    setIsAdjusting(true);
+    const scoreBefore = difficultyBreakdown.score;
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    try {
+      const newBlocks = new Map(blocks);
+      const blockList = Array.from(newBlocks.entries());
+      shuffleArray(blockList);
+
+      // Strategy 1: Flip a random block's direction toward farthest edge
+      for (const [key, block] of blockList) {
+        const hardDirs = getDirectionPreference(block.coord, 'hard');
+        const currentDir = block.direction;
+
+        for (const newDir of hardDirs) {
+          if (newDir === currentDir) continue;
+
+          const originalBlock = { ...block };
+          newBlocks.set(key, { ...block, direction: newDir });
+
+          if (analyzerQuickSolve(newBlocks, holes, rows, cols).solvable) {
+            setBlocks(newBlocks);
+            const newAnalysis = analyzePuzzle(newBlocks, holes, rows, cols);
+            const newBreakdown = newAnalysis.solvable ? calculateDifficultyScore(newAnalysis) : null;
+            const scoreAfter = newBreakdown?.score ?? scoreBefore;
+
+            if (scoreAfter > scoreBefore) {
+              setLastAdjustmentResult({
+                success: true,
+                scoreBefore,
+                scoreAfter,
+                action: `Rotated block toward harder edge`,
+              });
+              return;
+            }
+          }
+          newBlocks.set(key, originalBlock);
+        }
+      }
+
+      // Strategy 2: Add locked to a random normal block
+      const normalBlocks = blockList.filter(([, b]) => !b.locked && !b.iceCount);
+      shuffleArray(normalBlocks);
+
+      for (const [key, block] of normalBlocks) {
+        const originalBlock = { ...block };
+        newBlocks.set(key, { ...block, locked: true });
+
+        if (analyzerQuickSolve(newBlocks, holes, rows, cols).solvable) {
+          setBlocks(newBlocks);
+          const newAnalysis = analyzePuzzle(newBlocks, holes, rows, cols);
+          const newBreakdown = newAnalysis.solvable ? calculateDifficultyScore(newAnalysis) : null;
+          const scoreAfter = newBreakdown?.score ?? scoreBefore;
+
+          setLastAdjustmentResult({
+            success: true,
+            scoreBefore,
+            scoreAfter,
+            action: `Added gate block`,
+          });
+          return;
+        }
+        newBlocks.set(key, originalBlock);
+      }
+
+      // Strategy 3: Add ice to a random normal block
+      const nonIcedBlocks = blockList.filter(([, b]) => !b.iceCount && !b.locked);
+      shuffleArray(nonIcedBlocks);
+
+      for (const [key, block] of nonIcedBlocks) {
+        const iceCount = Math.floor(Math.random() * 5) + 3; // 3-7
+        const originalBlock = { ...block };
+        newBlocks.set(key, { ...block, iceCount });
+
+        if (analyzerQuickSolve(newBlocks, holes, rows, cols).solvable) {
+          setBlocks(newBlocks);
+          const newAnalysis = analyzePuzzle(newBlocks, holes, rows, cols);
+          const newBreakdown = newAnalysis.solvable ? calculateDifficultyScore(newAnalysis) : null;
+          const scoreAfter = newBreakdown?.score ?? scoreBefore;
+
+          setLastAdjustmentResult({
+            success: true,
+            scoreBefore,
+            scoreAfter,
+            action: `Added ice (${iceCount}) to block`,
+          });
+          return;
+        }
+        newBlocks.set(key, originalBlock);
+      }
+
+      // Strategy 4: Add mirror to a random non-mirror block
+      const nonMirrorBlocks = blockList.filter(([, b]) => !b.mirror);
+      shuffleArray(nonMirrorBlocks);
+
+      for (const [key, block] of nonMirrorBlocks) {
+        const originalBlock = { ...block };
+        newBlocks.set(key, { ...block, mirror: true });
+
+        if (analyzerQuickSolve(newBlocks, holes, rows, cols).solvable) {
+          setBlocks(newBlocks);
+          const newAnalysis = analyzePuzzle(newBlocks, holes, rows, cols);
+          const newBreakdown = newAnalysis.solvable ? calculateDifficultyScore(newAnalysis) : null;
+          const scoreAfter = newBreakdown?.score ?? scoreBefore;
+
+          setLastAdjustmentResult({
+            success: true,
+            scoreBefore,
+            scoreAfter,
+            action: `Added mirror to block`,
+          });
+          return;
+        }
+        newBlocks.set(key, originalBlock);
+      }
+
+      // No changes could be made
+      setLastAdjustmentResult({
+        success: false,
+        scoreBefore,
+        scoreAfter: scoreBefore,
+        action: `Cannot increase difficulty further`,
+      });
+    } finally {
+      setIsAdjusting(false);
+    }
+  }, [blocks, holes, rows, cols, difficultyBreakdown, getDirectionPreference]);
+
+  // Decrease difficulty - try modifications that make the puzzle easier
+  const decreaseDifficulty = useCallback(async () => {
+    if (!difficultyBreakdown || blocks.size === 0) return;
+
+    setIsAdjusting(true);
+    const scoreBefore = difficultyBreakdown.score;
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    try {
+      const newBlocks = new Map(blocks);
+      const blockList = Array.from(newBlocks.entries());
+      shuffleArray(blockList);
+
+      // Strategy 1: Remove mirror from a random mirror block
+      const mirrorBlocks = blockList.filter(([, b]) => b.mirror);
+      shuffleArray(mirrorBlocks);
+
+      for (const [key, block] of mirrorBlocks) {
+        const { mirror: _, ...blockWithoutMirror } = block;
+        newBlocks.set(key, blockWithoutMirror);
+
+        const newAnalysis = analyzePuzzle(newBlocks, holes, rows, cols);
+        const newBreakdown = newAnalysis.solvable ? calculateDifficultyScore(newAnalysis) : null;
+        const scoreAfter = newBreakdown?.score ?? scoreBefore;
+
+        setBlocks(newBlocks);
+        setLastAdjustmentResult({
+          success: true,
+          scoreBefore,
+          scoreAfter,
+          action: `Removed mirror from block`,
+        });
+        return;
+      }
+
+      // Strategy 2: Remove ice from a random iced block
+      const icedBlocks = blockList.filter(([, b]) => b.iceCount && b.iceCount > 0);
+      shuffleArray(icedBlocks);
+
+      for (const [key, block] of icedBlocks) {
+        const { iceCount: _, ...blockWithoutIce } = block;
+        newBlocks.set(key, blockWithoutIce);
+
+        const newAnalysis = analyzePuzzle(newBlocks, holes, rows, cols);
+        const newBreakdown = newAnalysis.solvable ? calculateDifficultyScore(newAnalysis) : null;
+        const scoreAfter = newBreakdown?.score ?? scoreBefore;
+
+        setBlocks(newBlocks);
+        setLastAdjustmentResult({
+          success: true,
+          scoreBefore,
+          scoreAfter,
+          action: `Removed ice from block`,
+        });
+        return;
+      }
+
+      // Strategy 3: Remove locked from a random locked block
+      const lockedBlocks = blockList.filter(([, b]) => b.locked);
+      shuffleArray(lockedBlocks);
+
+      for (const [key, block] of lockedBlocks) {
+        const { locked: _, ...blockWithoutLocked } = block;
+        newBlocks.set(key, blockWithoutLocked);
+
+        const newAnalysis = analyzePuzzle(newBlocks, holes, rows, cols);
+        const newBreakdown = newAnalysis.solvable ? calculateDifficultyScore(newAnalysis) : null;
+        const scoreAfter = newBreakdown?.score ?? scoreBefore;
+
+        setBlocks(newBlocks);
+        setLastAdjustmentResult({
+          success: true,
+          scoreBefore,
+          scoreAfter,
+          action: `Removed gate from block`,
+        });
+        return;
+      }
+
+      // Strategy 4: Find blocked blocks and rotate them to a clearable direction
+      // This directly improves clearability
+      const allDirections: SquareDirection[] = ['N', 'E', 'S', 'W'];
+
+      for (const [key, block] of blockList) {
+        // Skip locked/iced blocks as they have special clearability rules
+        if (block.locked || block.iceCount) continue;
+
+        // Check if this block is currently NOT clearable
+        const currentlyClearable = canClearBlock(block, newBlocks, holes);
+        if (currentlyClearable) continue; // Already clearable, skip
+
+        // Try each direction to find one that makes it clearable
+        for (const dir of allDirections) {
+          if (dir === block.direction) continue;
+
+          const modifiedBlock = { ...block, direction: dir as BlockDirection };
+          newBlocks.set(key, modifiedBlock);
+
+          // Check if now clearable AND puzzle still solvable
+          const nowClearable = canClearBlock(modifiedBlock, newBlocks, holes);
+          if (nowClearable && analyzerQuickSolve(newBlocks, holes, rows, cols).solvable) {
+            const newAnalysis = analyzePuzzle(newBlocks, holes, rows, cols);
+            const newBreakdown = newAnalysis.solvable ? calculateDifficultyScore(newAnalysis) : null;
+            const scoreAfter = newBreakdown?.score ?? scoreBefore;
+
+            setBlocks(newBlocks);
+            setLastAdjustmentResult({
+              success: true,
+              scoreBefore,
+              scoreAfter,
+              action: `Made blocked block clearable`,
+            });
+            return;
+          }
+
+          // Revert
+          newBlocks.set(key, block);
+        }
+      }
+
+      // Strategy 5: Flip any block toward nearest edge (fallback)
+      for (const [key, block] of blockList) {
+        if (block.locked || block.iceCount) continue;
+
+        const easyDirs = getDirectionPreference(block.coord, 'easy');
+        const currentDir = block.direction;
+
+        for (const newDir of easyDirs) {
+          if (newDir === currentDir) continue;
+
+          newBlocks.set(key, { ...block, direction: newDir });
+
+          if (analyzerQuickSolve(newBlocks, holes, rows, cols).solvable) {
+            const newAnalysis = analyzePuzzle(newBlocks, holes, rows, cols);
+            const newBreakdown = newAnalysis.solvable ? calculateDifficultyScore(newAnalysis) : null;
+            const scoreAfter = newBreakdown?.score ?? scoreBefore;
+
+            if (scoreAfter < scoreBefore) {
+              setBlocks(newBlocks);
+              setLastAdjustmentResult({
+                success: true,
+                scoreBefore,
+                scoreAfter,
+                action: `Rotated block toward easier edge`,
+              });
+              return;
+            }
+          }
+
+          // Revert if didn't help
+          newBlocks.set(key, block);
+        }
+      }
+
+      // No changes could be made
+      setLastAdjustmentResult({
+        success: false,
+        scoreBefore,
+        scoreAfter: scoreBefore,
+        action: `Cannot decrease difficulty further`,
+      });
+    } finally {
+      setIsAdjusting(false);
+    }
+  }, [blocks, holes, rows, cols, difficultyBreakdown, getDirectionPreference, canClearBlock]);
+
+  // Computed values for difficulty adjustment button states
+  const canIncreaseDifficulty = useMemo(() => {
+    if (!difficultyBreakdown || difficultyBreakdown.score >= 100) return false;
+    return Array.from(blocks.values()).some(b => !b.locked || !b.iceCount || !b.mirror);
+  }, [blocks, difficultyBreakdown]);
+
+  const canDecreaseDifficulty = useMemo(() => {
+    if (!difficultyBreakdown || difficultyBreakdown.score <= 0) return false;
+    return Array.from(blocks.values()).some(b => b.locked || b.iceCount || b.mirror);
+  }, [blocks, difficultyBreakdown]);
 
   // Handle cell click - always in block placement mode
   const handleCellClick = (coord: GridCoord) => {
@@ -1104,6 +1440,50 @@ export function SquareBlockLevelDesigner({
             <p className="text-xs text-center text-muted-foreground mt-1">
               Scroll to navigate, Ctrl+scroll to zoom
             </p>
+          )}
+
+          {/* Difficulty Adjustment Buttons */}
+          {blocks.size > 0 && solvability.solvable && (
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={decreaseDifficulty}
+                  disabled={isAdjusting || !canDecreaseDifficulty}
+                  className="flex-1"
+                >
+                  <TrendingDown className="h-4 w-4 mr-2" />
+                  Easier
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={increaseDifficulty}
+                  disabled={isAdjusting || !canIncreaseDifficulty}
+                  className="flex-1"
+                >
+                  <TrendingUp className="h-4 w-4 mr-2" />
+                  Harder
+                </Button>
+              </div>
+
+              {/* Adjustment Feedback Toast */}
+              {lastAdjustmentResult && (
+                <div className={`p-2 rounded-lg text-sm ${
+                  lastAdjustmentResult.success
+                    ? 'bg-green-500/10 border border-green-500/30 text-green-400'
+                    : 'bg-amber-500/10 border border-amber-500/30 text-amber-400'
+                }`}>
+                  <p className="font-medium">{lastAdjustmentResult.action}</p>
+                  {lastAdjustmentResult.success && (
+                    <p className="text-xs">
+                      Score: {lastAdjustmentResult.scoreBefore} → {lastAdjustmentResult.scoreAfter}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
           {/* Difficulty Breakdown */}
