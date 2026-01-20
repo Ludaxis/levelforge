@@ -640,7 +640,7 @@ export function FruitMatchCurveChart({
 
             <div className="space-y-3 text-xs">
               <div className="space-y-1">
-                <p className="font-medium text-foreground">Fruit Match Difficulty Factors</p>
+                <p className="font-medium text-foreground">Juicy Blast Difficulty Factors</p>
                 <p className="text-muted-foreground">
                   <span className="text-green-400">Pixel Count:</span> More pixels = longer gameplay<br/>
                   <span className="text-yellow-400">Unique Fruits:</span> More types = more decisions<br/>

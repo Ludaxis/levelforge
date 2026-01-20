@@ -36,8 +36,8 @@ const games = [
   },
   {
     id: 'fruit-match',
-    title: 'Pixel Art Fruit Match',
-    description: 'Triple tile match puzzle. Pick fruit tiles and match 3 to fill pixel art targets.',
+    title: 'Juicy Blast',
+    description: 'Triple tile match puzzle. Pick juicy tiles and match 3 to fill pixel art targets.',
     href: '/game/fruit-match',
     icon: Apple,
     status: 'ready' as const,

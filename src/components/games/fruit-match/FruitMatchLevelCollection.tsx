@@ -87,7 +87,7 @@ export { DEFAULT_SAWTOOTH_CONFIG };
 // Constants
 // ============================================================================
 
-const STORAGE_KEY = 'fruit-match-level-collection';
+const STORAGE_KEY = 'juicy-blast-level-collection';
 const MAX_LEVELS = 100;
 
 const DIFFICULTY_BADGE_COLORS: Record<DifficultyTier, string> = {
@@ -330,7 +330,7 @@ export function FruitMatchLevelCollection({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `fruit-match-level-${level.levelNumber}.json`;
+    a.download = `juicy-blast-level-${level.levelNumber}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -342,7 +342,7 @@ export function FruitMatchLevelCollection({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `fruit-match-collection-${levels.length}-levels.json`;
+    a.download = `juicy-blast-collection-${levels.length}-levels.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -356,7 +356,7 @@ export function FruitMatchLevelCollection({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `fruit-match-level-${level.levelNumber}.json`;
+      a.download = `juicy-blast-level-${level.levelNumber}.json`;
       a.click();
       URL.revokeObjectURL(url);
       // Small delay between downloads to prevent browser from blocking

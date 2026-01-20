@@ -256,10 +256,10 @@ export default function FruitMatchPage() {
 
       <div>
         <h1 className="text-2xl lg:text-3xl font-bold tracking-tight">
-          Pixel Art Fruit Match
+          Juicy Blast
         </h1>
         <p className="text-muted-foreground mt-2 text-sm lg:text-base">
-          Match tiles to fill pixel art targets. Design patterns and test difficulty curves.
+          Match juicy tiles to fill pixel art targets. Design patterns and test difficulty curves.
         </p>
       </div>
 

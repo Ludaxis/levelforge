@@ -346,7 +346,7 @@ export function FruitMatchLevelDesigner({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `fruit-match-design-${Date.now()}.json`;
+    a.download = `juicy-blast-design-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }, [pixelArtArray, gridWidth, gridHeight, sinkWidth, waitingStandSlots, minStackHeight, maxStackHeight]);
