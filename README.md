@@ -4,14 +4,26 @@
 
 An interactive toolkit for designing engaging puzzle game levels based on industry best practices from King, Dream Games, Peak Games, and Rovio.
 
-![Next.js](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js)
+![Next.js](https://img.shields.io/badge/Next.js-16.1.1-black?style=flat-square&logo=next.js)
+![React](https://img.shields.io/badge/React-19.2.3-61DAFB?style=flat-square&logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?style=flat-square&logo=typescript)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-38B2AC?style=flat-square&logo=tailwind-css)
+![Vitest](https://img.shields.io/badge/Vitest-3.2.4-6E9F18?style=flat-square&logo=vitest)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
 ---
 
 ## Features
+
+### Playable Game Demos
+
+Three fully playable puzzle games with configurable mechanics and level design tools:
+
+| Game | Route | Key Features |
+|------|-------|--------------|
+| **Match-3 Puzzle** | `/game/match-3/` | Configurable board size, color count, move limits, and objectives |
+| **Hexa Block Away** | `/game/hexa-block/` | Holes, pauses, carousels, bidirectional arrows, level designer |
+| **Square Block Away** | `/game/square-block/` | Ice, locked, mirror mechanics, holes, puzzle analyzer |
 
 ### Interactive Visualizations
 
@@ -27,11 +39,15 @@ An interactive toolkit for designing engaging puzzle game levels based on indust
 
 ### Design Tools
 
+- **Level Designer** - Interactive level creation with real-time metrics for Hexa Block and Square Block games.
+
+- **Puzzle Analyzer** - Solvability analysis, branching factor calculation, and difficulty scoring for puzzle levels.
+
+- **Level Collections** - Save, manage, and export level packs with difficulty curve visualization.
+
 - **Level Duration Calculator** - Industry benchmarks for level timing across genres (Match-3, Merge, Solitaire, Word games). Calculate optimal move counts based on level progression.
 
 - **Move Calculator** - Determine recommended move limits by level range with visual progression charts.
-
-- **Playable Match-3 Demo** - Test framework concepts with a fully playable game. Configure board size, move limits, color count, and objectives in real-time.
 
 ### Reference Materials
 
@@ -41,15 +57,41 @@ An interactive toolkit for designing engaging puzzle game levels based on indust
 
 ---
 
+## Game Mechanics
+
+### Hexa Block Away
+
+| Mechanic | Description |
+|----------|-------------|
+| **Holes** | Stacks fall through and disappear from the board |
+| **Pauses** | Blocks stop here, require second tap to continue |
+| **Carousels** | Rotate adjacent tiles clockwise when triggered |
+| **Bidirectional Arrows** | Two exit direction options for the player |
+
+### Square Block Away
+
+| Mechanic | Code | Description |
+|----------|------|-------------|
+| **Ice** | 2+N | Block frozen for N moves before it can act |
+| **Locked** | 3 | Requires adjacent neighbors to be cleared first |
+| **Mirror** | 4 | Moves in the opposite direction from input |
+| **Holes** | - | Blocks fall through and are removed |
+
+---
+
 ## Screenshots
 
 | Dashboard | Sawtooth Curve | Flow State |
 |:---------:|:--------------:|:----------:|
 | Overview of all tools | 10-level difficulty cycles | Skill vs Challenge zones |
 
-| Game Demo | Glossary | Calculator |
-|:---------:|:--------:|:----------:|
-| Playable Match-3 | 40+ terms | Level duration tools |
+| Match-3 Demo | Hexa Block Demo | Square Block Demo |
+|:------------:|:---------------:|:-----------------:|
+| Classic match-3 gameplay | Hex grid with special mechanics | Square grid with ice/mirror |
+
+| Level Designer | Puzzle Analyzer |
+|:--------------:|:---------------:|
+| Interactive level creation | Solvability and difficulty metrics |
 
 ---
 
@@ -80,15 +122,17 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 
 ## Tech Stack
 
-| Technology | Purpose |
-|------------|---------|
-| **Next.js 15** | React framework with App Router |
-| **TypeScript** | Type-safe development |
-| **Tailwind CSS 4** | Utility-first styling |
-| **shadcn/ui** | Accessible UI components |
-| **Recharts** | Composable chart library |
-| **next-themes** | Dark/light mode support |
-| **Lucide React** | Beautiful icons |
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| **Next.js** | 16.1.1 | React framework with App Router |
+| **React** | 19.2.3 | UI library |
+| **TypeScript** | 5 | Type-safe development |
+| **Tailwind CSS** | 4 | Utility-first styling |
+| **Vitest** | 3.2.4 | Unit testing framework |
+| **Recharts** | 2.15.4 | Composable chart library |
+| **shadcn/ui** | - | Accessible UI components |
+| **next-themes** | - | Dark/light mode support |
+| **Lucide React** | - | Beautiful icons |
 
 ---
 
@@ -97,25 +141,69 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 ```
 src/
 ├── app/
-│   ├── page.tsx           # Dashboard
-│   ├── sawtooth/          # Sawtooth curve visualizer
-│   ├── cognitive/         # Cognitive balance tool
-│   ├── emotional/         # Emotional design charts
-│   ├── calculator/        # Level duration calculator
-│   ├── game/              # Match-3 demo
-│   └── glossary/          # Terminology reference
+│   ├── page.tsx               # Dashboard
+│   ├── game/
+│   │   ├── page.tsx           # Game index
+│   │   ├── match-3/           # Match-3 puzzle game
+│   │   ├── hexa-block/        # Hexa Block Away game
+│   │   └── square-block/      # Square Block Away game
+│   ├── sawtooth/              # Sawtooth curve visualizer
+│   ├── cognitive/             # Cognitive balance tool
+│   ├── emotional/             # Emotional design charts
+│   ├── calculator/            # Level duration calculator
+│   └── glossary/              # Terminology reference
 ├── components/
-│   ├── ui/                # shadcn/ui components
-│   ├── charts/            # Visualization components
-│   ├── game/              # Game demo components
-│   └── layout/            # App shell & navigation
+│   ├── ui/                    # shadcn/ui components
+│   ├── charts/                # Visualization components (7 charts)
+│   ├── games/
+│   │   ├── match-3/           # Match-3 game components
+│   │   ├── hexa-block/        # Hexa Block game components
+│   │   └── square-block/      # Square Block game components
+│   ├── hex/                   # Hex grid rendering
+│   └── layout/                # App shell & navigation
 ├── lib/
-│   ├── constants.ts       # Framework data & benchmarks
-│   ├── calculations.ts    # Design formulas
-│   └── utils.ts           # Utility functions
+│   ├── useMatch3Game.ts       # Match-3 game logic hook
+│   ├── useHexaBlockGame.ts    # Hexa Block game logic hook
+│   ├── useSquareBlockGame.ts  # Square Block game logic hook
+│   ├── puzzleAnalyzer.ts      # Solvability & difficulty analysis
+│   ├── hexGrid.ts             # Hex grid utilities
+│   ├── squareGrid.ts          # Square grid utilities
+│   ├── levelCodec.ts          # Level encoding/decoding
+│   ├── constants.ts           # Framework data & benchmarks
+│   └── utils.ts               # Utility functions
 └── types/
-    └── game.ts            # TypeScript definitions
+    ├── game.ts                # Match-3 type definitions
+    ├── level.ts               # Level framework types
+    ├── hexaBlock.ts           # Hexa Block types
+    └── squareBlock.ts         # Square Block types
 ```
+
+---
+
+## Level Design Features
+
+### Level Designer
+
+Create levels interactively with:
+- Click-to-place tile mechanics
+- Real-time difficulty metrics
+- Export to level code format
+- Zoom and pan controls (Ctrl+Wheel to zoom)
+
+### Puzzle Analyzer
+
+Automatic analysis including:
+- **Solvability**: Can the puzzle be solved?
+- **Branching Factor**: Average choices per move
+- **Difficulty Score**: Composite difficulty rating
+- **Move Sequence**: Optimal solution path
+
+### Level Collections
+
+Manage level packs with:
+- Import/export level sets
+- Difficulty curve visualization
+- Bulk editing capabilities
 
 ---
 
@@ -134,6 +222,19 @@ A 10-level difficulty cycle proven effective in top puzzle games:
 | 8-9 | Hard | Rising tension |
 | 10 | Super Hard | Cycle peak |
 
+### Level Archetypes
+
+| Archetype | Purpose | Example |
+|-----------|---------|---------|
+| **Tutorial** | Teach a single mechanic | First ice block level |
+| **Demonstration** | Show mechanic combinations | Ice + mirrors together |
+| **Constraint** | Limit available moves | Tight move count |
+| **Sandbox** | Free exploration | Large board, many moves |
+| **Precision** | Require exact sequences | Single solution path |
+| **Recovery** | Easy win after hard level | Simple layout |
+| **Gatekeeper** | Test mastery before progression | Cycle peak level |
+| **Showcase** | Highlight unique board shapes | Special formations |
+
 ### Difficulty Tiers
 
 | Tier | Win Rate | Attempts |
@@ -142,6 +243,19 @@ A 10-level difficulty cycle proven effective in top puzzle games:
 | Medium | 40-60% | 4-8 |
 | Hard | 25-40% | 9-20 |
 | Super Hard | 20-30% | 20-35+ |
+
+### Quality Checklist
+
+When designing levels, verify:
+
+| Category | Checkpoints |
+|----------|-------------|
+| **Goal Clarity** | Objective is immediately obvious |
+| **Difficulty Pacing** | Matches position in sawtooth cycle |
+| **Mechanic Introduction** | New mechanics taught before testing |
+| **Visual Clarity** | Board state easy to parse |
+| **Solution Variety** | Multiple valid approaches (usually) |
+| **Feedback Quality** | Clear success/failure signals |
 
 ### Cognitive Modes
 
@@ -169,6 +283,12 @@ npm start
 
 # Run linting
 npm run lint
+
+# Run tests in watch mode
+npm test
+
+# Run tests once
+npm run test:run
 ```
 
 ---

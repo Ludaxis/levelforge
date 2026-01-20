@@ -1,6 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Gamepad2, Hexagon, Square } from 'lucide-react';
+import { Gamepad2, Hexagon, Square, Apple } from 'lucide-react';
 import Link from 'next/link';
 
 const games = [
@@ -33,6 +33,16 @@ const games = [
     status: 'ready' as const,
     color: 'from-amber-500/20 to-orange-500/20',
     borderColor: 'border-amber-500/30 hover:border-amber-500/50',
+  },
+  {
+    id: 'fruit-match',
+    title: 'Pixel Art Fruit Match',
+    description: 'Triple tile match puzzle. Pick fruit tiles and match 3 to fill pixel art targets.',
+    href: '/game/fruit-match',
+    icon: Apple,
+    status: 'ready' as const,
+    color: 'from-red-500/20 to-green-500/20',
+    borderColor: 'border-red-500/30 hover:border-red-500/50',
   },
 ];
 
