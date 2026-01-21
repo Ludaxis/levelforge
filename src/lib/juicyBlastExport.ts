@@ -201,11 +201,16 @@ export interface ImportedLevel {
 
 export function importFromReferenceFormat(ref: ReferenceLevel): ImportedLevel {
   const colorData = new Map<string, { colorType: number; colorHex: string; group: number }>();
+  const height = ref.Artwork.Height;
 
   // Convert PixelData to our PixelCell format
+  // Note: Reference format has y=0 at bottom, our format has row=0 at top
+  // So we flip: row = (height - 1) - y
   const pixelArt: PixelCell[] = ref.Artwork.PixelData.map((pixel) => {
-    // Store raw color data for round-trip
-    const key = `${pixel.Position.y},${pixel.Position.x}`;
+    const flippedRow = (height - 1) - pixel.Position.y;
+
+    // Store raw color data for round-trip (using flipped row)
+    const key = `${flippedRow},${pixel.Position.x}`;
     colorData.set(key, {
       colorType: pixel.ColorType,
       colorHex: pixel.ColorHex,
@@ -216,7 +221,7 @@ export function importFromReferenceFormat(ref: ReferenceLevel): ImportedLevel {
     const fruitType = COLOR_TYPE_TO_FRUIT[pixel.ColorType] || 'apple';
 
     return {
-      row: pixel.Position.y,
+      row: flippedRow,
       col: pixel.Position.x,
       fruitType,
       filled: false,
@@ -260,16 +265,20 @@ export function exportToReferenceFormat(data: ExportLevelData): ReferenceLevel {
   // Group pixels by color type and assign groups
   const colorTypeGroups = new Map<number, number>();
   let nextGroup = 1;
+  const height = data.pixelArtHeight;
 
   // Build PixelData array
+  // Note: Our format has row=0 at top, reference format has y=0 at bottom
+  // So we flip: y = (height - 1) - row
   const pixelData: ReferencePixelData[] = data.pixelArt.map((cell) => {
+    const flippedY = (height - 1) - cell.row;
     const key = `${cell.row},${cell.col}`;
 
     // Use preserved color data if available
     if (data.colorData?.has(key)) {
       const preserved = data.colorData.get(key)!;
       return {
-        Position: { x: cell.col, y: cell.row },
+        Position: { x: cell.col, y: flippedY },
         ColorType: preserved.colorType,
         Group: preserved.group,
         ColorHex: preserved.colorHex,
@@ -287,7 +296,7 @@ export function exportToReferenceFormat(data: ExportLevelData): ReferenceLevel {
     const group = colorTypeGroups.get(colorType)!;
 
     return {
-      Position: { x: cell.col, y: cell.row },
+      Position: { x: cell.col, y: flippedY },
       ColorType: colorType,
       Group: group,
       ColorHex: colorHex,
