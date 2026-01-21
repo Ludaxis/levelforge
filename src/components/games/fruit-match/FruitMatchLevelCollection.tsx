@@ -17,6 +17,14 @@ import {
 } from '@/types/fruitMatch';
 import { pixelKey } from '@/lib/fruitMatchUtils';
 import {
+  exportToReferenceFormat,
+  importFromReferenceFormat,
+  isReferenceFormat,
+  ReferenceLevel,
+  DIFFICULTY_TO_NUMBER,
+  NUMBER_TO_DIFFICULTY,
+} from '@/lib/juicyBlastExport';
+import {
   Layers,
   Download,
   Upload,
@@ -323,21 +331,37 @@ export function FruitMatchLevelCollection({
     );
   }, [levels, searchQuery]);
 
-  // Export single level as JSON
+  // Convert DesignedFruitMatchLevel to ReferenceLevel format
+  const levelToReferenceFormat = (level: DesignedFruitMatchLevel): ReferenceLevel => {
+    return exportToReferenceFormat({
+      levelId: `level_${String(level.levelNumber).padStart(3, '0')}`,
+      levelIndex: level.levelNumber,
+      difficulty: level.metrics.difficulty,
+      graphicId: `graphic_${level.pixelArtWidth}x${level.pixelArtHeight}`,
+      pixelArtWidth: level.pixelArtWidth,
+      pixelArtHeight: level.pixelArtHeight,
+      pixelArt: level.pixelArt,
+      sinkTileCount: level.sinkStacks.reduce((sum, stack) => sum + stack.length, 0),
+    });
+  };
+
+  // Export single level as JSON (reference format)
   const handleExportLevel = (level: DesignedFruitMatchLevel) => {
-    const dataStr = JSON.stringify(level, null, 2);
+    const referenceLevel = levelToReferenceFormat(level);
+    const dataStr = JSON.stringify(referenceLevel, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `juicy-blast-level-${level.levelNumber}.json`;
+    a.download = `level_${level.levelNumber}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  // Export all levels as single JSON file
+  // Export all levels as single JSON file (array of reference format)
   const handleExportAll = () => {
-    const dataStr = JSON.stringify(levels, null, 2);
+    const referenceLevels = levels.map(levelToReferenceFormat);
+    const dataStr = JSON.stringify(referenceLevels, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -347,16 +371,17 @@ export function FruitMatchLevelCollection({
     URL.revokeObjectURL(url);
   };
 
-  // Export all levels as separate JSON files
+  // Export all levels as separate JSON files (reference format)
   const handleExportAllSeparate = async () => {
     for (let i = 0; i < levels.length; i++) {
       const level = levels[i];
-      const dataStr = JSON.stringify(level, null, 2);
+      const referenceLevel = levelToReferenceFormat(level);
+      const dataStr = JSON.stringify(referenceLevel, null, 2);
       const blob = new Blob([dataStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `juicy-blast-level-${level.levelNumber}.json`;
+      a.download = `level_${level.levelNumber}.json`;
       a.click();
       URL.revokeObjectURL(url);
       // Small delay between downloads to prevent browser from blocking
@@ -366,7 +391,59 @@ export function FruitMatchLevelCollection({
     }
   };
 
-  // Import collection from JSON (supports multiple file selection)
+  // Convert ReferenceLevel to DesignedFruitMatchLevel
+  const referenceToDesignedLevel = (ref: ReferenceLevel, levelNumber: number): DesignedFruitMatchLevel => {
+    const imported = importFromReferenceFormat(ref);
+
+    // Calculate metrics from the imported data
+    const totalPixels = imported.pixelArt.length;
+
+    // Calculate fruit distribution
+    const fruitDistribution: Record<FruitType, number> = {
+      apple: 0,
+      orange: 0,
+      lemon: 0,
+      grape: 0,
+      cherry: 0,
+      kiwi: 0,
+    };
+    for (const cell of imported.pixelArt) {
+      fruitDistribution[cell.fruitType]++;
+    }
+
+    const uniqueFruitTypes = Object.values(fruitDistribution).filter(v => v > 0).length;
+    const waitingStandSlots = 7;
+    const totalTilesInSink = totalPixels * 3; // Estimate: 3 tiles per pixel
+
+    return {
+      id: `level-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      name: `Level ${levelNumber}`,
+      levelNumber,
+      pixelArt: imported.pixelArt,
+      pixelArtWidth: imported.pixelArtWidth,
+      pixelArtHeight: imported.pixelArtHeight,
+      sinkWidth: 6, // Default sink width
+      sinkStacks: [], // Will be regenerated when playing
+      waitingStandSlots,
+      metrics: {
+        totalPixels,
+        uniqueFruitTypes,
+        fruitDistribution,
+        totalTilesInSink,
+        waitingStandSlots,
+        estimatedMatches: totalPixels,
+        difficultyScore: imported.difficulty === 'trivial' ? 15 :
+                        imported.difficulty === 'easy' ? 30 :
+                        imported.difficulty === 'medium' ? 45 :
+                        imported.difficulty === 'hard' ? 60 :
+                        imported.difficulty === 'expert' ? 75 : 90,
+        difficulty: imported.difficulty,
+      },
+      createdAt: Date.now(),
+    };
+  };
+
+  // Import collection from JSON (supports multiple file selection and reference format)
   const handleImport = () => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -385,9 +462,17 @@ export function FruitMatchLevelCollection({
           const content = await file.text();
           const imported = JSON.parse(content);
 
-          // Check if it's a single level
+          // Check if it's reference format (single level)
+          if (isReferenceFormat(imported)) {
+            const match = file.name.match(/level[_-]?(\d+)/i);
+            const levelNumber = match ? parseInt(match[1], 10) : currentLevelNumber++;
+            newLevels.push(referenceToDesignedLevel(imported, levelNumber));
+            continue;
+          }
+
+          // Check if it's our internal format (single level)
           if (imported && !Array.isArray(imported) && imported.pixelArt) {
-            const match = file.name.match(/level-(\d+)/i);
+            const match = file.name.match(/level[_-]?(\d+)/i);
             const levelNumber = match ? parseInt(match[1], 10) : currentLevelNumber++;
             newLevels.push({ ...imported, levelNumber });
             continue;
@@ -396,10 +481,16 @@ export function FruitMatchLevelCollection({
           // Handle array of levels
           if (Array.isArray(imported)) {
             for (const l of imported) {
-              newLevels.push({
-                ...l,
-                levelNumber: currentLevelNumber++,
-              });
+              // Check if array item is reference format
+              if (isReferenceFormat(l)) {
+                newLevels.push(referenceToDesignedLevel(l, currentLevelNumber++));
+              } else if (l.pixelArt) {
+                // Internal format
+                newLevels.push({
+                  ...l,
+                  levelNumber: currentLevelNumber++,
+                });
+              }
             }
           }
         } catch (e) {

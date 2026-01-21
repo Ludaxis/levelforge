@@ -33,6 +33,11 @@ import {
   DifficultyMetrics,
 } from '@/lib/fruitMatchDifficulty';
 import {
+  exportToReferenceFormat,
+  importFromReferenceFormat,
+  isReferenceFormat,
+} from '@/lib/juicyBlastExport';
+import {
   Settings,
   Play,
   Trash2,
@@ -329,29 +334,29 @@ export function FruitMatchLevelDesigner({
     setDesignMode('edit');
   }, []);
 
-  // Export design as JSON
+  // Export design as JSON (reference format)
   const handleExportJSON = useCallback(() => {
-    const exportData = {
-      pixelArt: pixelArtArray,
+    const referenceLevel = exportToReferenceFormat({
+      levelId: `level_${String(levelNumber).padStart(3, '0')}`,
+      levelIndex: levelNumber,
+      difficulty: metrics?.difficulty || 'medium',
+      graphicId: `graphic_${gridWidth}x${gridHeight}`,
       pixelArtWidth: gridWidth,
       pixelArtHeight: gridHeight,
-      sinkWidth,
-      waitingStandSlots,
-      minStackHeight,
-      maxStackHeight,
-    };
+      pixelArt: pixelArtArray,
+    });
 
-    const dataStr = JSON.stringify(exportData, null, 2);
+    const dataStr = JSON.stringify(referenceLevel, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `juicy-blast-design-${Date.now()}.json`;
+    a.download = `level_${levelNumber}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [pixelArtArray, gridWidth, gridHeight, sinkWidth, waitingStandSlots, minStackHeight, maxStackHeight]);
+  }, [pixelArtArray, gridWidth, gridHeight, levelNumber, metrics]);
 
-  // Import design from JSON
+  // Import design from JSON (supports reference format and internal format)
   const handleImportJSON = useCallback(() => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -364,7 +369,39 @@ export function FruitMatchLevelDesigner({
         const content = await file.text();
         const imported = JSON.parse(content);
 
-        // Validate and load the data
+        // Check if it's reference format
+        if (isReferenceFormat(imported)) {
+          const refImported = importFromReferenceFormat(imported);
+
+          // Load pixel art from reference format
+          const map = new Map<string, PixelCell>();
+          for (const cell of refImported.pixelArt) {
+            map.set(pixelKey(cell.row, cell.col), {
+              row: cell.row,
+              col: cell.col,
+              fruitType: cell.fruitType,
+              filled: false,
+            });
+          }
+          setPixelArt(map);
+
+          // Load settings
+          setGridWidth(refImported.pixelArtWidth);
+          setGridHeight(refImported.pixelArtHeight);
+
+          // Extract level number from filename or LevelIndex
+          const match = file.name.match(/level[_-]?(\d+)/i);
+          const extractedLevelNumber = match ? parseInt(match[1], 10) : refImported.levelIndex;
+          if (onLevelNumberChange && extractedLevelNumber) {
+            onLevelNumberChange(extractedLevelNumber);
+          }
+
+          setDesignMode('edit');
+          setSelectedEmoji('');
+          return;
+        }
+
+        // Validate and load internal format data
         if (imported.pixelArt && Array.isArray(imported.pixelArt)) {
           // Load pixel art
           const map = new Map<string, PixelCell>();
@@ -391,7 +428,7 @@ export function FruitMatchLevelDesigner({
           setDesignMode('edit');
           setSelectedEmoji('');
         } else {
-          alert('Invalid JSON format. Expected pixelArt array.');
+          alert('Invalid JSON format. Expected pixelArt array or reference format.');
         }
       } catch (err) {
         console.error('Failed to import:', err);
@@ -399,7 +436,7 @@ export function FruitMatchLevelDesigner({
       }
     };
     input.click();
-  }, []);
+  }, [onLevelNumberChange]);
 
   // Handle grid size change - regenerate from emoji
   const handleGridSizeChange = useCallback(async (newWidth: number, newHeight: number) => {
