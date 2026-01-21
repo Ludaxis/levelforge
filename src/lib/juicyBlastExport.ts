@@ -287,7 +287,8 @@ export function exportToReferenceFormat(data: ExportLevelData): ReferenceLevel {
 
     // Otherwise, convert from FruitType
     const colorType = FRUIT_TO_COLOR_TYPE[cell.fruitType];
-    const colorHex = FRUIT_COLORS[cell.fruitType].replace('#', '').toUpperCase();
+    // Use the standard reference color for this ColorType, not our internal fruit color
+    const colorHex = COLOR_TYPE_TO_HEX[colorType];
 
     // Assign group by color type
     if (!colorTypeGroups.has(colorType)) {
