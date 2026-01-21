@@ -51,8 +51,8 @@ export interface FruitMatchAnimationState {
 }
 
 function initializeState(level: FruitMatchLevel): FruitMatchState {
-  // Generate launcher queue from pixel art
-  const queue = generateLauncherQueue(level.pixelArt);
+  // Generate launcher queue from pixel art (with optional manual ordering)
+  const queue = generateLauncherQueue(level.pixelArt, level.launcherOrderConfig);
   const { launchers, remainingQueue } = createInitialLaunchers(queue);
 
   // Initialize progress tracking for each launcher

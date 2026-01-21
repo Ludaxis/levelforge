@@ -11,7 +11,19 @@
  * }
  */
 
-import { PixelCell, FruitType, DifficultyTier, FRUIT_COLORS, ALL_FRUITS } from '@/types/fruitMatch';
+import {
+  PixelCell,
+  FruitType,
+  DifficultyTier,
+  FRUIT_COLORS,
+  ALL_FRUITS,
+  LauncherOrderConfig,
+  PixelGroup,
+  UnlockStage,
+  ExplicitLauncherConfig,
+  LAUNCHER_CAPACITIES,
+  LauncherCapacity,
+} from '@/types/fruitMatch';
 
 // ============================================================================
 // Reference Format Types
@@ -62,44 +74,46 @@ export interface ReferenceLevel {
 // Color Type Mapping
 // ============================================================================
 
+// ColorType enum values:
+// None=-1, Blue=0, Orange=1, Red=2, Pink=3, Yellow=4, Green=5, Violet=6, White=7, Black=8
+
 // Standard color palette (ColorType -> Hex)
 export const COLOR_TYPE_TO_HEX: Record<number, string> = {
-  0: '4C9EF2',  // Blue
-  1: 'FA9E00',  // Orange
-  2: 'DD4422',  // Red
-  3: 'DF4C7C',  // Pink
-  4: '8B5CF6',  // Purple/Violet
-  5: '22C55E',  // Green
-  6: 'EAB308',  // Yellow
-  7: 'FFFAFA',  // White
-  8: '4C4141',  // Dark/Black
-  9: '06B6D4',  // Cyan
+  0: '4C9EF2',  // Blue - blueberry
+  1: 'F99D00',  // Orange - orange
+  2: 'DF4624',  // Red - strawberry
+  3: 'DE4C7E',  // Pink - dragon fruit
+  4: 'F3DE00',  // Yellow - banana
+  5: '90CA00',  // Green - apple
+  6: '8E68E0',  // Violet/Purple - plum
+  7: 'FFFBF7',  // White/Cream - pear
+  8: '4C4343',  // Black/Dark - blackberry
 };
 
 // Map FruitType to ColorType
 export const FRUIT_TO_COLOR_TYPE: Record<FruitType, number> = {
-  apple: 2,     // Red
-  orange: 1,    // Orange
-  lemon: 6,     // Yellow
-  grape: 4,     // Purple
-  cherry: 3,    // Pink
-  kiwi: 5,      // Green
-  white: 7,     // White
-  black: 8,     // Dark/Black
+  blueberry: 0,    // Blue
+  orange: 1,       // Orange
+  strawberry: 2,   // Red
+  dragonfruit: 3,  // Pink
+  banana: 4,       // Yellow
+  apple: 5,        // Green
+  plum: 6,         // Violet/Purple
+  pear: 7,         // White/Cream
+  blackberry: 8,   // Black/Dark
 };
 
 // Map ColorType to FruitType (reverse mapping)
 export const COLOR_TYPE_TO_FRUIT: Record<number, FruitType> = {
-  0: 'kiwi',    // Blue -> closest is kiwi (green)
-  1: 'orange',  // Orange
-  2: 'apple',   // Red
-  3: 'cherry',  // Pink
-  4: 'grape',   // Purple
-  5: 'kiwi',    // Green
-  6: 'lemon',   // Yellow
-  7: 'white',   // White
-  8: 'black',   // Dark/Black
-  9: 'kiwi',    // Cyan -> default to kiwi
+  0: 'blueberry',    // Blue
+  1: 'orange',       // Orange
+  2: 'strawberry',   // Red
+  3: 'dragonfruit',  // Pink
+  4: 'banana',       // Yellow
+  5: 'apple',        // Green
+  6: 'plum',         // Violet/Purple
+  7: 'pear',         // White/Cream
+  8: 'blackberry',   // Black/Dark
 };
 
 // Difficulty tier to number mapping
@@ -199,11 +213,17 @@ export interface ImportedLevel {
   selectableItems: ReferenceSelectableItem[];
   requirements: ReferenceRequirement[];
   unlockStageData: ReferenceUnlockStage[];
+  // Extracted launcher order config from imported groups
+  launcherOrderConfig?: LauncherOrderConfig;
 }
 
 export function importFromReferenceFormat(ref: ReferenceLevel): ImportedLevel {
   const colorData = new Map<string, { colorType: number; colorHex: string; group: number }>();
   const height = ref.Artwork.Height;
+
+  // Track groups and their color types
+  const groupColorTypes = new Map<number, Set<FruitType>>();
+  const groupPixelCounts = new Map<number, number>();
 
   // Convert PixelData to our PixelCell format
   // Note: Reference format has y=0 at bottom, our format has row=0 at top
@@ -222,13 +242,29 @@ export function importFromReferenceFormat(ref: ReferenceLevel): ImportedLevel {
     // Map ColorType to FruitType
     const fruitType = COLOR_TYPE_TO_FRUIT[pixel.ColorType] || 'apple';
 
+    // Track group info
+    if (!groupColorTypes.has(pixel.Group)) {
+      groupColorTypes.set(pixel.Group, new Set());
+    }
+    groupColorTypes.get(pixel.Group)!.add(fruitType);
+    groupPixelCounts.set(pixel.Group, (groupPixelCounts.get(pixel.Group) || 0) + 1);
+
     return {
       row: flippedRow,
       col: pixel.Position.x,
       fruitType,
       filled: false,
+      groupId: pixel.Group,
     };
   });
+
+  // Build LauncherOrderConfig from extracted groups
+  const launcherOrderConfig = buildLauncherOrderConfigFromImport(
+    pixelArt,
+    groupColorTypes,
+    groupPixelCounts,
+    ref.UnlockStageData
+  );
 
   return {
     levelId: ref.LevelId,
@@ -242,7 +278,103 @@ export function importFromReferenceFormat(ref: ReferenceLevel): ImportedLevel {
     selectableItems: ref.SelectableItems,
     requirements: ref.Requirements,
     unlockStageData: ref.UnlockStageData,
+    launcherOrderConfig,
   };
+}
+
+/**
+ * Helper to build LauncherOrderConfig from imported reference format data
+ */
+function buildLauncherOrderConfigFromImport(
+  pixelArt: PixelCell[],
+  groupColorTypes: Map<number, Set<FruitType>>,
+  groupPixelCounts: Map<number, number>,
+  unlockStageData: ReferenceUnlockStage[]
+): LauncherOrderConfig {
+  // Build PixelGroups
+  const groups: PixelGroup[] = [];
+  const groupIds = Array.from(groupColorTypes.keys()).sort((a, b) => a - b);
+
+  groupIds.forEach((groupId, index) => {
+    const colorTypes = Array.from(groupColorTypes.get(groupId) || []);
+    groups.push({
+      id: groupId,
+      name: `Group ${index + 1}`,
+      colorTypes,
+      order: index,
+    });
+  });
+
+  // Build UnlockStages from reference format
+  const unlockStages: UnlockStage[] = unlockStageData.map((stage, index) => ({
+    id: index + 1,
+    name: `Stage ${index + 1}`,
+    groupIds: stage.RequiredCompletedGroups,
+  }));
+
+  // If no unlock stages, create a default one with all groups
+  if (unlockStages.length === 0) {
+    unlockStages.push({
+      id: 1,
+      name: 'Stage 1',
+      groupIds: groupIds,
+    });
+  }
+
+  // Build ExplicitLauncherConfigs - generate launchers for each group in order
+  const launchers: ExplicitLauncherConfig[] = [];
+  let orderIndex = 0;
+
+  for (const group of groups) {
+    for (const fruitType of group.colorTypes) {
+      const pixelCount = pixelArt.filter(
+        c => c.fruitType === fruitType && c.groupId === group.id
+      ).length;
+
+      if (pixelCount > 0) {
+        const capacities = breakdownIntoCapacitiesForImport(pixelCount);
+        for (const capacity of capacities) {
+          launchers.push({
+            id: `imported-${Date.now()}-${orderIndex}`,
+            fruitType,
+            capacity,
+            groupId: group.id,
+            orderIndex: orderIndex++,
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    mode: 'manual', // Imported levels use manual mode to preserve order
+    groups,
+    launchers,
+    unlockStages,
+  };
+}
+
+/**
+ * Break down pixel count into launcher capacities (for import)
+ */
+function breakdownIntoCapacitiesForImport(pixelCount: number): LauncherCapacity[] {
+  const capacities: LauncherCapacity[] = [];
+  let remaining = pixelCount;
+
+  const sortedCapacities = [...LAUNCHER_CAPACITIES].sort((a, b) => b - a);
+
+  for (const capacity of sortedCapacities) {
+    while (remaining >= capacity) {
+      capacities.push(capacity);
+      remaining -= capacity;
+    }
+  }
+
+  if (remaining > 0) {
+    capacities.push(20);
+  }
+
+  return capacities;
 }
 
 // ============================================================================
@@ -261,13 +393,27 @@ export interface ExportLevelData {
   colorData?: Map<string, { colorType: number; colorHex: string; group: number }>;
   // Optional: sink tiles for SelectableItems
   sinkTileCount?: number;
+  // Optional: launcher order config for explicit groups
+  launcherOrderConfig?: LauncherOrderConfig;
 }
 
 export function exportToReferenceFormat(data: ExportLevelData): ReferenceLevel {
-  // Group pixels by color type and assign groups
+  const height = data.pixelArtHeight;
+  const config = data.launcherOrderConfig;
+
+  // Build a map from FruitType to group ID if config exists
+  const fruitToGroupId = new Map<FruitType, number>();
+  if (config) {
+    for (const group of config.groups) {
+      for (const fruitType of group.colorTypes) {
+        fruitToGroupId.set(fruitType, group.id);
+      }
+    }
+  }
+
+  // Auto-assign groups by color type if no config
   const colorTypeGroups = new Map<number, number>();
   let nextGroup = 1;
-  const height = data.pixelArtHeight;
 
   // Build PixelData array
   // Note: Our format has row=0 at top, reference format has y=0 at bottom
@@ -276,7 +422,7 @@ export function exportToReferenceFormat(data: ExportLevelData): ReferenceLevel {
     const flippedY = (height - 1) - cell.row;
     const key = `${cell.row},${cell.col}`;
 
-    // Use preserved color data if available
+    // Use preserved color data if available (from import round-trip)
     if (data.colorData?.has(key)) {
       const preserved = data.colorData.get(key)!;
       return {
@@ -287,16 +433,23 @@ export function exportToReferenceFormat(data: ExportLevelData): ReferenceLevel {
       };
     }
 
-    // Otherwise, convert from FruitType
+    // Convert from FruitType
     const colorType = FRUIT_TO_COLOR_TYPE[cell.fruitType];
-    // Use the standard reference color for this ColorType, not our internal fruit color
     const colorHex = COLOR_TYPE_TO_HEX[colorType];
 
-    // Assign group by color type
-    if (!colorTypeGroups.has(colorType)) {
-      colorTypeGroups.set(colorType, nextGroup++);
+    // Determine group - prefer cell's explicit groupId, then config, then auto-assign
+    let group: number;
+    if (cell.groupId !== undefined) {
+      group = cell.groupId;
+    } else if (config && fruitToGroupId.has(cell.fruitType)) {
+      group = fruitToGroupId.get(cell.fruitType)!;
+    } else {
+      // Auto-assign by color type
+      if (!colorTypeGroups.has(colorType)) {
+        colorTypeGroups.set(colorType, nextGroup++);
+      }
+      group = colorTypeGroups.get(colorType)!;
     }
-    const group = colorTypeGroups.get(colorType)!;
 
     return {
       Position: { x: cell.col, y: flippedY },
@@ -312,27 +465,33 @@ export function exportToReferenceFormat(data: ExportLevelData): ReferenceLevel {
     Layer: 0,
   }));
 
-  // Build Requirements (count pixels per ColorType, grouped)
-  const colorTypeCounts = new Map<number, number>();
+  // Build Requirements (count pixels per ColorType and Group)
+  const requirementMap = new Map<string, { colorType: number; count: number; group: number }>();
   for (const pixel of pixelData) {
-    colorTypeCounts.set(pixel.ColorType, (colorTypeCounts.get(pixel.ColorType) || 0) + 1);
+    const key = `${pixel.ColorType}-${pixel.Group}`;
+    if (!requirementMap.has(key)) {
+      requirementMap.set(key, { colorType: pixel.ColorType, count: 0, group: pixel.Group });
+    }
+    requirementMap.get(key)!.count++;
   }
 
-  const requirements: ReferenceRequirement[] = [];
-  for (const [colorType, count] of colorTypeCounts) {
-    const group = colorTypeGroups.get(colorType) || 0;
-    requirements.push({
-      ColorType: colorType,
-      Value: count,
-      Group: group,
-    });
-  }
+  const requirements: ReferenceRequirement[] = Array.from(requirementMap.values()).map(r => ({
+    ColorType: r.colorType,
+    Value: r.count,
+    Group: r.group,
+  }));
 
-  // Build simple UnlockStageData (all groups in one stage)
-  const allGroups = Array.from(colorTypeGroups.values());
-  const unlockStageData: ReferenceUnlockStage[] = [
-    { RequiredCompletedGroups: allGroups },
-  ];
+  // Build UnlockStageData from config or use all groups in one stage
+  let unlockStageData: ReferenceUnlockStage[];
+  if (config && config.unlockStages.length > 0) {
+    unlockStageData = config.unlockStages.map(stage => ({
+      RequiredCompletedGroups: stage.groupIds,
+    }));
+  } else {
+    // Get all unique groups from pixel data
+    const allGroups = Array.from(new Set(pixelData.map(p => p.Group)));
+    unlockStageData = [{ RequiredCompletedGroups: allGroups }];
+  }
 
   return {
     LevelId: data.levelId || `level_${String(data.levelIndex).padStart(3, '0')}`,

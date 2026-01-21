@@ -99,12 +99,12 @@ export const PixelArtCanvas = forwardRef<PixelArtCanvasRef, PixelArtCanvasProps>
               ctx.strokeRect(x + 0.5, y + 0.5, cellSize - 1, cellSize - 1);
             }
           } else {
-            // Unfilled cell - faded with color hint (target to fill)
-            ctx.fillStyle = color + '20'; // ~12% opacity - slightly more visible
+            // Unfilled cell - gray color (no color hint - mystery until filled)
+            ctx.fillStyle = 'rgba(128, 128, 128, 0.25)'; // Gray with low opacity
             ctx.fillRect(x, y, cellSize, cellSize);
-            // Colored border for unfilled - dashed style feel
+            // Gray border for unfilled
             if (cellSize > 2) {
-              ctx.strokeStyle = color + '50'; // ~31% opacity
+              ctx.strokeStyle = 'rgba(128, 128, 128, 0.4)';
               ctx.lineWidth = 1;
               ctx.strokeRect(x + 0.5, y + 0.5, cellSize - 1, cellSize - 1);
             }

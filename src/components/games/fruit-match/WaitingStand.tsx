@@ -22,7 +22,7 @@ export function WaitingStand({
 
   // Count tiles per fruit type
   const fruitCounts: Record<FruitType, number> = {
-    apple: 0, orange: 0, lemon: 0, grape: 0, cherry: 0, kiwi: 0, white: 0, black: 0
+    blueberry: 0, orange: 0, strawberry: 0, dragonfruit: 0, banana: 0, apple: 0, plum: 0, pear: 0, blackberry: 0
   };
   tiles.forEach(tile => {
     fruitCounts[tile.fruitType]++;

@@ -158,7 +158,7 @@ function calculateDecisionComplexity(
  */
 function calculateLaunchersPerFruit(pixelArt: PixelCell[]): Record<FruitType, number> {
   const fruitCounts: Record<FruitType, number> = {
-    apple: 0, orange: 0, lemon: 0, grape: 0, cherry: 0, kiwi: 0, white: 0, black: 0
+    blueberry: 0, orange: 0, strawberry: 0, dragonfruit: 0, banana: 0, apple: 0, plum: 0, pear: 0, blackberry: 0
   };
 
   for (const cell of pixelArt) {
@@ -166,7 +166,7 @@ function calculateLaunchersPerFruit(pixelArt: PixelCell[]): Record<FruitType, nu
   }
 
   const launchersNeeded: Record<FruitType, number> = {
-    apple: 0, orange: 0, lemon: 0, grape: 0, cherry: 0, kiwi: 0, white: 0, black: 0
+    blueberry: 0, orange: 0, strawberry: 0, dragonfruit: 0, banana: 0, apple: 0, plum: 0, pear: 0, blackberry: 0
   };
 
   const sortedCapacities = [...LAUNCHER_CAPACITIES].sort((a, b) => b - a);
@@ -199,7 +199,7 @@ export function calculateDifficultyMetrics(level: FruitMatchLevel): DifficultyMe
   const totalPixels = pixelArt.length;
 
   const fruitDistribution: Record<FruitType, number> = {
-    apple: 0, orange: 0, lemon: 0, grape: 0, cherry: 0, kiwi: 0, white: 0, black: 0
+    blueberry: 0, orange: 0, strawberry: 0, dragonfruit: 0, banana: 0, apple: 0, plum: 0, pear: 0, blackberry: 0
   };
   for (const cell of pixelArt) {
     fruitDistribution[cell.fruitType]++;
@@ -355,7 +355,7 @@ export function checkSolvability(level: FruitMatchLevel): {
 
   // Count required tiles per fruit
   const requiredTiles: Record<FruitType, number> = {
-    apple: 0, orange: 0, lemon: 0, grape: 0, cherry: 0, kiwi: 0, white: 0, black: 0
+    blueberry: 0, orange: 0, strawberry: 0, dragonfruit: 0, banana: 0, apple: 0, plum: 0, pear: 0, blackberry: 0
   };
 
   // Calculate launchers needed per fruit
@@ -368,7 +368,7 @@ export function checkSolvability(level: FruitMatchLevel): {
 
   // Count actual tiles in sink per fruit
   const actualTiles: Record<FruitType, number> = {
-    apple: 0, orange: 0, lemon: 0, grape: 0, cherry: 0, kiwi: 0, white: 0, black: 0
+    blueberry: 0, orange: 0, strawberry: 0, dragonfruit: 0, banana: 0, apple: 0, plum: 0, pear: 0, blackberry: 0
   };
 
   for (const stack of sinkStacks) {

@@ -7,6 +7,7 @@ import {
   LAUNCHER_CAPACITIES,
   FruitMatchLevel,
   FruitMatchLevelMetrics,
+  LauncherOrderConfig,
   ALL_FRUITS,
   FRUIT_EMOJI,
   FRUIT_COLORS,
@@ -15,6 +16,43 @@ import {
   pixelKey,
   calculateFruitMatchDifficulty,
 } from '@/types/fruitMatch';
+
+// ============================================================================
+// Fruit Type Migration (for backward compatibility with old type names)
+// ============================================================================
+
+/**
+ * Migration map for old fruit type names to new ones
+ * Old types were: cherry, grape, lemon, kiwi, white, black
+ * New types are mapped to ColorType enum (0-8)
+ */
+const FRUIT_TYPE_MIGRATION: Record<string, FruitType> = {
+  // New types (unchanged)
+  blueberry: 'blueberry',
+  orange: 'orange',
+  strawberry: 'strawberry',
+  dragonfruit: 'dragonfruit',
+  banana: 'banana',
+  apple: 'apple',
+  plum: 'plum',
+  pear: 'pear',
+  blackberry: 'blackberry',
+  // Old types -> new types
+  cherry: 'strawberry',   // Red
+  grape: 'plum',          // Purple/Violet
+  lemon: 'banana',        // Yellow
+  kiwi: 'apple',          // Green
+  white: 'pear',          // White/Cream
+  black: 'blackberry',    // Black/Dark
+};
+
+/**
+ * Migrate old fruit type names to new ones
+ * Returns the migrated fruit type, or 'apple' as fallback
+ */
+export function migrateFruitType(fruitType: string): FruitType {
+  return FRUIT_TYPE_MIGRATION[fruitType] || 'apple';
+}
 
 // ============================================================================
 // Pixel Art Helpers
@@ -50,7 +88,7 @@ export function getUnfilledPixels(pixelArt: PixelCell[]): PixelCell[] {
  */
 export function getRequiredFruitCounts(pixelArt: PixelCell[]): Record<FruitType, number> {
   const counts: Record<FruitType, number> = {
-    apple: 0, orange: 0, lemon: 0, grape: 0, cherry: 0, kiwi: 0, white: 0, black: 0
+    blueberry: 0, orange: 0, strawberry: 0, dragonfruit: 0, banana: 0, apple: 0, plum: 0, pear: 0, blackberry: 0
   };
   for (const cell of pixelArt) {
     if (!cell.filled) {
@@ -148,7 +186,7 @@ export function removeTileFromStack(
  */
 export function calculateMatchesNeeded(fruitCounts: Record<FruitType, number>): Record<FruitType, number> {
   const matchesNeeded: Record<FruitType, number> = {
-    apple: 0, orange: 0, lemon: 0, grape: 0, cherry: 0, kiwi: 0, white: 0, black: 0
+    blueberry: 0, orange: 0, strawberry: 0, dragonfruit: 0, banana: 0, apple: 0, plum: 0, pear: 0, blackberry: 0
   };
 
   // Sort capacities from largest to smallest for breakdown
@@ -312,8 +350,23 @@ function breakdownIntoCapacities(pixelCount: number): LauncherCapacity[] {
 /**
  * Generate launcher queue based on unfilled pixels
  * Returns launcher configs with fruit type and capacity
+ * If launcherOrderConfig is provided with mode='manual', uses explicit order
+ * Otherwise shuffles the queue randomly
  */
-export function generateLauncherQueue(pixelArt: PixelCell[]): LauncherConfig[] {
+export function generateLauncherQueue(
+  pixelArt: PixelCell[],
+  launcherOrderConfig?: LauncherOrderConfig
+): LauncherConfig[] {
+  // If manual mode with explicit config, use the explicit launcher order
+  if (launcherOrderConfig?.mode === 'manual' && launcherOrderConfig.launchers.length > 0) {
+    // Sort by orderIndex and map to LauncherConfig
+    const sorted = [...launcherOrderConfig.launchers].sort((a, b) => a.orderIndex - b.orderIndex);
+    return sorted.map(l => ({
+      fruitType: l.fruitType,
+      capacity: l.capacity,
+    }));
+  }
+
   // Count pixels per fruit type
   const fruitCounts = getRequiredFruitCounts(pixelArt);
 
@@ -486,7 +539,7 @@ export function calculateLevelMetrics(
 ): FruitMatchLevelMetrics {
   // Count fruit distribution in pixel art
   const fruitDistribution: Record<FruitType, number> = {
-    apple: 0, orange: 0, lemon: 0, grape: 0, cherry: 0, kiwi: 0, white: 0, black: 0
+    blueberry: 0, orange: 0, strawberry: 0, dragonfruit: 0, banana: 0, apple: 0, plum: 0, pear: 0, blackberry: 0
   };
   for (const cell of pixelArt) {
     fruitDistribution[cell.fruitType]++;
@@ -530,12 +583,12 @@ export function createSimpleTestLevel(): FruitMatchLevel {
     { row: 0, col: 2, fruitType: 'orange', filled: false },
     { row: 0, col: 3, fruitType: 'apple', filled: false },
     { row: 1, col: 0, fruitType: 'orange', filled: false },
-    { row: 1, col: 1, fruitType: 'lemon', filled: false },
-    { row: 1, col: 2, fruitType: 'lemon', filled: false },
+    { row: 1, col: 1, fruitType: 'banana', filled: false },
+    { row: 1, col: 2, fruitType: 'banana', filled: false },
     { row: 1, col: 3, fruitType: 'orange', filled: false },
     { row: 2, col: 0, fruitType: 'orange', filled: false },
-    { row: 2, col: 1, fruitType: 'lemon', filled: false },
-    { row: 2, col: 2, fruitType: 'lemon', filled: false },
+    { row: 2, col: 1, fruitType: 'banana', filled: false },
+    { row: 2, col: 2, fruitType: 'banana', filled: false },
     { row: 2, col: 3, fruitType: 'orange', filled: false },
     { row: 3, col: 0, fruitType: 'apple', filled: false },
     { row: 3, col: 1, fruitType: 'orange', filled: false },
@@ -574,26 +627,34 @@ export function createSimpleTestLevel(): FruitMatchLevel {
  */
 export function emojiPatternToPixelArt(pattern: string[][]): PixelCell[] {
   const emojiToFruit: Record<string, FruitType> = {
-    '🍎': 'apple',
-    '🍊': 'orange',
-    '🍋': 'lemon',
-    '🍇': 'grape',
-    '🍒': 'cherry',
-    '🥝': 'kiwi',
-    // Also support color squares
-    '🟥': 'apple',
-    '🟧': 'orange',
-    '🟨': 'lemon',
-    '🟪': 'grape',
-    '🩷': 'cherry',
-    '🟩': 'kiwi',
+    // Fruit emojis
+    '🫐': 'blueberry',    // Blue
+    '🍊': 'orange',       // Orange
+    '🍓': 'strawberry',   // Red
+    '🩷': 'dragonfruit',  // Pink (pink heart)
+    '🍌': 'banana',       // Yellow
+    '🍏': 'apple',        // Green
+    '🍇': 'plum',         // Purple (grape emoji)
+    '🍐': 'pear',         // Cream/White
+    '🖤': 'blackberry',   // Black (black heart)
+    // Color squares for direct color mapping
+    '🟦': 'blueberry',    // Blue
+    '🟧': 'orange',       // Orange
+    '🟥': 'strawberry',   // Red
+    '🟨': 'banana',       // Yellow
+    '🟩': 'apple',        // Green
+    '🟪': 'plum',         // Purple
+    '⬜': 'pear',         // White/Cream
+    '⬛': 'blackberry',   // Black
   };
 
   const cells: PixelCell[] = [];
   for (let row = 0; row < pattern.length; row++) {
     for (let col = 0; col < pattern[row].length; col++) {
       const emoji = pattern[row][col];
-      if (emoji && emoji !== '⬜' && emoji !== '⬛' && emoji !== ' ') {
+      // Skip empty cells - only spaces and empty strings are skipped
+      // All other emojis (including ⬜ and ⬛) are valid colors
+      if (emoji && emoji.trim() !== '') {
         const fruitType = emojiToFruit[emoji] || 'apple';
         cells.push({
           row,

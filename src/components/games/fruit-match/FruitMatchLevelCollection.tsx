@@ -15,7 +15,7 @@ import {
   FruitType,
   DifficultyTier,
 } from '@/types/fruitMatch';
-import { pixelKey } from '@/lib/fruitMatchUtils';
+import { pixelKey, migrateFruitType } from '@/lib/fruitMatchUtils';
 import {
   exportToReferenceFormat,
   importFromReferenceFormat,
@@ -114,6 +114,47 @@ const FLOW_ZONE_COLORS: Record<FlowZone, string> = {
 };
 
 // ============================================================================
+// Level Migration Helper
+// ============================================================================
+
+/**
+ * Migrate fruit types in a level for backward compatibility
+ * Converts old fruit type names (cherry, grape, etc.) to new ones
+ */
+function migrateLevel(level: DesignedFruitMatchLevel): DesignedFruitMatchLevel {
+  return {
+    ...level,
+    // Migrate pixel art fruit types
+    pixelArt: level.pixelArt.map(cell => ({
+      ...cell,
+      fruitType: migrateFruitType(cell.fruitType),
+    })),
+    // Migrate metrics fruit distribution keys
+    metrics: level.metrics ? {
+      ...level.metrics,
+      fruitDistribution: Object.fromEntries(
+        Object.entries(level.metrics.fruitDistribution || {}).map(([key, value]) => [
+          migrateFruitType(key),
+          value,
+        ])
+      ) as Record<FruitType, number>,
+    } : level.metrics,
+    // Migrate launcher order config if present
+    launcherOrderConfig: level.launcherOrderConfig ? {
+      ...level.launcherOrderConfig,
+      groups: level.launcherOrderConfig.groups?.map(g => ({
+        ...g,
+        colorTypes: g.colorTypes.map(ct => migrateFruitType(ct)),
+      })) || [],
+      launchers: level.launcherOrderConfig.launchers?.map(l => ({
+        ...l,
+        fruitType: migrateFruitType(l.fruitType),
+      })) || [],
+    } : undefined,
+  };
+}
+
+// ============================================================================
 // Hook for localStorage persistence
 // ============================================================================
 
@@ -121,14 +162,16 @@ export function useFruitMatchLevelCollection() {
   const [levels, setLevels] = useState<DesignedFruitMatchLevel[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load from localStorage on mount
+  // Load from localStorage on mount (with fruit type migration)
   useEffect(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) {
-          setLevels(parsed);
+          // Migrate all levels to ensure fruit types are up-to-date
+          const migratedLevels = parsed.map(migrateLevel);
+          setLevels(migratedLevels);
         }
       }
     } catch (e) {
@@ -400,14 +443,15 @@ export function FruitMatchLevelCollection({
 
     // Calculate fruit distribution
     const fruitDistribution: Record<FruitType, number> = {
-      apple: 0,
+      blueberry: 0,
       orange: 0,
-      lemon: 0,
-      grape: 0,
-      cherry: 0,
-      kiwi: 0,
-      white: 0,
-      black: 0,
+      strawberry: 0,
+      dragonfruit: 0,
+      banana: 0,
+      apple: 0,
+      plum: 0,
+      pear: 0,
+      blackberry: 0,
     };
     for (const cell of imported.pixelArt) {
       fruitDistribution[cell.fruitType]++;

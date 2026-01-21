@@ -13,6 +13,7 @@ import {
   PixelCell,
   FruitMatchLevel,
   DesignedFruitMatchLevel,
+  LauncherOrderConfig,
   FRUIT_EMOJI,
   FRUIT_COLORS,
   ALL_FRUITS,
@@ -22,6 +23,7 @@ import {
   getRequiredFruitCounts,
   calculateLevelMetrics,
   pixelKey,
+  migrateFruitType,
 } from '@/lib/fruitMatchUtils';
 import {
   emojiToPixelArtAsync,
@@ -37,6 +39,7 @@ import {
   importFromReferenceFormat,
   isReferenceFormat,
 } from '@/lib/juicyBlastExport';
+import { LauncherOrderEditor } from './LauncherOrderEditor';
 import {
   Settings,
   Play,
@@ -57,6 +60,7 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize,
+  Layers,
 } from 'lucide-react';
 
 // ============================================================================
@@ -72,7 +76,7 @@ interface FruitMatchLevelDesignerProps {
   editingLevel?: DesignedFruitMatchLevel | null;
 }
 
-type DesignMode = 'emoji' | 'image' | 'edit';
+type DesignMode = 'emoji' | 'image' | 'edit' | 'groups';
 
 // ============================================================================
 // Constants
@@ -141,6 +145,13 @@ export function FruitMatchLevelDesigner({
   // Zoom state
   const [zoom, setZoom] = useState(1);
 
+  // Launcher order config state
+  const [launcherOrderConfig, setLauncherOrderConfig] = useState<LauncherOrderConfig | null>(null);
+
+  // Painting state (for click-and-hold)
+  const [isPainting, setIsPainting] = useState(false);
+  const lastPaintedCell = useRef<{ row: number; col: number } | null>(null);
+
   // File input ref
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -164,12 +175,31 @@ export function FruitMatchLevelDesigner({
       setWaitingStandSlots(editingLevel.waitingStandSlots);
       setDesignMode('edit');
 
-      // Convert pixel art array to Map
+      // Convert pixel art array to Map (with fruit type migration for backward compatibility)
       const map = new Map<string, PixelCell>();
       for (const cell of editingLevel.pixelArt) {
-        map.set(pixelKey(cell.row, cell.col), cell);
+        map.set(pixelKey(cell.row, cell.col), {
+          ...cell,
+          fruitType: migrateFruitType(cell.fruitType),
+        });
       }
       setPixelArt(map);
+
+      // Load launcher order config if present (with fruit type migration)
+      if (editingLevel.launcherOrderConfig) {
+        const migratedConfig: LauncherOrderConfig = {
+          ...editingLevel.launcherOrderConfig,
+          groups: editingLevel.launcherOrderConfig.groups?.map(g => ({
+            ...g,
+            colorTypes: g.colorTypes.map(ct => migrateFruitType(ct)),
+          })) || [],
+          launchers: editingLevel.launcherOrderConfig.launchers?.map(l => ({
+            ...l,
+            fruitType: migrateFruitType(l.fruitType),
+          })) || [],
+        };
+        setLauncherOrderConfig(migratedConfig);
+      }
     }
   }, [editingLevel]);
 
@@ -332,6 +362,7 @@ export function FruitMatchLevelDesigner({
     setPixelArt(new Map());
     setSelectedEmoji('');
     setDesignMode('edit');
+    setLauncherOrderConfig(null);
   }, []);
 
   // Export design as JSON (reference format)
@@ -344,6 +375,7 @@ export function FruitMatchLevelDesigner({
       pixelArtWidth: gridWidth,
       pixelArtHeight: gridHeight,
       pixelArt: pixelArtArray,
+      launcherOrderConfig: launcherOrderConfig || undefined,
     });
 
     const dataStr = JSON.stringify(referenceLevel, null, 2);
@@ -354,7 +386,7 @@ export function FruitMatchLevelDesigner({
     a.download = `level_${levelNumber}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [pixelArtArray, gridWidth, gridHeight, levelNumber, metrics]);
+  }, [pixelArtArray, gridWidth, gridHeight, levelNumber, metrics, launcherOrderConfig]);
 
   // Import design from JSON (supports reference format and internal format)
   const handleImportJSON = useCallback(() => {
@@ -373,7 +405,7 @@ export function FruitMatchLevelDesigner({
         if (isReferenceFormat(imported)) {
           const refImported = importFromReferenceFormat(imported);
 
-          // Load pixel art from reference format
+          // Load pixel art from reference format (preserve groupId)
           const map = new Map<string, PixelCell>();
           for (const cell of refImported.pixelArt) {
             map.set(pixelKey(cell.row, cell.col), {
@@ -381,6 +413,7 @@ export function FruitMatchLevelDesigner({
               col: cell.col,
               fruitType: cell.fruitType,
               filled: false,
+              groupId: cell.groupId,
             });
           }
           setPixelArt(map);
@@ -396,6 +429,13 @@ export function FruitMatchLevelDesigner({
             onLevelNumberChange(extractedLevelNumber);
           }
 
+          // Load launcher order config if present in imported data
+          if (refImported.launcherOrderConfig) {
+            setLauncherOrderConfig(refImported.launcherOrderConfig);
+          } else {
+            setLauncherOrderConfig(null);
+          }
+
           setDesignMode('edit');
           setSelectedEmoji('');
           return;
@@ -403,15 +443,16 @@ export function FruitMatchLevelDesigner({
 
         // Validate and load internal format data
         if (imported.pixelArt && Array.isArray(imported.pixelArt)) {
-          // Load pixel art
+          // Load pixel art (with fruit type migration for backward compatibility)
           const map = new Map<string, PixelCell>();
           for (const cell of imported.pixelArt) {
             if (cell.row !== undefined && cell.col !== undefined && cell.fruitType) {
               map.set(pixelKey(cell.row, cell.col), {
                 row: cell.row,
                 col: cell.col,
-                fruitType: cell.fruitType,
+                fruitType: migrateFruitType(cell.fruitType),
                 filled: false,
+                groupId: cell.groupId,
               });
             }
           }
@@ -424,6 +465,23 @@ export function FruitMatchLevelDesigner({
           if (imported.waitingStandSlots) setWaitingStandSlots(imported.waitingStandSlots);
           if (imported.minStackHeight) setMinStackHeight(imported.minStackHeight);
           if (imported.maxStackHeight) setMaxStackHeight(imported.maxStackHeight);
+          if (imported.launcherOrderConfig) {
+            // Migrate fruit types in launcherOrderConfig for backward compatibility
+            const migratedConfig: LauncherOrderConfig = {
+              ...imported.launcherOrderConfig,
+              groups: imported.launcherOrderConfig.groups?.map((g: { id: number; name: string; colorTypes: string[]; order: number }) => ({
+                ...g,
+                colorTypes: g.colorTypes.map((ct: string) => migrateFruitType(ct)),
+              })) || [],
+              launchers: imported.launcherOrderConfig.launchers?.map((l: { id: string; fruitType: string; capacity: number; groupId: number; orderIndex: number }) => ({
+                ...l,
+                fruitType: migrateFruitType(l.fruitType),
+              })) || [],
+            };
+            setLauncherOrderConfig(migratedConfig);
+          } else {
+            setLauncherOrderConfig(null);
+          }
 
           setDesignMode('edit');
           setSelectedEmoji('');
@@ -602,8 +660,9 @@ export function FruitMatchLevelDesigner({
       sinkStacks,
       waitingStandSlots,
       difficulty: metrics?.difficulty || 'medium',
+      launcherOrderConfig: launcherOrderConfig || undefined,
     };
-  }, [isValid, pixelArtArray, gridWidth, gridHeight, sinkWidth, fruitCounts, minStackHeight, maxStackHeight, waitingStandSlots, levelNumber, metrics]);
+  }, [isValid, pixelArtArray, gridWidth, gridHeight, sinkWidth, fruitCounts, minStackHeight, maxStackHeight, waitingStandSlots, levelNumber, metrics, launcherOrderConfig]);
 
   // Play level
   const handlePlay = useCallback(() => {
@@ -631,11 +690,12 @@ export function FruitMatchLevelDesigner({
       waitingStandSlots,
       metrics,
       createdAt: editingLevel?.createdAt || Date.now(),
+      launcherOrderConfig: launcherOrderConfig || undefined,
     };
 
     onAddToCollection(designedLevel);
     clearAll();
-  }, [onAddToCollection, metrics, pixelArtArray, gridWidth, gridHeight, sinkWidth, fruitCounts, minStackHeight, maxStackHeight, waitingStandSlots, levelNumber, editingLevel, clearAll]);
+  }, [onAddToCollection, metrics, pixelArtArray, gridWidth, gridHeight, sinkWidth, fruitCounts, minStackHeight, maxStackHeight, waitingStandSlots, levelNumber, editingLevel, clearAll, launcherOrderConfig]);
 
   // Cell size for grid - scale based on grid size, min 1px for large grids
   const maxCanvasSize = 600;
@@ -675,27 +735,113 @@ export function FruitMatchLevelDesigner({
     });
   }, [pixelArt, gridWidth, gridHeight, cellSize, canvasWidth, canvasHeight]);
 
-  // Handle canvas click for editing
-  const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (designMode !== 'edit') return;
-
+  // Get cell coordinates from mouse/touch event
+  const getCellFromEvent = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return null;
 
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
 
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
+    let clientX: number, clientY: number;
+    if ('touches' in e) {
+      if (e.touches.length === 0) return null;
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
 
     const col = Math.floor(x / cellSize);
     const row = Math.floor(y / cellSize);
 
     if (row >= 0 && row < gridHeight && col >= 0 && col < gridWidth) {
-      handleCellClick(row, col);
+      return { row, col };
     }
-  }, [designMode, cellSize, gridWidth, gridHeight, handleCellClick]);
+    return null;
+  }, [cellSize, gridWidth, gridHeight]);
+
+  // Paint a cell (used by mouse/touch handlers)
+  const paintCell = useCallback((row: number, col: number) => {
+    // Skip if same as last painted cell (avoid redundant updates)
+    if (lastPaintedCell.current?.row === row && lastPaintedCell.current?.col === col) {
+      return;
+    }
+    lastPaintedCell.current = { row, col };
+    handleCellClick(row, col);
+  }, [handleCellClick]);
+
+  // Handle mouse down - start painting
+  const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (designMode !== 'edit') return;
+    e.preventDefault();
+
+    setIsPainting(true);
+    lastPaintedCell.current = null;
+
+    const cell = getCellFromEvent(e);
+    if (cell) {
+      paintCell(cell.row, cell.col);
+    }
+  }, [designMode, getCellFromEvent, paintCell]);
+
+  // Handle mouse move - continue painting if mouse is down
+  const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (designMode !== 'edit' || !isPainting) return;
+
+    const cell = getCellFromEvent(e);
+    if (cell) {
+      paintCell(cell.row, cell.col);
+    }
+  }, [designMode, isPainting, getCellFromEvent, paintCell]);
+
+  // Handle mouse up - stop painting
+  const handleCanvasMouseUp = useCallback(() => {
+    setIsPainting(false);
+    lastPaintedCell.current = null;
+  }, []);
+
+  // Handle mouse leave - stop painting when leaving canvas
+  const handleCanvasMouseLeave = useCallback(() => {
+    setIsPainting(false);
+    lastPaintedCell.current = null;
+  }, []);
+
+  // Handle touch start - start painting
+  const handleCanvasTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (designMode !== 'edit') return;
+    e.preventDefault();
+
+    setIsPainting(true);
+    lastPaintedCell.current = null;
+
+    const cell = getCellFromEvent(e);
+    if (cell) {
+      paintCell(cell.row, cell.col);
+    }
+  }, [designMode, getCellFromEvent, paintCell]);
+
+  // Handle touch move - continue painting
+  const handleCanvasTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (designMode !== 'edit' || !isPainting) return;
+    e.preventDefault();
+
+    const cell = getCellFromEvent(e);
+    if (cell) {
+      paintCell(cell.row, cell.col);
+    }
+  }, [designMode, isPainting, getCellFromEvent, paintCell]);
+
+  // Handle touch end - stop painting
+  const handleCanvasTouchEnd = useCallback(() => {
+    setIsPainting(false);
+    lastPaintedCell.current = null;
+  }, []);
 
   // Computed values for difficulty adjustment buttons
   const canIncreaseDifficulty = waitingStandSlots > 5 || sinkWidth < 10 || maxStackHeight < 6;
@@ -746,7 +892,7 @@ export function FruitMatchLevelDesigner({
         <CardContent className="space-y-4">
           {/* Design Mode Tabs */}
           <Tabs value={designMode} onValueChange={(v) => setDesignMode(v as DesignMode)}>
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="emoji" className="flex items-center gap-2">
                 <Smile className="h-4 w-4" />
                 Emoji
@@ -758,6 +904,14 @@ export function FruitMatchLevelDesigner({
               <TabsTrigger value="edit" className="flex items-center gap-2">
                 <Pencil className="h-4 w-4" />
                 Edit
+              </TabsTrigger>
+              <TabsTrigger
+                value="groups"
+                className="flex items-center gap-2"
+                disabled={pixelArtArray.length === 0}
+              >
+                <Layers className="h-4 w-4" />
+                Groups
               </TabsTrigger>
             </TabsList>
 
@@ -841,12 +995,13 @@ export function FruitMatchLevelDesigner({
                       variant={selectedFruit === fruit ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => setSelectedFruit(fruit)}
-                      className="w-10 h-10 text-xl p-0"
-                      style={{
-                        backgroundColor: selectedFruit === fruit ? FRUIT_COLORS[fruit] : undefined,
-                      }}
+                      className={`w-10 h-10 p-1 ${selectedFruit === fruit ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : ''}`}
+                      title={fruit}
                     >
-                      {FRUIT_EMOJI[fruit]}
+                      <div
+                        className="w-full h-full rounded"
+                        style={{ backgroundColor: FRUIT_COLORS[fruit] }}
+                      />
                     </Button>
                   ))}
                   <Button
@@ -859,6 +1014,25 @@ export function FruitMatchLevelDesigner({
                   </Button>
                 </div>
               </div>
+            </TabsContent>
+
+            {/* Groups Mode */}
+            <TabsContent value="groups" className="space-y-4 mt-4">
+              <LauncherOrderEditor
+                pixelArt={pixelArtArray}
+                pixelArtWidth={gridWidth}
+                pixelArtHeight={gridHeight}
+                config={launcherOrderConfig}
+                onChange={setLauncherOrderConfig}
+                onPixelArtChange={(updatedPixelArt) => {
+                  // Convert array back to Map
+                  const map = new Map<string, PixelCell>();
+                  for (const cell of updatedPixelArt) {
+                    map.set(pixelKey(cell.row, cell.col), cell);
+                  }
+                  setPixelArt(map);
+                }}
+              />
             </TabsContent>
           </Tabs>
 
@@ -898,8 +1072,14 @@ export function FruitMatchLevelDesigner({
               ref={canvasRef}
               width={canvasWidth}
               height={canvasHeight}
-              onClick={handleCanvasClick}
-              className={`${designMode === 'edit' ? 'cursor-crosshair' : 'cursor-default'}`}
+              onMouseDown={handleCanvasMouseDown}
+              onMouseMove={handleCanvasMouseMove}
+              onMouseUp={handleCanvasMouseUp}
+              onMouseLeave={handleCanvasMouseLeave}
+              onTouchStart={handleCanvasTouchStart}
+              onTouchMove={handleCanvasTouchMove}
+              onTouchEnd={handleCanvasTouchEnd}
+              className={`${designMode === 'edit' ? 'cursor-crosshair' : 'cursor-default'} select-none touch-none`}
               style={{
                 imageRendering: 'pixelated',
                 width: canvasWidth * zoom,

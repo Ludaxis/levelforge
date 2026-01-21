@@ -11,31 +11,36 @@ export type DifficultyTier = 'trivial' | 'easy' | 'medium' | 'hard' | 'expert' |
 // Fruit Types and Colors
 // ============================================================================
 
-export type FruitType = 'apple' | 'orange' | 'lemon' | 'grape' | 'cherry' | 'kiwi' | 'white' | 'black';
+// Fruit types mapped to ColorType enum:
+// Blue=0, Orange=1, Red=2, Pink=3, Yellow=4, Green=5, Violet=6, White=7, Black=8
+export type FruitType = 'blueberry' | 'orange' | 'strawberry' | 'dragonfruit' | 'banana' | 'apple' | 'plum' | 'pear' | 'blackberry';
 
 export const FRUIT_EMOJI: Record<FruitType, string> = {
-  apple: '🍎',
-  orange: '🍊',
-  lemon: '🍋',
-  grape: '🍇',
-  cherry: '🍒',
-  kiwi: '🥝',
-  white: '⬜',
-  black: '⬛',
+  blueberry: '🫐',     // Blue (ColorType 0)
+  orange: '🍊',        // Orange (ColorType 1)
+  strawberry: '🍓',    // Red (ColorType 2)
+  dragonfruit: '🩷',   // Pink (ColorType 3) - pink heart as placeholder
+  banana: '🍌',        // Yellow (ColorType 4)
+  apple: '🍏',         // Green (ColorType 5)
+  plum: '🍇',          // Purple/Violet (ColorType 6) - grape emoji for purple
+  pear: '🍐',          // Cream/White (ColorType 7)
+  blackberry: '🖤',    // Dark/Black (ColorType 8) - black heart
 };
 
 export const FRUIT_COLORS: Record<FruitType, string> = {
-  apple: '#DD4422',    // Red (reference format)
-  orange: '#FA9E00',   // Orange (reference format)
-  lemon: '#EAB308',    // Yellow
-  grape: '#8B5CF6',    // Purple/Violet
-  cherry: '#DF4C7C',   // Pink (reference format)
-  kiwi: '#22C55E',     // Green
-  white: '#FFFAFA',    // White (reference format)
-  black: '#4C4141',    // Dark/Black (reference format)
+  blueberry: '#4C9EF2',    // Blue (ColorType 0)
+  orange: '#F99D00',       // Orange (ColorType 1)
+  strawberry: '#DF4624',   // Red (ColorType 2)
+  dragonfruit: '#DE4C7E',  // Pink (ColorType 3)
+  banana: '#F3DE00',       // Yellow (ColorType 4)
+  apple: '#90CA00',        // Green (ColorType 5)
+  plum: '#8E68E0',         // Purple/Violet (ColorType 6)
+  pear: '#FFFBF7',         // Cream/White (ColorType 7)
+  blackberry: '#4C4343',   // Dark/Black (ColorType 8)
 };
 
-export const ALL_FRUITS: FruitType[] = ['apple', 'orange', 'lemon', 'grape', 'cherry', 'kiwi', 'white', 'black'];
+// Ordered by ColorType enum value (0-8)
+export const ALL_FRUITS: FruitType[] = ['blueberry', 'orange', 'strawberry', 'dragonfruit', 'banana', 'apple', 'plum', 'pear', 'blackberry'];
 
 // ============================================================================
 // Pixel Art Types
@@ -46,6 +51,7 @@ export interface PixelCell {
   col: number;
   fruitType: FruitType;
   filled: boolean;
+  groupId?: number; // Optional group assignment for manual launcher ordering
 }
 
 // ============================================================================
@@ -75,6 +81,42 @@ export interface Launcher {
 }
 
 // ============================================================================
+// Launcher Order Configuration Types
+// ============================================================================
+
+// Pixel group for organizing colors into unlock stages
+export interface PixelGroup {
+  id: number;
+  name: string;
+  colorTypes: FruitType[];
+  order: number; // Display/processing order
+}
+
+// Unlock stage - defines which groups reveal first
+export interface UnlockStage {
+  id: number;
+  name: string;
+  groupIds: number[]; // Groups included in this stage
+}
+
+// Launcher with explicit ordering
+export interface ExplicitLauncherConfig {
+  id: string;
+  fruitType: FruitType;
+  capacity: LauncherCapacity;
+  groupId: number;
+  orderIndex: number;
+}
+
+// Complete launcher order configuration
+export interface LauncherOrderConfig {
+  mode: 'auto' | 'manual';
+  groups: PixelGroup[];
+  launchers: ExplicitLauncherConfig[];
+  unlockStages: UnlockStage[];
+}
+
+// ============================================================================
 // Level Configuration Types
 // ============================================================================
 
@@ -88,6 +130,7 @@ export interface FruitMatchLevel {
   sinkStacks: SinkTile[][];        // Initial stacked tiles per column
   waitingStandSlots: number;       // Number of slots (5-9)
   difficulty: DifficultyTier;
+  launcherOrderConfig?: LauncherOrderConfig; // Optional manual launcher ordering
 }
 
 // ============================================================================
@@ -188,6 +231,7 @@ export interface DesignedFruitMatchLevel {
   waitingStandSlots: number;
   metrics: FruitMatchLevelMetrics;
   createdAt: number;
+  launcherOrderConfig?: LauncherOrderConfig; // Optional manual launcher ordering
 }
 
 // ============================================================================
