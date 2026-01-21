@@ -84,19 +84,21 @@ export const FRUIT_TO_COLOR_TYPE: Record<FruitType, number> = {
   grape: 4,     // Purple
   cherry: 3,    // Pink
   kiwi: 5,      // Green
+  white: 7,     // White
+  black: 8,     // Dark/Black
 };
 
 // Map ColorType to FruitType (reverse mapping)
 export const COLOR_TYPE_TO_FRUIT: Record<number, FruitType> = {
-  0: 'kiwi',    // Blue -> closest is kiwi (green) - or could add new fruit
+  0: 'kiwi',    // Blue -> closest is kiwi (green)
   1: 'orange',  // Orange
   2: 'apple',   // Red
   3: 'cherry',  // Pink
   4: 'grape',   // Purple
   5: 'kiwi',    // Green
   6: 'lemon',   // Yellow
-  7: 'apple',   // White -> default to apple
-  8: 'grape',   // Dark -> default to grape
+  7: 'white',   // White
+  8: 'black',   // Dark/Black
   9: 'kiwi',    // Cyan -> default to kiwi
 };
 

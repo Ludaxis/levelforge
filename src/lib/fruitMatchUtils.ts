@@ -50,7 +50,7 @@ export function getUnfilledPixels(pixelArt: PixelCell[]): PixelCell[] {
  */
 export function getRequiredFruitCounts(pixelArt: PixelCell[]): Record<FruitType, number> {
   const counts: Record<FruitType, number> = {
-    apple: 0, orange: 0, lemon: 0, grape: 0, cherry: 0, kiwi: 0
+    apple: 0, orange: 0, lemon: 0, grape: 0, cherry: 0, kiwi: 0, white: 0, black: 0
   };
   for (const cell of pixelArt) {
     if (!cell.filled) {
@@ -148,7 +148,7 @@ export function removeTileFromStack(
  */
 export function calculateMatchesNeeded(fruitCounts: Record<FruitType, number>): Record<FruitType, number> {
   const matchesNeeded: Record<FruitType, number> = {
-    apple: 0, orange: 0, lemon: 0, grape: 0, cherry: 0, kiwi: 0
+    apple: 0, orange: 0, lemon: 0, grape: 0, cherry: 0, kiwi: 0, white: 0, black: 0
   };
 
   // Sort capacities from largest to smallest for breakdown
@@ -486,7 +486,7 @@ export function calculateLevelMetrics(
 ): FruitMatchLevelMetrics {
   // Count fruit distribution in pixel art
   const fruitDistribution: Record<FruitType, number> = {
-    apple: 0, orange: 0, lemon: 0, grape: 0, cherry: 0, kiwi: 0
+    apple: 0, orange: 0, lemon: 0, grape: 0, cherry: 0, kiwi: 0, white: 0, black: 0
   };
   for (const cell of pixelArt) {
     fruitDistribution[cell.fruitType]++;

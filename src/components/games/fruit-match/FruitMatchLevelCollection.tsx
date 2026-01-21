@@ -406,6 +406,8 @@ export function FruitMatchLevelCollection({
       grape: 0,
       cherry: 0,
       kiwi: 0,
+      white: 0,
+      black: 0,
     };
     for (const cell of imported.pixelArt) {
       fruitDistribution[cell.fruitType]++;

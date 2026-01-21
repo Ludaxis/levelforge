@@ -11,7 +11,7 @@ export type DifficultyTier = 'trivial' | 'easy' | 'medium' | 'hard' | 'expert' |
 // Fruit Types and Colors
 // ============================================================================
 
-export type FruitType = 'apple' | 'orange' | 'lemon' | 'grape' | 'cherry' | 'kiwi';
+export type FruitType = 'apple' | 'orange' | 'lemon' | 'grape' | 'cherry' | 'kiwi' | 'white' | 'black';
 
 export const FRUIT_EMOJI: Record<FruitType, string> = {
   apple: '🍎',
@@ -20,18 +20,22 @@ export const FRUIT_EMOJI: Record<FruitType, string> = {
   grape: '🍇',
   cherry: '🍒',
   kiwi: '🥝',
+  white: '⬜',
+  black: '⬛',
 };
 
 export const FRUIT_COLORS: Record<FruitType, string> = {
-  apple: '#ef4444',    // red-500
-  orange: '#f97316',   // orange-500
-  lemon: '#eab308',    // yellow-500
-  grape: '#8b5cf6',    // violet-500
-  cherry: '#ec4899',   // pink-500
-  kiwi: '#22c55e',     // green-500
+  apple: '#DD4422',    // Red (reference format)
+  orange: '#FA9E00',   // Orange (reference format)
+  lemon: '#EAB308',    // Yellow
+  grape: '#8B5CF6',    // Purple/Violet
+  cherry: '#DF4C7C',   // Pink (reference format)
+  kiwi: '#22C55E',     // Green
+  white: '#FFFAFA',    // White (reference format)
+  black: '#4C4141',    // Dark/Black (reference format)
 };
 
-export const ALL_FRUITS: FruitType[] = ['apple', 'orange', 'lemon', 'grape', 'cherry', 'kiwi'];
+export const ALL_FRUITS: FruitType[] = ['apple', 'orange', 'lemon', 'grape', 'cherry', 'kiwi', 'white', 'black'];
 
 // ============================================================================
 // Pixel Art Types

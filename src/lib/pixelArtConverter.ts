@@ -105,15 +105,12 @@ function findClosestFruit(rgb: RGB): FruitType {
 }
 
 /**
- * Check if a pixel should be considered "empty" (transparent or near-white)
+ * Check if a pixel should be considered "empty" (transparent only)
+ * Note: We no longer skip white pixels - they are valid colors now
  */
 function isEmptyPixel(r: number, g: number, b: number, a: number): boolean {
-  // Transparent pixels
+  // Only transparent pixels are empty
   if (a < 30) return true;
-
-  // Very light pixels (close to white)
-  const brightness = (r + g + b) / 3;
-  if (brightness > 245 && a < 200) return true;
 
   return false;
 }
