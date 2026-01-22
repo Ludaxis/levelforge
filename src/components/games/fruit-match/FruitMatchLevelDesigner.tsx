@@ -14,6 +14,8 @@ import {
   FruitMatchLevel,
   DesignedFruitMatchLevel,
   LauncherOrderConfig,
+  PixelGroup,
+  ExplicitLauncherConfig,
   FRUIT_EMOJI,
   FRUIT_COLORS,
   ALL_FRUITS,
@@ -24,6 +26,7 @@ import {
   calculateLevelMetrics,
   pixelKey,
   migrateFruitType,
+  breakdownIntoCapacities,
 } from '@/lib/fruitMatchUtils';
 import {
   emojiToPixelArtAsync,
@@ -650,6 +653,53 @@ export function FruitMatchLevelDesigner({
 
     const sinkStacks = generateSinkStacks(sinkWidth, fruitCounts, minStackHeight, maxStackHeight);
 
+    // Generate a default launcher config if none exists
+    let finalConfig = launcherOrderConfig;
+    if (!finalConfig && pixelArtArray.length > 0) {
+      // Create one group per color type with launchers
+      const colorCounts = new Map<FruitType, number>();
+      for (const cell of pixelArtArray) {
+        colorCounts.set(cell.fruitType, (colorCounts.get(cell.fruitType) || 0) + 1);
+      }
+
+      const groups: PixelGroup[] = [];
+      const launchers: ExplicitLauncherConfig[] = [];
+      let groupOrder = 0;
+      let launcherIndex = 0;
+
+      for (const fruit of ALL_FRUITS) {
+        const count = colorCounts.get(fruit);
+        if (count && count > 0) {
+          const groupId = Date.now() + groupOrder;
+          groups.push({
+            id: groupId,
+            name: fruit.charAt(0).toUpperCase() + fruit.slice(1),
+            colorTypes: [fruit],
+            order: groupOrder++,
+          });
+
+          // Create launchers for this group
+          const capacities = breakdownIntoCapacities(count);
+          for (const capacity of capacities) {
+            launchers.push({
+              id: `launcher-${Date.now()}-${launcherIndex}`,
+              fruitType: fruit,
+              capacity,
+              groupId,
+              orderIndex: launcherIndex++,
+            });
+          }
+        }
+      }
+
+      finalConfig = {
+        mode: 'auto',
+        groups,
+        launchers,
+        unlockStages: [{ id: 1, name: 'Stage 1', groupIds: groups.map(g => g.id) }],
+      };
+    }
+
     return {
       id: `custom-${Date.now()}`,
       name: `Level ${levelNumber}`,
@@ -660,7 +710,7 @@ export function FruitMatchLevelDesigner({
       sinkStacks,
       waitingStandSlots,
       difficulty: metrics?.difficulty || 'medium',
-      launcherOrderConfig: launcherOrderConfig || undefined,
+      launcherOrderConfig: finalConfig || undefined,
     };
   }, [isValid, pixelArtArray, gridWidth, gridHeight, sinkWidth, fruitCounts, minStackHeight, maxStackHeight, waitingStandSlots, levelNumber, metrics, launcherOrderConfig]);
 

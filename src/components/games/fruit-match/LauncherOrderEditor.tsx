@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -625,12 +625,35 @@ export function LauncherOrderEditor({
   const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
 
+  // Track if we've already synced the initial config
+  const hasInitializedRef = useRef(false);
+
   // Initialize config if not provided
   const currentConfig = useMemo(() => {
     if (config) return config;
     if (pixelArt.length === 0) return null;
     return generateInitialConfig(pixelArt);
   }, [config, pixelArt]);
+
+  // Sync generated config to parent when config prop is null but we have pixelArt
+  useEffect(() => {
+    if (!hasInitializedRef.current && config === null && currentConfig !== null && pixelArt.length > 0) {
+      hasInitializedRef.current = true;
+      // Also update pixel art with groupIds
+      if (onPixelArtChange) {
+        const updatedPixelArt = pixelArt.map(cell => {
+          const group = currentConfig.groups.find(g => g.colorTypes.includes(cell.fruitType));
+          return { ...cell, groupId: group?.id };
+        });
+        onPixelArtChange(updatedPixelArt);
+      }
+      onChange(currentConfig);
+    }
+    // Reset the flag if config becomes null again (e.g., new pixel art loaded)
+    if (config !== null) {
+      hasInitializedRef.current = true;
+    }
+  }, [config, currentConfig, pixelArt, onChange, onPixelArtChange]);
 
   // Drag state for groups
   const [draggedGroupId, setDraggedGroupId] = useState<number | null>(null);

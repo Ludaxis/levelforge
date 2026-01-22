@@ -325,7 +325,7 @@ export interface LauncherConfig {
  * Break down a pixel count into launcher capacities
  * Prioritizes larger capacities first for efficiency
  */
-function breakdownIntoCapacities(pixelCount: number): LauncherCapacity[] {
+export function breakdownIntoCapacities(pixelCount: number): LauncherCapacity[] {
   const capacities: LauncherCapacity[] = [];
   let remaining = pixelCount;
 
@@ -357,17 +357,27 @@ export function generateLauncherQueue(
   pixelArt: PixelCell[],
   launcherOrderConfig?: LauncherOrderConfig
 ): LauncherConfig[] {
-  // If manual mode with explicit config, use the explicit launcher order
-  if (launcherOrderConfig?.mode === 'manual' && launcherOrderConfig.launchers.length > 0) {
+  // If we have explicit launchers in the config, use them
+  if (launcherOrderConfig && launcherOrderConfig.launchers.length > 0) {
     // Sort by orderIndex and map to LauncherConfig
     const sorted = [...launcherOrderConfig.launchers].sort((a, b) => a.orderIndex - b.orderIndex);
-    return sorted.map(l => ({
+    const configs = sorted.map(l => ({
       fruitType: l.fruitType,
       capacity: l.capacity,
     }));
+
+    // If auto mode, shuffle the launchers (but still use the defined capacities)
+    if (launcherOrderConfig.mode === 'auto') {
+      for (let i = configs.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [configs[i], configs[j]] = [configs[j], configs[i]];
+      }
+    }
+
+    return configs;
   }
 
-  // Count pixels per fruit type
+  // Fallback: No config provided, generate from pixel counts
   const fruitCounts = getRequiredFruitCounts(pixelArt);
 
   // Create launcher configs for each fruit type
