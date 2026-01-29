@@ -139,7 +139,7 @@ export function useSyncedLevelCollection<T extends BaseLevel>(
         setIsLoaded(true);
       }
 
-      // Then check Supabase in background (if available and no local data)
+      // Then check Supabase in background
       if (supabaseProvider.current.isAvailable()) {
         try {
           const remoteLevels = await supabaseProvider.current.loadLevels();
@@ -155,6 +155,22 @@ export function useSyncedLevelCollection<T extends BaseLevel>(
               // Also save to localStorage
               await localProvider.current.saveLevels(migrated);
               console.log(`[Sync] Loaded ${migrated.length} levels from Supabase`);
+            } else if (localLevels.length > 0) {
+              // Local data exists - push to remote if different
+              const localJson = JSON.stringify(localLevels);
+              const remoteJson = JSON.stringify(remoteLevels);
+              if (localJson !== remoteJson) {
+                console.log('[Sync] Local data differs from remote, pushing local→remote');
+                isSyncingRef.current = true;
+                try {
+                  await supabaseProvider.current.saveLevels(localLevels);
+                  console.log('[Sync] Pushed local data to Supabase');
+                } catch (pushError) {
+                  console.error('[Sync] Failed to push local→remote:', pushError);
+                } finally {
+                  isSyncingRef.current = false;
+                }
+              }
             }
 
             setSyncState({
@@ -301,6 +317,18 @@ export function useSyncedLevelCollection<T extends BaseLevel>(
       clearTimeout(syncTimeoutRef.current);
       syncTimeoutRef.current = null;
     }
+
+    // Wait for any in-flight sync to complete before re-syncing
+    if (isSyncingRef.current) {
+      const maxWait = 10000;
+      const pollInterval = 100;
+      let waited = 0;
+      while (isSyncingRef.current && waited < maxWait) {
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        waited += pollInterval;
+      }
+    }
+
     await syncToSupabase();
   }, [syncToSupabase]);
 

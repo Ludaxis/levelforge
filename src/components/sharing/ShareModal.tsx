@@ -38,6 +38,7 @@ interface ShareModalProps {
   gameType: string;
   levelCount: number;
   onSignInClick?: () => void;
+  onBeforeShare?: () => Promise<void>;
 }
 
 export function ShareModal({
@@ -47,6 +48,7 @@ export function ShareModal({
   gameType,
   levelCount,
   onSignInClick,
+  onBeforeShare,
 }: ShareModalProps) {
   const { isAuthenticated, isSupabaseAvailable } = useAuth();
   const [shareInfo, setShareInfo] = useState<DbSharedCollection | null>(null);
@@ -77,6 +79,18 @@ export function ShareModal({
 
     setIsLoading(true);
     setError(null);
+
+    // Force sync local data to remote before creating/updating share link
+    if (onBeforeShare) {
+      try {
+        await onBeforeShare();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to sync before sharing';
+        setError(message);
+        setIsLoading(false);
+        return;
+      }
+    }
 
     const result = await createShareLink(collectionId, title || undefined, description || undefined);
 

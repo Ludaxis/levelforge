@@ -53,7 +53,7 @@ interface HexaBlockLevelCollectionProps {
   onEditLevel: (level: DesignedLevel) => void;
   onPlayLevel: (level: DesignedLevel) => void;
   syncState?: SyncState;
-  onForceSync?: () => void;
+  onForceSync?: () => Promise<void>;
 }
 
 // ============================================================================
@@ -169,7 +169,7 @@ function MiniLevelPreview({ level, size = 60 }: MiniLevelPreviewProps) {
 // Sync Status Indicator Component
 // ============================================================================
 
-function SyncStatusIndicator({ syncState, onForceSync }: { syncState: SyncState; onForceSync?: () => void }) {
+function SyncStatusIndicator({ syncState, onForceSync }: { syncState: SyncState; onForceSync?: () => Promise<void> }) {
   const statusConfig = {
     synced: { color: 'bg-green-500', label: 'Synced', icon: Cloud },
     pending: { color: 'bg-yellow-500', label: 'Syncing...', icon: RefreshCw },
@@ -356,6 +356,7 @@ export function HexaBlockLevelCollection({
           setShowShareModal(false);
           setShowAuthModal(true);
         }}
+        onBeforeShare={onForceSync}
       />
 
       {/* Auth Modal */}
