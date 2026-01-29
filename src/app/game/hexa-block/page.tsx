@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { HexBlockBoard } from '@/components/games/hexa-block/HexBlockBoard';
 import { HexBlockStatus } from '@/components/games/hexa-block/HexBlockStatus';
 import { HexBlockLevelDesigner } from '@/components/games/hexa-block/HexBlockLevelDesigner';
@@ -98,7 +99,8 @@ function GameContainer({ level, onBack }: { level: HexaBlockLevel; onBack?: () =
 // Main Page Component
 // ============================================================================
 
-export default function HexaBlockPage() {
+function HexaBlockPageContent() {
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState('design');
   const [playingLevel, setPlayingLevel] = useState<HexaBlockLevel | null>(null);
   const [gameKey, setGameKey] = useState(0);
@@ -106,7 +108,24 @@ export default function HexaBlockPage() {
   const [editingLevel, setEditingLevel] = useState<DesignedLevel | null>(null);
 
   // Level collection state
-  const { levels, setLevels, isLoaded, addLevel } = useLevelCollection();
+  const { levels, setLevels, isLoaded, addLevel, importLevels, syncState, forceSync } = useLevelCollection();
+
+  // Handle shared import
+  useEffect(() => {
+    if (searchParams.get('import') !== 'shared') return;
+    const raw = localStorage.getItem('shared-import-pending');
+    if (!raw) return;
+    try {
+      const { gameType, levels: sharedLevels } = JSON.parse(raw);
+      if (gameType !== 'hexa-block' || !Array.isArray(sharedLevels)) return;
+      localStorage.removeItem('shared-import-pending');
+      importLevels(sharedLevels as DesignedLevel[]);
+      setActiveTab('collection');
+      window.history.replaceState({}, '', '/game/hexa-block');
+    } catch {
+      // Invalid data, ignore
+    }
+  }, [searchParams, importLevels]);
 
   // Handle playing a custom level from designer
   const handlePlayCustomLevel = (level: HexaBlockLevel) => {
@@ -231,6 +250,8 @@ export default function HexaBlockPage() {
               onLevelsChange={setLevels}
               onEditLevel={handleEditLevel}
               onPlayLevel={handlePlayCollectionLevel}
+              syncState={syncState}
+              onForceSync={forceSync}
             />
           </div>
         </TabsContent>
@@ -316,5 +337,13 @@ export default function HexaBlockPage() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+export default function HexaBlockPage() {
+  return (
+    <Suspense>
+      <HexaBlockPageContent />
+    </Suspense>
   );
 }

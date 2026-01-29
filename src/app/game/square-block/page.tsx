@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -173,7 +174,8 @@ function GameContainer({ level, onBack }: { level: SquareBlockLevel; onBack?: ()
 // Main Page Component
 // ============================================================================
 
-export default function SquareBlockPage() {
+function SquareBlockPageContent() {
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState('design');
   const [playingLevel, setPlayingLevel] = useState<SquareBlockLevel | null>(null);
   const [gameKey, setGameKey] = useState(0);
@@ -182,7 +184,24 @@ export default function SquareBlockPage() {
   const [sawtoothConfig, setSawtoothConfig] = useState<SawtoothConfig>(DEFAULT_SAWTOOTH_CONFIG);
 
   // Level collection state
-  const { levels, setLevels, isLoaded, addLevel } = useLevelCollection();
+  const { levels, setLevels, isLoaded, addLevel, importLevels, syncState, forceSync } = useLevelCollection();
+
+  // Handle shared import
+  useEffect(() => {
+    if (searchParams.get('import') !== 'shared') return;
+    const raw = localStorage.getItem('shared-import-pending');
+    if (!raw) return;
+    try {
+      const { gameType, levels: sharedLevels } = JSON.parse(raw);
+      if (gameType !== 'square-block' || !Array.isArray(sharedLevels)) return;
+      localStorage.removeItem('shared-import-pending');
+      importLevels(sharedLevels as DesignedLevel[]);
+      setActiveTab('collection');
+      window.history.replaceState({}, '', '/game/square-block');
+    } catch {
+      // Invalid data, ignore
+    }
+  }, [searchParams, importLevels]);
 
   // Convert DesignedLevel to SquareBlockLevel for gameplay
   const designedLevelToPlayable = (level: DesignedLevel): SquareBlockLevel => ({
@@ -310,6 +329,8 @@ export default function SquareBlockPage() {
               onPlayLevel={handlePlayCollectionLevel}
               sawtoothConfig={sawtoothConfig}
               onSawtoothConfigChange={setSawtoothConfig}
+              syncState={syncState}
+              onForceSync={forceSync}
             />
           </div>
         </TabsContent>
@@ -395,5 +416,13 @@ export default function SquareBlockPage() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+export default function SquareBlockPage() {
+  return (
+    <Suspense>
+      <SquareBlockPageContent />
+    </Suspense>
   );
 }

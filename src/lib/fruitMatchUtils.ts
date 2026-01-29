@@ -319,6 +319,7 @@ export function countSinkTiles(sinkStacks: SinkTile[][]): number {
 export interface LauncherConfig {
   fruitType: FruitType;
   capacity: LauncherCapacity;
+  groupId?: number;  // Optional group ID for targeting specific pixel groups
 }
 
 /**
@@ -359,14 +360,15 @@ export function generateLauncherQueue(
 ): LauncherConfig[] {
   // If we have explicit launchers in the config, use them
   if (launcherOrderConfig && launcherOrderConfig.launchers.length > 0) {
-    // Sort by orderIndex and map to LauncherConfig
+    // Sort by orderIndex and map to LauncherConfig (preserving groupId)
     const sorted = [...launcherOrderConfig.launchers].sort((a, b) => a.orderIndex - b.orderIndex);
-    const configs = sorted.map(l => ({
+    const configs: LauncherConfig[] = sorted.map(l => ({
       fruitType: l.fruitType,
       capacity: l.capacity,
+      groupId: l.groupId,  // Preserve groupId for targeting specific pixel groups
     }));
 
-    // If auto mode, shuffle the launchers (but still use the defined capacities)
+    // If auto mode, shuffle the launchers (but still use the defined capacities and groupIds)
     if (launcherOrderConfig.mode === 'auto') {
       for (let i = configs.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -377,7 +379,7 @@ export function generateLauncherQueue(
     return configs;
   }
 
-  // Fallback: No config provided, generate from pixel counts
+  // Fallback: No config provided, generate from pixel counts (no groupId)
   const fruitCounts = getRequiredFruitCounts(pixelArt);
 
   // Create launcher configs for each fruit type
@@ -416,6 +418,7 @@ export function createInitialLaunchers(queue: LauncherConfig[]): {
       requiredFruit: queue[i].fruitType,
       capacity: queue[i].capacity,
       position: i,
+      groupId: queue[i].groupId,  // Preserve groupId for targeting specific pixel groups
     });
   }
   return {
@@ -464,6 +467,7 @@ export function shiftLaunchers(
       requiredFruit: queue[0].fruitType,
       capacity: queue[0].capacity,
       position: maxPosition,
+      groupId: queue[0].groupId,  // Preserve groupId for targeting specific pixel groups
     });
     return { launchers: shifted, remainingQueue: queue.slice(1) };
   }

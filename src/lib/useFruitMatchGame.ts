@@ -106,6 +106,9 @@ export function useFruitMatchGame(initialLevel: FruitMatchLevel) {
   // Track which launchers are currently executing (for parallel shooting)
   const executingLaunchersRef = useRef<Set<string>>(new Set());
 
+  // Track cells already claimed by parallel shootings (synchronous ref for race condition prevention)
+  const claimedCellsRef = useRef<Set<string>>(new Set());
+
   // Check if a tile is pickable (top of its stack)
   const canPickTile = useCallback((position: number, stackIndex: number): boolean => {
     const stack = state.sinkStacks[position];
@@ -294,6 +297,14 @@ export function useFruitMatchGame(initialLevel: FruitMatchLevel) {
   // Called when shooting animation completes for a specific launcher
   const onShootingComplete = useCallback((launcherId: string) => {
     setAnimationState(prev => {
+      // Find the completed shooting to clear its claimed cells
+      const completedShooting = prev.activeShootings.find(s => s.launcherId === launcherId);
+      if (completedShooting) {
+        for (const cell of completedShooting.targetCells) {
+          claimedCellsRef.current.delete(`${cell.row},${cell.col}`);
+        }
+      }
+
       const newActiveShootings = prev.activeShootings.filter(s => s.launcherId !== launcherId);
       return {
         ...prev,
@@ -345,20 +356,32 @@ export function useFruitMatchGame(initialLevel: FruitMatchLevel) {
     const matchingFruit = launcher.requiredFruit;
     const matchingCapacity = launcher.capacity;
     const matchingLauncherId = launcher.id;
+    const matchingGroupId = launcher.groupId;
 
     // Get unfilled cells of this fruit type, sorted by position (row then col)
-    // Also exclude cells targeted by other active shootings
-    const otherTargetedCells = new Set<string>();
-    // Get current active shootings from state ref pattern
-    const currentActiveShootings = stateRef.current.pixelArt; // we need to track targeted cells differently
-
+    // If launcher has a groupId, only target pixels with that specific groupId
+    // Also exclude cells already claimed by other parallel shootings
     const unfilled = currentState.pixelArt
-      .filter(c => !c.filled && c.fruitType === matchingFruit)
+      .filter(c => {
+        if (c.filled) return false;
+        if (c.fruitType !== matchingFruit) return false;
+        // If launcher has a groupId, only target pixels with matching groupId
+        if (matchingGroupId !== undefined && c.groupId !== matchingGroupId) return false;
+        // Exclude cells already claimed by other parallel shootings
+        const cellKey = `${c.row},${c.col}`;
+        if (claimedCellsRef.current.has(cellKey)) return false;
+        return true;
+      })
       .sort((a, b) => {
         if (a.row !== b.row) return a.row - b.row;
         return a.col - b.col;
       });
     const targetCells = unfilled.slice(0, matchingCapacity);
+
+    // Claim these cells immediately (before async operations)
+    for (const cell of targetCells) {
+      claimedCellsRef.current.add(`${cell.row},${cell.col}`);
+    }
 
     if (targetCells.length === 0) {
       executingLaunchersRef.current.delete(launcherId);
@@ -408,6 +431,10 @@ export function useFruitMatchGame(initialLevel: FruitMatchLevel) {
               return isTarget ? { ...c, filled: true } : c;
             }),
           }));
+          // Clear claimed cells for this launcher
+          for (const cell of targetCells) {
+            claimedCellsRef.current.delete(`${cell.row},${cell.col}`);
+          }
           // Remove this shooting from active
           setAnimationState(prev => {
             const newActiveShootings = prev.activeShootings.filter(s => s.launcherId !== matchingLauncherId);
@@ -556,11 +583,21 @@ export function useFruitMatchGame(initialLevel: FruitMatchLevel) {
 
   // Reset the game
   const reset = useCallback(() => {
+    // Clear all tracking refs
+    claimedCellsRef.current.clear();
+    executingLaunchersRef.current.clear();
+    shootingResolveMapRef.current.clear();
+    setAnimationState({ activeShootings: [], isShootingActive: false });
     setState(initializeState(state.level));
   }, [state.level]);
 
   // Load a new level
   const loadLevel = useCallback((level: FruitMatchLevel) => {
+    // Clear all tracking refs
+    claimedCellsRef.current.clear();
+    executingLaunchersRef.current.clear();
+    shootingResolveMapRef.current.clear();
+    setAnimationState({ activeShootings: [], isShootingActive: false });
     setState(initializeState(level));
   }, []);
 

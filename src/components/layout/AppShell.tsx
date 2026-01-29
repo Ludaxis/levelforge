@@ -18,6 +18,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { UserMenu } from '@/components/auth/UserMenu';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -88,6 +89,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
+
+        {/* User section */}
+        <div className="border-t p-3 lg:p-4">
+          <UserMenu />
+        </div>
 
         <div className="border-t p-3 lg:p-4">
           <div className="flex items-center justify-between">

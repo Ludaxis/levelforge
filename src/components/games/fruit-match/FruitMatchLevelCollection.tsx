@@ -24,6 +24,8 @@ import {
   DIFFICULTY_TO_NUMBER,
   NUMBER_TO_DIFFICULTY,
 } from '@/lib/juicyBlastExport';
+import { useSyncedLevelCollection } from '@/lib/storage/useSyncedLevelCollection';
+import { SyncState } from '@/lib/storage/types';
 import {
   Layers,
   Download,
@@ -38,7 +40,15 @@ import {
   GripVertical,
   Settings,
   RotateCcw,
+  RefreshCw,
+  Cloud,
+  CloudOff,
+  Share2,
 } from 'lucide-react';
+import { useAuth } from '@/lib/auth/AuthContext';
+import { ShareModal } from '@/components/sharing/ShareModal';
+import { AuthModal } from '@/components/auth/AuthModal';
+import { createSupabaseStorageProvider } from '@/lib/storage/supabase';
 
 // ============================================================================
 // Types
@@ -51,6 +61,8 @@ interface FruitMatchLevelCollectionProps {
   onPlayLevel: (level: DesignedFruitMatchLevel) => void;
   sawtoothConfig?: SawtoothConfig;
   onSawtoothConfigChange?: (config: SawtoothConfig) => void;
+  syncState?: SyncState;
+  onForceSync?: () => void;
 }
 
 // Flow zone types
@@ -159,97 +171,14 @@ function migrateLevel(level: DesignedFruitMatchLevel): DesignedFruitMatchLevel {
 // ============================================================================
 
 export function useFruitMatchLevelCollection() {
-  const [levels, setLevels] = useState<DesignedFruitMatchLevel[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const collection = useSyncedLevelCollection<DesignedFruitMatchLevel>({
+    gameType: 'fruit-match',
+    localStorageKey: STORAGE_KEY,
+    maxLevels: MAX_LEVELS,
+    migrate: migrateLevel,
+  });
 
-  // Load from localStorage on mount (with fruit type migration)
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          // Migrate all levels to ensure fruit types are up-to-date
-          const migratedLevels = parsed.map(migrateLevel);
-          setLevels(migratedLevels);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load fruit match level collection:', e);
-    }
-    setIsLoaded(true);
-  }, []);
-
-  // Save to localStorage when levels change
-  useEffect(() => {
-    if (isLoaded) {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(levels));
-      } catch (e) {
-        console.error('Failed to save fruit match level collection:', e);
-      }
-    }
-  }, [levels, isLoaded]);
-
-  const addLevel = useCallback((level: DesignedFruitMatchLevel) => {
-    setLevels((prev) => {
-      if (prev.length >= MAX_LEVELS) return prev;
-      const maxNum = prev.reduce((max, l) => Math.max(max, l.levelNumber), 0);
-      const newLevel = { ...level, levelNumber: maxNum + 1 };
-      return [...prev, newLevel];
-    });
-  }, []);
-
-  const updateLevel = useCallback((id: string, updates: Partial<DesignedFruitMatchLevel>) => {
-    setLevels((prev) =>
-      prev.map((l) => (l.id === id ? { ...l, ...updates } : l))
-    );
-  }, []);
-
-  const deleteLevel = useCallback((id: string) => {
-    setLevels((prev) => {
-      const filtered = prev.filter((l) => l.id !== id);
-      return filtered.map((l, i) => ({ ...l, levelNumber: i + 1 }));
-    });
-  }, []);
-
-  const moveLevel = useCallback((id: string, direction: 'up' | 'down') => {
-    setLevels((prev) => {
-      const index = prev.findIndex((l) => l.id === id);
-      if (index === -1) return prev;
-      if (direction === 'up' && index === 0) return prev;
-      if (direction === 'down' && index === prev.length - 1) return prev;
-
-      const newLevels = [...prev];
-      const swapIndex = direction === 'up' ? index - 1 : index + 1;
-      [newLevels[index], newLevels[swapIndex]] = [newLevels[swapIndex], newLevels[index]];
-
-      return newLevels.map((l, i) => ({ ...l, levelNumber: i + 1 }));
-    });
-  }, []);
-
-  const clearAll = useCallback(() => {
-    setLevels([]);
-  }, []);
-
-  const importLevels = useCallback((importedLevels: DesignedFruitMatchLevel[]) => {
-    setLevels(importedLevels.slice(0, MAX_LEVELS).map((l, i) => ({
-      ...l,
-      levelNumber: i + 1,
-    })));
-  }, []);
-
-  return {
-    levels,
-    setLevels,
-    isLoaded,
-    addLevel,
-    updateLevel,
-    deleteLevel,
-    moveLevel,
-    clearAll,
-    importLevels,
-  };
+  return collection;
 }
 
 // ============================================================================
@@ -305,6 +234,36 @@ function MiniLevelPreview({ level, size = 60 }: MiniLevelPreviewProps) {
 }
 
 // ============================================================================
+// Sync Status Indicator Component
+// ============================================================================
+
+function SyncStatusIndicator({ syncState, onForceSync }: { syncState: SyncState; onForceSync?: () => void }) {
+  const statusConfig = {
+    synced: { color: 'bg-green-500', label: 'Synced', icon: Cloud },
+    pending: { color: 'bg-yellow-500', label: 'Syncing...', icon: RefreshCw },
+    offline: { color: 'bg-gray-500', label: 'Offline', icon: CloudOff },
+    error: { color: 'bg-red-500', label: 'Error', icon: CloudOff },
+    conflict: { color: 'bg-orange-500', label: 'Conflict', icon: Cloud },
+  };
+
+  const config = statusConfig[syncState.status];
+  const Icon = config.icon;
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <button
+        onClick={onForceSync}
+        className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-muted-foreground hover:text-foreground transition-colors"
+        title={`${config.label}${syncState.lastSynced ? ` - Last synced: ${syncState.lastSynced.toLocaleTimeString()}` : ''}${syncState.error ? ` - ${syncState.error}` : ''}`}
+      >
+        <span className={`w-2 h-2 rounded-full ${config.color} ${syncState.status === 'pending' ? 'animate-pulse' : ''}`} />
+        <Icon className={`h-3.5 w-3.5 ${syncState.status === 'pending' ? 'animate-spin' : ''}`} />
+      </button>
+    </div>
+  );
+}
+
+// ============================================================================
 // Main Component
 // ============================================================================
 
@@ -315,13 +274,29 @@ export function FruitMatchLevelCollection({
   onPlayLevel,
   sawtoothConfig: externalConfig,
   onSawtoothConfigChange,
+  syncState,
+  onForceSync,
 }: FruitMatchLevelCollectionProps) {
+  const { isAuthenticated, isSupabaseAvailable } = useAuth();
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [internalConfig, setInternalConfig] = useState<SawtoothConfig>(DEFAULT_SAWTOOTH_CONFIG);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [collectionId, setCollectionId] = useState<string | null>(null);
+
+  // Get collection ID for sharing
+  useEffect(() => {
+    if (isSupabaseAvailable) {
+      const provider = createSupabaseStorageProvider<DesignedFruitMatchLevel>('fruit-match');
+      if ('getCollectionId' in provider) {
+        (provider as { getCollectionId: () => Promise<string | null> }).getCollectionId().then(setCollectionId);
+      }
+    }
+  }, [isSupabaseAvailable, isAuthenticated]);
 
   // Use external config if provided, otherwise use internal state
   const sawtoothConfig = externalConfig ?? internalConfig;
@@ -649,9 +624,39 @@ export function FruitMatchLevelCollection({
             <Button variant="outline" size="sm" onClick={handleImport}>
               <Upload className="h-4 w-4" />
             </Button>
+            {isSupabaseAvailable && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowShareModal(true)}
+                disabled={levels.length === 0}
+                title={isAuthenticated ? "Share collection" : "Sign in to share"}
+              >
+                <Share2 className="h-4 w-4" />
+              </Button>
+            )}
+            {syncState && (
+              <SyncStatusIndicator syncState={syncState} onForceSync={onForceSync} />
+            )}
           </div>
         </div>
       </CardHeader>
+
+      {/* Share Modal */}
+      <ShareModal
+        open={showShareModal}
+        onOpenChange={setShowShareModal}
+        collectionId={collectionId}
+        gameType="Fruit Match"
+        levelCount={levels.length}
+        onSignInClick={() => {
+          setShowShareModal(false);
+          setShowAuthModal(true);
+        }}
+      />
+
+      {/* Auth Modal */}
+      <AuthModal open={showAuthModal} onOpenChange={setShowAuthModal} />
       <CardContent className="space-y-4">
         {/* Search and Settings Toggle */}
         <div className="flex gap-2">

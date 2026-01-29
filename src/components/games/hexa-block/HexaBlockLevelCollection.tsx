@@ -18,6 +18,8 @@ import {
   getHexPolygonPoints,
   getGridBounds,
 } from '@/lib/hexGrid';
+import { useSyncedLevelCollection } from '@/lib/storage/useSyncedLevelCollection';
+import { SyncState } from '@/lib/storage/types';
 import {
   Layers,
   Download,
@@ -31,7 +33,15 @@ import {
   Search,
   Grid3X3,
   List,
+  RefreshCw,
+  Cloud,
+  CloudOff,
+  Share2,
 } from 'lucide-react';
+import { useAuth } from '@/lib/auth/AuthContext';
+import { ShareModal } from '@/components/sharing/ShareModal';
+import { AuthModal } from '@/components/auth/AuthModal';
+import { createSupabaseStorageProvider } from '@/lib/storage/supabase';
 
 // ============================================================================
 // Types
@@ -42,6 +52,8 @@ interface HexaBlockLevelCollectionProps {
   onLevelsChange: (levels: DesignedLevel[]) => void;
   onEditLevel: (level: DesignedLevel) => void;
   onPlayLevel: (level: DesignedLevel) => void;
+  syncState?: SyncState;
+  onForceSync?: () => void;
 }
 
 // ============================================================================
@@ -69,64 +81,15 @@ const FLOW_ZONE_COLORS: Record<FlowZone, string> = {
 // ============================================================================
 
 export function useLevelCollection() {
-  const [levels, setLevels] = useState<DesignedLevel[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const collection = useSyncedLevelCollection<DesignedLevel>({
+    gameType: 'hexa-block',
+    localStorageKey: STORAGE_KEY,
+    maxLevels: MAX_LEVELS,
+  });
 
-  // Load from localStorage on mount
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          setLevels(parsed);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load level collection:', e);
-    }
-    setIsLoaded(true);
-  }, []);
-
-  // Save to localStorage when levels change
-  useEffect(() => {
-    if (isLoaded) {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(levels));
-      } catch (e) {
-        console.error('Failed to save level collection:', e);
-      }
-    }
-  }, [levels, isLoaded]);
-
-  const addLevel = useCallback((level: DesignedLevel) => {
-    setLevels((prev) => {
-      if (prev.length >= MAX_LEVELS) {
-        return prev;
-      }
-      // Assign next level number
-      const maxNum = prev.reduce((max, l) => Math.max(max, l.levelNumber), 0);
-      const newLevel = { ...level, levelNumber: maxNum + 1 };
-      return [...prev, newLevel];
-    });
-  }, []);
-
-  const updateLevel = useCallback((id: string, updates: Partial<DesignedLevel>) => {
-    setLevels((prev) =>
-      prev.map((l) => (l.id === id ? { ...l, ...updates } : l))
-    );
-  }, []);
-
-  const deleteLevel = useCallback((id: string) => {
-    setLevels((prev) => {
-      const filtered = prev.filter((l) => l.id !== id);
-      // Renumber remaining levels
-      return filtered.map((l, i) => ({ ...l, levelNumber: i + 1 }));
-    });
-  }, []);
-
+  // Add duplicateLevel for backwards compatibility
   const duplicateLevel = useCallback((level: DesignedLevel) => {
-    setLevels((prev) => {
+    collection.setLevels((prev: DesignedLevel[]) => {
       if (prev.length >= MAX_LEVELS) return prev;
       const newLevel: DesignedLevel = {
         ...level,
@@ -137,46 +100,11 @@ export function useLevelCollection() {
       };
       return [...prev, newLevel];
     });
-  }, []);
-
-  const moveLevel = useCallback((id: string, direction: 'up' | 'down') => {
-    setLevels((prev) => {
-      const index = prev.findIndex((l) => l.id === id);
-      if (index === -1) return prev;
-      if (direction === 'up' && index === 0) return prev;
-      if (direction === 'down' && index === prev.length - 1) return prev;
-
-      const newLevels = [...prev];
-      const swapIndex = direction === 'up' ? index - 1 : index + 1;
-      [newLevels[index], newLevels[swapIndex]] = [newLevels[swapIndex], newLevels[index]];
-
-      // Update level numbers
-      return newLevels.map((l, i) => ({ ...l, levelNumber: i + 1 }));
-    });
-  }, []);
-
-  const clearAll = useCallback(() => {
-    setLevels([]);
-  }, []);
-
-  const importLevels = useCallback((importedLevels: DesignedLevel[]) => {
-    setLevels(importedLevels.slice(0, MAX_LEVELS).map((l, i) => ({
-      ...l,
-      levelNumber: i + 1,
-    })));
-  }, []);
+  }, [collection]);
 
   return {
-    levels,
-    setLevels,
-    isLoaded,
-    addLevel,
-    updateLevel,
-    deleteLevel,
+    ...collection,
     duplicateLevel,
-    moveLevel,
-    clearAll,
-    importLevels,
   };
 }
 
@@ -238,6 +166,36 @@ function MiniLevelPreview({ level, size = 60 }: MiniLevelPreviewProps) {
 }
 
 // ============================================================================
+// Sync Status Indicator Component
+// ============================================================================
+
+function SyncStatusIndicator({ syncState, onForceSync }: { syncState: SyncState; onForceSync?: () => void }) {
+  const statusConfig = {
+    synced: { color: 'bg-green-500', label: 'Synced', icon: Cloud },
+    pending: { color: 'bg-yellow-500', label: 'Syncing...', icon: RefreshCw },
+    offline: { color: 'bg-gray-500', label: 'Offline', icon: CloudOff },
+    error: { color: 'bg-red-500', label: 'Error', icon: CloudOff },
+    conflict: { color: 'bg-orange-500', label: 'Conflict', icon: Cloud },
+  };
+
+  const config = statusConfig[syncState.status];
+  const Icon = config.icon;
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <button
+        onClick={onForceSync}
+        className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-muted-foreground hover:text-foreground transition-colors"
+        title={`${config.label}${syncState.lastSynced ? ` - Last synced: ${syncState.lastSynced.toLocaleTimeString()}` : ''}${syncState.error ? ` - ${syncState.error}` : ''}`}
+      >
+        <span className={`w-2 h-2 rounded-full ${config.color} ${syncState.status === 'pending' ? 'animate-pulse' : ''}`} />
+        <Icon className={`h-3.5 w-3.5 ${syncState.status === 'pending' ? 'animate-spin' : ''}`} />
+      </button>
+    </div>
+  );
+}
+
+// ============================================================================
 // Main Component
 // ============================================================================
 
@@ -246,9 +204,25 @@ export function HexaBlockLevelCollection({
   onLevelsChange,
   onEditLevel,
   onPlayLevel,
+  syncState,
+  onForceSync,
 }: HexaBlockLevelCollectionProps) {
+  const { isAuthenticated, isSupabaseAvailable } = useAuth();
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [collectionId, setCollectionId] = useState<string | null>(null);
+
+  // Get collection ID for sharing
+  useEffect(() => {
+    if (isSupabaseAvailable) {
+      const provider = createSupabaseStorageProvider<DesignedLevel>('hexa-block');
+      if ('getCollectionId' in provider) {
+        (provider as { getCollectionId: () => Promise<string | null> }).getCollectionId().then(setCollectionId);
+      }
+    }
+  }, [isSupabaseAvailable, isAuthenticated]);
 
   // Filter levels by search
   const filteredLevels = useMemo(() => {
@@ -353,9 +327,39 @@ export function HexaBlockLevelCollection({
             <Button variant="outline" size="sm" onClick={handleImport}>
               <Upload className="h-4 w-4" />
             </Button>
+            {isSupabaseAvailable && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowShareModal(true)}
+                disabled={levels.length === 0}
+                title={isAuthenticated ? "Share collection" : "Sign in to share"}
+              >
+                <Share2 className="h-4 w-4" />
+              </Button>
+            )}
+            {syncState && (
+              <SyncStatusIndicator syncState={syncState} onForceSync={onForceSync} />
+            )}
           </div>
         </div>
       </CardHeader>
+
+      {/* Share Modal */}
+      <ShareModal
+        open={showShareModal}
+        onOpenChange={setShowShareModal}
+        collectionId={collectionId}
+        gameType="Hexa Block"
+        levelCount={levels.length}
+        onSignInClick={() => {
+          setShowShareModal(false);
+          setShowAuthModal(true);
+        }}
+      />
+
+      {/* Auth Modal */}
+      <AuthModal open={showAuthModal} onOpenChange={setShowAuthModal} />
       <CardContent className="space-y-4">
         {/* Search */}
         <div className="relative">

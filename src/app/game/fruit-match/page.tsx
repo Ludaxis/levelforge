@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -166,7 +167,8 @@ function GameContainer({
 // Main Page Component
 // ============================================================================
 
-export default function FruitMatchPage() {
+function FruitMatchPageContent() {
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState('design');
   const [playingLevel, setPlayingLevel] = useState<FruitMatchLevel | null>(null);
   const [gameKey, setGameKey] = useState(0);
@@ -174,7 +176,25 @@ export default function FruitMatchPage() {
   const [editingLevel, setEditingLevel] = useState<DesignedFruitMatchLevel | null>(null);
 
   // Level collection state
-  const { levels, setLevels, isLoaded, addLevel } = useFruitMatchLevelCollection();
+  const { levels, setLevels, isLoaded, addLevel, importLevels, syncState, forceSync } = useFruitMatchLevelCollection();
+
+  // Handle shared import
+  useEffect(() => {
+    if (searchParams.get('import') !== 'shared') return;
+    const raw = localStorage.getItem('shared-import-pending');
+    if (!raw) return;
+    try {
+      const { gameType, levels: sharedLevels } = JSON.parse(raw);
+      if (gameType !== 'fruit-match' || !Array.isArray(sharedLevels)) return;
+      localStorage.removeItem('shared-import-pending');
+      importLevels(sharedLevels as DesignedFruitMatchLevel[]);
+      setActiveTab('collection');
+      // Clean up URL
+      window.history.replaceState({}, '', '/game/fruit-match');
+    } catch {
+      // Invalid data, ignore
+    }
+  }, [searchParams, importLevels]);
 
   // Convert DesignedFruitMatchLevel to FruitMatchLevel for gameplay
   const designedLevelToPlayable = (level: DesignedFruitMatchLevel): FruitMatchLevel => {
@@ -302,6 +322,8 @@ export default function FruitMatchPage() {
             onLevelsChange={setLevels}
             onEditLevel={handleEditLevel}
             onPlayLevel={handlePlayCollectionLevel}
+            syncState={syncState}
+            onForceSync={forceSync}
           />
 
           {/* Sawtooth Curve Chart */}
@@ -467,5 +489,13 @@ export default function FruitMatchPage() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+export default function FruitMatchPage() {
+  return (
+    <Suspense>
+      <FruitMatchPageContent />
+    </Suspense>
   );
 }

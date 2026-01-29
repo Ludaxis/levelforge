@@ -78,6 +78,7 @@ export interface Launcher {
   requiredFruit: FruitType;
   capacity: LauncherCapacity;  // How many pixels this launcher fills when shot
   position: number;  // 0-3 (left to right), 0 is the one to shoot next
+  groupId?: number;  // Optional group ID for targeting specific pixel groups
 }
 
 // ============================================================================
@@ -176,6 +177,7 @@ export interface ShootingConfig {
 export interface LauncherConfig {
   fruitType: FruitType;
   capacity: LauncherCapacity;
+  groupId?: number;  // Optional group ID for targeting specific pixel groups
 }
 
 // Track tiles collected for each launcher
