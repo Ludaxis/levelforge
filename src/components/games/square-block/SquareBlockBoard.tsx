@@ -603,6 +603,39 @@ export function SquareBlockBoard({
         </svg>
       </div>
 
+      {/* Deadlock Legend - shown when deadlock occurs */}
+      {deadlockInfo?.hasDeadlock && (
+        <div className="mt-3 p-3 bg-muted/50 rounded-lg border border-muted">
+          <p className="text-xs font-medium text-muted-foreground mb-2">Deadlock - Why blocks are stuck:</p>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded border-2 border-amber-400 bg-amber-400/20 flex items-center justify-center">
+                <span className="text-[8px]">▭</span>
+              </div>
+              <span className="text-muted-foreground">Points at edge (root cause)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded border-2 border-purple-500 bg-purple-500/20 flex items-center justify-center">
+                <span className="text-[8px]">↔</span>
+              </div>
+              <span className="text-muted-foreground">Mutual block (A↔B)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded border-2 border-purple-500 bg-purple-500/20 flex items-center justify-center">
+                <span className="text-[8px]">↻</span>
+              </div>
+              <span className="text-muted-foreground">Circular chain (A→B→C→A)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded border-2 border-red-500 border-dashed bg-red-500/20 flex items-center justify-center">
+                <span className="text-[8px] font-bold">3</span>
+              </div>
+              <span className="text-muted-foreground">Blocked (# = chain length)</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Scroll hint for large grids */}
       {(rows > 10 || cols > 10) && (
         <p className="text-xs text-center text-muted-foreground mt-1">
