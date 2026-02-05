@@ -301,6 +301,11 @@ export function SquareBlockBoard({
           const isBlocker = deadlockInfo?.blockerBlocks.has(key) ?? false;
           const isStuck = !!stuckReason;
           const isMutualBlock = stuckReason?.type === 'mutual_block';
+          const isCircularChain = stuckReason?.type === 'circular_chain';
+          const isEdgeBlocked = stuckReason?.type === 'edge_blocked';
+          const chainLength = stuckReason?.blockingChain?.length ?? 0;
+          const rootCause = stuckReason?.rootCause;
+          const isRootCause = stuckReason?.rootBlockKey === key; // This block is the root of the problem
 
           // Apply grayscale to block color when in deadlock state
           const blockColor = hasDeadlock ? toGrayscale(block.color) : block.color;
@@ -484,7 +489,29 @@ export function SquareBlockBoard({
                 />
               )}
 
-              {/* ENHANCED DEADLOCK indicators */}
+              {/* ENHANCED DEADLOCK indicators with root cause */}
+
+              {/* ROOT CAUSE: Edge Blocked - Yellow/amber, this block points at edge */}
+              {isEdgeBlocked && isRootCause && (
+                <g pointerEvents="none">
+                  <rect
+                    x={pixel.x - cellSize / 2 + 1}
+                    y={pixel.y - cellSize / 2 + 1}
+                    width={cellSize - 2}
+                    height={cellSize - 2}
+                    fill="rgba(251, 191, 36, 0.2)"
+                    stroke="rgba(251, 191, 36, 0.9)"
+                    strokeWidth={3}
+                    rx={6}
+                  />
+                  {/* Edge/wall icon in corner */}
+                  <g transform={`translate(${pixel.x + cellSize / 2 - 10}, ${pixel.y - cellSize / 2 + 10})`}>
+                    <circle cx={0} cy={0} r={7} fill="rgba(251, 191, 36, 0.95)" />
+                    <text x={0} y={1} textAnchor="middle" fontSize={9} fill="white" fontWeight="bold">▭</text>
+                  </g>
+                </g>
+              )}
+
               {/* Mutual Block: Purple solid border with circular arrow icon */}
               {isMutualBlock && (
                 <g pointerEvents="none">
@@ -498,17 +525,61 @@ export function SquareBlockBoard({
                     strokeWidth={3}
                     rx={6}
                   />
-                  {/* Circular arrows icon in corner */}
+                  {/* Mutual block icon */}
                   <g transform={`translate(${pixel.x + cellSize / 2 - 10}, ${pixel.y - cellSize / 2 + 10})`}>
                     <circle cx={0} cy={0} r={7} fill="rgba(139, 92, 246, 0.95)" />
-                    {/* Circular arrows symbol */}
+                    <text x={0} y={1} textAnchor="middle" fontSize={9} fill="white" fontWeight="bold">↔</text>
+                  </g>
+                </g>
+              )}
+
+              {/* Circular Chain: Purple with cycle icon */}
+              {isCircularChain && (
+                <g pointerEvents="none">
+                  <rect
+                    x={pixel.x - cellSize / 2 + 1}
+                    y={pixel.y - cellSize / 2 + 1}
+                    width={cellSize - 2}
+                    height={cellSize - 2}
+                    fill="rgba(139, 92, 246, 0.15)"
+                    stroke="rgba(139, 92, 246, 0.9)"
+                    strokeWidth={3}
+                    rx={6}
+                  />
+                  {/* Circular chain icon with count */}
+                  <g transform={`translate(${pixel.x + cellSize / 2 - 10}, ${pixel.y - cellSize / 2 + 10})`}>
+                    <circle cx={0} cy={0} r={7} fill="rgba(139, 92, 246, 0.95)" />
                     <text x={0} y={1} textAnchor="middle" fontSize={9} fill="white" fontWeight="bold">↻</text>
                   </g>
                 </g>
               )}
 
-              {/* Blocker Block (not mutual): Orange solid border with chain icon */}
-              {isBlocker && !isMutualBlock && !isStuck && (
+              {/* Blocked by chain leading to edge (not root, not mutual/circular) */}
+              {isStuck && !isMutualBlock && !isCircularChain && !isRootCause && rootCause === 'edge_blocked' && (
+                <g pointerEvents="none">
+                  <rect
+                    x={pixel.x - cellSize / 2 + 1}
+                    y={pixel.y - cellSize / 2 + 1}
+                    width={cellSize - 2}
+                    height={cellSize - 2}
+                    fill="rgba(239, 68, 68, 0.15)"
+                    stroke="rgba(239, 68, 68, 0.9)"
+                    strokeWidth={3}
+                    strokeDasharray="6 3"
+                    rx={6}
+                  />
+                  {/* Chain length indicator */}
+                  <g transform={`translate(${pixel.x + cellSize / 2 - 10}, ${pixel.y - cellSize / 2 + 10})`}>
+                    <circle cx={0} cy={0} r={7} fill="rgba(239, 68, 68, 0.95)" />
+                    <text x={0} y={1} textAnchor="middle" fontSize={chainLength > 9 ? 7 : 9} fill="white" fontWeight="bold">
+                      {chainLength > 1 ? chainLength : '!'}
+                    </text>
+                  </g>
+                </g>
+              )}
+
+              {/* Pure blocker (not stuck itself, just blocking others) */}
+              {isBlocker && !isStuck && (
                 <g pointerEvents="none">
                   <rect
                     x={pixel.x - cellSize / 2 + 1}
@@ -520,32 +591,9 @@ export function SquareBlockBoard({
                     strokeWidth={3}
                     rx={6}
                   />
-                  {/* Chain link icon in corner */}
                   <g transform={`translate(${pixel.x + cellSize / 2 - 10}, ${pixel.y - cellSize / 2 + 10})`}>
                     <circle cx={0} cy={0} r={7} fill="rgba(245, 158, 11, 0.95)" />
                     <text x={0} y={1} textAnchor="middle" fontSize={9} fill="white" fontWeight="bold">⛓</text>
-                  </g>
-                </g>
-              )}
-
-              {/* Blocked Block (not mutual, not a blocker itself): Red dashed border with warning icon */}
-              {isStuck && !isMutualBlock && (
-                <g pointerEvents="none">
-                  <rect
-                    x={pixel.x - cellSize / 2 + 1}
-                    y={pixel.y - cellSize / 2 + 1}
-                    width={cellSize - 2}
-                    height={cellSize - 2}
-                    fill="rgba(239, 68, 68, 0.15)"
-                    stroke="rgba(239, 68, 68, 0.9)"
-                    strokeWidth={3}
-                    strokeDasharray={isBlocker ? "none" : "6 3"}
-                    rx={6}
-                  />
-                  {/* Warning icon in corner */}
-                  <g transform={`translate(${pixel.x + cellSize / 2 - 10}, ${pixel.y - cellSize / 2 + 10})`}>
-                    <circle cx={0} cy={0} r={7} fill={isBlocker ? "rgba(245, 158, 11, 0.95)" : "rgba(239, 68, 68, 0.95)"} />
-                    <text x={0} y={1} textAnchor="middle" fontSize={11} fill="white" fontWeight="bold">{isBlocker ? "⛓" : "!"}</text>
                   </g>
                 </g>
               )}

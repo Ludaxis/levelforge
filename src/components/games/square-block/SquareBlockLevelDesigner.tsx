@@ -50,7 +50,7 @@ import {
 } from 'lucide-react';
 import { downloadLevelAsJSON, parseAndImportLevel } from '@/lib/squareBlockExport';
 import { CollectionMetadata } from '@/lib/storage/types';
-import { DeadlockInfo, StuckReason } from '@/lib/useSquareBlockGame';
+import { DeadlockInfo, StuckReason, RootCauseType } from '@/lib/useSquareBlockGame';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -435,7 +435,7 @@ export function SquareBlockLevelDesigner({
     return getDirectionPath(block.coord, block.direction as SquareDirection, currentBlocks, currentHoles);
   }, [getDirectionPath]);
 
-  // Compute deadlock info for enhanced visualization
+  // Compute deadlock info with full chain tracing
   const deadlockInfo = useMemo((): DeadlockInfo => {
     const emptyResult: DeadlockInfo = {
       stuckBlocks: new Map(),
@@ -445,17 +445,13 @@ export function SquareBlockLevelDesigner({
 
     if (solvability.solvable) return emptyResult;
 
-    const stuckBlocks = new Map<string, StuckReason>();
-    const blockerBlocks = new Set<string>();
+    // Step 1: Build a map of each block's immediate blocker
+    const immediateBlocker = new Map<string, string | null>();
+    const isStuckBlock = new Set<string>();
 
     for (const [key, block] of blocks) {
-      // Skip if currently clearable
       if (canClearBlock(block, blocks, holes)) continue;
-
-      // Iced blocks with ice remaining are "waiting" (not stuck yet)
       if (block.iceCount && block.iceCount > 0) continue;
-
-      // Gate blocks with neighbors are "waiting" for neighbors to clear
       if (block.locked) {
         const hasNeighbor = ['N', 'E', 'S', 'W'].some(dir => {
           const neighborCoord = gridAdd(block.coord, SQUARE_DIRECTIONS[dir as SquareDirection]);
@@ -464,34 +460,88 @@ export function SquareBlockLevelDesigner({
         if (hasNeighbor) continue;
       }
 
-      // Block is stuck - determine why
+      isStuckBlock.add(key);
       const pathInfo = getBlockPath(block, blocks, holes);
-
       if (pathInfo.blocked && pathInfo.blockerCoord) {
-        const blockerKey = gridKey(pathInfo.blockerCoord);
-        stuckBlocks.set(key, {
-          type: 'blocked_by',
-          blockedBy: blockerKey,
-          message: `Blocked by block at ${blockerKey}`,
-        });
-        blockerBlocks.add(blockerKey);
+        immediateBlocker.set(key, gridKey(pathInfo.blockerCoord));
       } else {
-        stuckBlocks.set(key, {
-          type: 'both_directions_blocked',
-          message: 'Both exit directions blocked',
-        });
+        immediateBlocker.set(key, null); // Edge blocked
       }
     }
 
-    // Detect mutual blocks
-    for (const [key, reason] of stuckBlocks) {
-      if (reason.blockedBy && stuckBlocks.has(reason.blockedBy)) {
-        const otherReason = stuckBlocks.get(reason.blockedBy);
-        if (otherReason?.blockedBy === key) {
-          reason.type = 'mutual_block';
-          reason.message = `Mutual deadlock with ${reason.blockedBy}`;
+    // Step 2: Trace chains to find root cause
+    const stuckBlocks = new Map<string, StuckReason>();
+    const blockerBlocks = new Set<string>();
+
+    function traceChain(startKey: string): { chain: string[]; rootCause: RootCauseType; rootBlockKey?: string } {
+      const chain: string[] = [startKey];
+      const visited = new Set<string>([startKey]);
+      let current = startKey;
+
+      while (true) {
+        const blockerKey = immediateBlocker.get(current);
+
+        if (blockerKey === null || blockerKey === undefined) {
+          return { chain, rootCause: 'edge_blocked', rootBlockKey: current };
         }
+
+        if (visited.has(blockerKey)) {
+          const cycleStart = chain.indexOf(blockerKey);
+          const cycleLength = chain.length - cycleStart;
+          if (cycleLength === 2) {
+            return { chain, rootCause: 'mutual_block' };
+          } else {
+            return { chain, rootCause: 'circular_chain' };
+          }
+        }
+
+        if (!isStuckBlock.has(blockerKey)) {
+          return { chain, rootCause: 'edge_blocked', rootBlockKey: blockerKey };
+        }
+
+        chain.push(blockerKey);
+        visited.add(blockerKey);
+        current = blockerKey;
       }
+    }
+
+    for (const key of isStuckBlock) {
+      const { chain, rootCause, rootBlockKey } = traceChain(key);
+      const blockerKey = immediateBlocker.get(key);
+
+      for (let i = 1; i < chain.length; i++) {
+        blockerBlocks.add(chain[i]);
+      }
+
+      let message: string;
+      let type: StuckReason['type'];
+
+      if (rootCause === 'edge_blocked') {
+        if (chain.length === 1) {
+          message = 'Points at edge, cannot exit';
+          type = 'edge_blocked';
+        } else {
+          const rootBlock = blocks.get(rootBlockKey!);
+          const rootCoord = rootBlock ? `(${rootBlock.coord.row},${rootBlock.coord.col})` : rootBlockKey;
+          message = `Chain: ${chain.length} blocks → ${rootCoord} hits edge`;
+          type = 'blocked_by';
+        }
+      } else if (rootCause === 'mutual_block') {
+        message = `Mutual block with ${blockerKey}`;
+        type = 'mutual_block';
+      } else {
+        message = `Circular chain of ${chain.length} blocks`;
+        type = 'circular_chain';
+      }
+
+      stuckBlocks.set(key, {
+        type,
+        blockedBy: blockerKey ?? undefined,
+        blockingChain: chain,
+        rootCause,
+        rootBlockKey,
+        message,
+      });
     }
 
     return {
@@ -1750,6 +1800,11 @@ export function SquareBlockLevelDesigner({
                 const isBlocker = deadlockInfo.blockerBlocks.has(key);
                 const isStuck = !!stuckReason;
                 const isMutualBlock = stuckReason?.type === 'mutual_block';
+                const isCircularChain = stuckReason?.type === 'circular_chain';
+                const isEdgeBlocked = stuckReason?.type === 'edge_blocked';
+                const chainLength = stuckReason?.blockingChain?.length ?? 0;
+                const rootCause = stuckReason?.rootCause;
+                const isRootCause = stuckReason?.rootBlockKey === key;
 
                 // Apply grayscale when in deadlock state
                 const blockColor = hasDeadlock ? toGrayscale(block.color) : block.color;
@@ -1884,8 +1939,30 @@ export function SquareBlockLevelDesigner({
                         pointerEvents="none"
                       />
                     )}
-                    {/* ENHANCED DEADLOCK indicators */}
-                    {/* Mutual Block: Purple solid border with circular arrow icon */}
+                    {/* ENHANCED DEADLOCK indicators with root cause */}
+
+                    {/* ROOT CAUSE: Edge Blocked - Yellow/amber, this block points at edge */}
+                    {isEdgeBlocked && isRootCause && (
+                      <g pointerEvents="none">
+                        <rect
+                          x={pixel.x - cellSize / 2 + 1}
+                          y={pixel.y - cellSize / 2 + 1}
+                          width={cellSize - 2}
+                          height={cellSize - 2}
+                          fill="rgba(251, 191, 36, 0.2)"
+                          stroke="rgba(251, 191, 36, 0.9)"
+                          strokeWidth={3}
+                          rx={5}
+                        />
+                        {/* Edge/wall icon */}
+                        <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
+                          <circle cx={0} cy={0} r={6} fill="rgba(251, 191, 36, 0.95)" />
+                          <text x={0} y={1} textAnchor="middle" fontSize={8} fill="white" fontWeight="bold">▭</text>
+                        </g>
+                      </g>
+                    )}
+
+                    {/* Mutual Block: Purple solid border */}
                     {isMutualBlock && (
                       <g pointerEvents="none">
                         <rect
@@ -1898,7 +1975,26 @@ export function SquareBlockLevelDesigner({
                           strokeWidth={3}
                           rx={5}
                         />
-                        {/* Circular arrows icon in corner */}
+                        <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
+                          <circle cx={0} cy={0} r={6} fill="rgba(139, 92, 246, 0.95)" />
+                          <text x={0} y={1} textAnchor="middle" fontSize={8} fill="white" fontWeight="bold">↔</text>
+                        </g>
+                      </g>
+                    )}
+
+                    {/* Circular Chain: Purple with cycle icon */}
+                    {isCircularChain && (
+                      <g pointerEvents="none">
+                        <rect
+                          x={pixel.x - cellSize / 2 + 1}
+                          y={pixel.y - cellSize / 2 + 1}
+                          width={cellSize - 2}
+                          height={cellSize - 2}
+                          fill="rgba(139, 92, 246, 0.15)"
+                          stroke="rgba(139, 92, 246, 0.9)"
+                          strokeWidth={3}
+                          rx={5}
+                        />
                         <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
                           <circle cx={0} cy={0} r={6} fill="rgba(139, 92, 246, 0.95)" />
                           <text x={0} y={1} textAnchor="middle" fontSize={8} fill="white" fontWeight="bold">↻</text>
@@ -1906,8 +2002,32 @@ export function SquareBlockLevelDesigner({
                       </g>
                     )}
 
-                    {/* Blocker Block (not mutual): Orange solid border with chain icon */}
-                    {isBlocker && !isMutualBlock && !isStuck && (
+                    {/* Blocked by chain leading to edge (not root, not mutual/circular) */}
+                    {isStuck && !isMutualBlock && !isCircularChain && !isRootCause && rootCause === 'edge_blocked' && (
+                      <g pointerEvents="none">
+                        <rect
+                          x={pixel.x - cellSize / 2 + 1}
+                          y={pixel.y - cellSize / 2 + 1}
+                          width={cellSize - 2}
+                          height={cellSize - 2}
+                          fill="rgba(239, 68, 68, 0.15)"
+                          stroke="rgba(239, 68, 68, 0.9)"
+                          strokeWidth={3}
+                          strokeDasharray="5 2"
+                          rx={5}
+                        />
+                        {/* Chain length indicator */}
+                        <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
+                          <circle cx={0} cy={0} r={6} fill="rgba(239, 68, 68, 0.95)" />
+                          <text x={0} y={1} textAnchor="middle" fontSize={chainLength > 9 ? 6 : 8} fill="white" fontWeight="bold">
+                            {chainLength > 1 ? chainLength : '!'}
+                          </text>
+                        </g>
+                      </g>
+                    )}
+
+                    {/* Pure blocker (not stuck itself) */}
+                    {isBlocker && !isStuck && (
                       <g pointerEvents="none">
                         <rect
                           x={pixel.x - cellSize / 2 + 1}
@@ -1919,32 +2039,9 @@ export function SquareBlockLevelDesigner({
                           strokeWidth={3}
                           rx={5}
                         />
-                        {/* Chain link icon in corner */}
                         <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
                           <circle cx={0} cy={0} r={6} fill="rgba(245, 158, 11, 0.95)" />
                           <text x={0} y={1} textAnchor="middle" fontSize={8} fill="white" fontWeight="bold">⛓</text>
-                        </g>
-                      </g>
-                    )}
-
-                    {/* Blocked Block (not mutual): Red dashed border with warning icon */}
-                    {isStuck && !isMutualBlock && (
-                      <g pointerEvents="none">
-                        <rect
-                          x={pixel.x - cellSize / 2 + 1}
-                          y={pixel.y - cellSize / 2 + 1}
-                          width={cellSize - 2}
-                          height={cellSize - 2}
-                          fill="rgba(239, 68, 68, 0.15)"
-                          stroke="rgba(239, 68, 68, 0.9)"
-                          strokeWidth={3}
-                          strokeDasharray={isBlocker ? "none" : "5 2"}
-                          rx={5}
-                        />
-                        {/* Warning or chain icon in corner */}
-                        <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
-                          <circle cx={0} cy={0} r={6} fill={isBlocker ? "rgba(245, 158, 11, 0.95)" : "rgba(239, 68, 68, 0.95)"} />
-                          <text x={0} y={1} textAnchor="middle" fontSize={10} fill="white" fontWeight="bold">{isBlocker ? "⛓" : "!"}</text>
                         </g>
                       </g>
                     )}

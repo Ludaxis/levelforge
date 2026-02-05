@@ -27,10 +27,18 @@ import {
 // Deadlock Info Types
 // ============================================================================
 
+export type RootCauseType =
+  | 'edge_blocked'      // Block pointing at edge, can't exit
+  | 'circular_chain'    // Part of a circular blocking chain (A→B→C→A)
+  | 'mutual_block';     // Two blocks directly blocking each other (A↔B)
+
 export interface StuckReason {
-  type: 'blocked_by' | 'mutual_block' | 'both_directions_blocked';
-  blockedBy?: string;  // Key of the blocking block (e.g., "2,3")
-  message: string;     // Human-readable explanation
+  type: 'blocked_by' | 'mutual_block' | 'edge_blocked' | 'circular_chain';
+  blockedBy?: string;           // Key of the immediate blocking block
+  blockingChain: string[];      // Full chain from this block to root cause
+  rootCause: RootCauseType;     // Why the chain ultimately can't move
+  rootBlockKey?: string;        // The block at the root of the problem (for edge_blocked)
+  message: string;              // Human-readable explanation
 }
 
 export interface DeadlockInfo {
@@ -518,7 +526,7 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
   // Check if level is solvable
   const isSolvable = clearableBlocks.length > 0 || state.isComplete;
 
-  // Compute deadlock info for enhanced deadlock visualization
+  // Compute deadlock info for enhanced deadlock visualization with full chain tracing
   const deadlockInfo = useMemo((): DeadlockInfo => {
     const emptyResult: DeadlockInfo = {
       stuckBlocks: new Map(),
@@ -531,8 +539,9 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
       return emptyResult;
     }
 
-    const stuckBlocks = new Map<string, StuckReason>();
-    const blockerBlocks = new Set<string>();
+    // Step 1: Build a map of each block's immediate blocker
+    const immediateBlocker = new Map<string, string | null>(); // blockKey -> blockerKey or null (edge)
+    const isStuckBlock = new Set<string>();
 
     for (const [key, block] of state.blocks) {
       // Skip if block can be cleared
@@ -549,43 +558,115 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
         if (hasNeighbors(block.coord)) continue;
       }
 
-      // Block is stuck - determine why using getBlockPath
+      // Block is stuck
+      isStuckBlock.add(key);
       const pathInfo = getBlockPath(block);
 
       if (pathInfo.blocked && pathInfo.blockerCoord) {
-        // Blocked by another block
-        const blockerKey = gridKey(pathInfo.blockerCoord);
-        stuckBlocks.set(key, {
-          type: 'blocked_by',
-          blockedBy: blockerKey,
-          message: `Blocked by block at ${blockerKey}`,
-        });
-        blockerBlocks.add(blockerKey);
-      } else if (pathInfo.blocked && !pathInfo.holeCoord) {
-        // For bidirectional blocks, both directions are blocked
-        stuckBlocks.set(key, {
-          type: 'both_directions_blocked',
-          message: 'Both exit directions blocked',
-        });
+        immediateBlocker.set(key, gridKey(pathInfo.blockerCoord));
       } else {
-        // Fallback - shouldn't happen if canClearBlock is accurate
-        stuckBlocks.set(key, {
-          type: 'both_directions_blocked',
-          message: 'Cannot exit',
-        });
+        // Blocked by edge (no blocker block, just can't exit)
+        immediateBlocker.set(key, null);
       }
     }
 
-    // Detect mutual blocks (A blocks B, B blocks A)
-    for (const [key, reason] of stuckBlocks) {
-      if (reason.blockedBy && stuckBlocks.has(reason.blockedBy)) {
-        const otherReason = stuckBlocks.get(reason.blockedBy);
-        if (otherReason?.blockedBy === key) {
-          // Mutual block detected - update both to mutual_block type
-          reason.type = 'mutual_block';
-          reason.message = `Mutual deadlock with ${reason.blockedBy}`;
+    // Step 2: For each stuck block, trace the blocking chain to find root cause
+    const stuckBlocks = new Map<string, StuckReason>();
+    const blockerBlocks = new Set<string>();
+
+    function traceChain(startKey: string): { chain: string[]; rootCause: RootCauseType; rootBlockKey?: string } {
+      const chain: string[] = [startKey];
+      const visited = new Set<string>([startKey]);
+      let current = startKey;
+
+      while (true) {
+        const blockerKey = immediateBlocker.get(current);
+
+        if (blockerKey === null || blockerKey === undefined) {
+          // Current block is blocked by edge (can't exit grid)
+          return { chain, rootCause: 'edge_blocked', rootBlockKey: current };
         }
+
+        // Check if blocker is in our chain (circular dependency)
+        if (visited.has(blockerKey)) {
+          // Found a cycle - determine if it's mutual (2 blocks) or circular chain (3+)
+          const cycleStart = chain.indexOf(blockerKey);
+          const cycleLength = chain.length - cycleStart;
+
+          if (cycleLength === 1) {
+            // Self-blocking? Shouldn't happen, treat as edge
+            return { chain, rootCause: 'edge_blocked', rootBlockKey: current };
+          } else if (cycleLength === 2) {
+            // Mutual block: A blocks B, B blocks A
+            return { chain, rootCause: 'mutual_block' };
+          } else {
+            // Circular chain: A → B → C → A
+            return { chain, rootCause: 'circular_chain' };
+          }
+        }
+
+        // Check if blocker can clear (not stuck) - it's the root cause
+        if (!isStuckBlock.has(blockerKey)) {
+          // Blocker is not stuck - it CAN move but hasn't. This block just waits.
+          // But in a deadlock scenario, this shouldn't happen.
+          // The blocker must be pointing at an edge or also stuck.
+          const blockerBlock = state.blocks.get(blockerKey);
+          if (blockerBlock) {
+            const blockerPath = getBlockPath(blockerBlock);
+            if (!blockerPath.blocked) {
+              // Blocker can actually clear - shouldn't be in deadlock
+              return { chain, rootCause: 'edge_blocked', rootBlockKey: blockerKey };
+            }
+          }
+          return { chain, rootCause: 'edge_blocked', rootBlockKey: blockerKey };
+        }
+
+        // Continue tracing
+        chain.push(blockerKey);
+        visited.add(blockerKey);
+        current = blockerKey;
       }
+    }
+
+    for (const key of isStuckBlock) {
+      const { chain, rootCause, rootBlockKey } = traceChain(key);
+      const blockerKey = immediateBlocker.get(key);
+
+      // Add all blocks in chain (except first) as blockers
+      for (let i = 1; i < chain.length; i++) {
+        blockerBlocks.add(chain[i]);
+      }
+
+      // Create human-readable message
+      let message: string;
+      let type: StuckReason['type'];
+
+      if (rootCause === 'edge_blocked') {
+        if (chain.length === 1) {
+          message = 'Points at edge, cannot exit';
+          type = 'edge_blocked';
+        } else {
+          const rootBlock = state.blocks.get(rootBlockKey!);
+          const rootCoord = rootBlock ? `(${rootBlock.coord.row},${rootBlock.coord.col})` : rootBlockKey;
+          message = `Chain: ${chain.length} blocks → ${rootCoord} hits edge`;
+          type = 'blocked_by';
+        }
+      } else if (rootCause === 'mutual_block') {
+        message = `Mutual block with ${blockerKey}`;
+        type = 'mutual_block';
+      } else {
+        message = `Circular chain of ${chain.length} blocks`;
+        type = 'circular_chain';
+      }
+
+      stuckBlocks.set(key, {
+        type,
+        blockedBy: blockerKey ?? undefined,
+        blockingChain: chain,
+        rootCause,
+        rootBlockKey,
+        message,
+      });
     }
 
     return {
