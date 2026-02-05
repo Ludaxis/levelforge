@@ -242,7 +242,8 @@ export function importFromReferenceFormat(data: ReferenceFormat): ExportableLeve
     }
 
     const mechanic = typeof cell.mechanic === 'number' ? cell.mechanic : 0;
-    const mechanicExtras = typeof cell.mechanicExtras === 'string' ? cell.mechanicExtras : '';
+    // Handle both string and number values for mechanicExtras (dev exports as number)
+    const mechanicExtras = cell.mechanicExtras != null ? String(cell.mechanicExtras) : '';
 
     // Mechanic codes: 0=normal, 1=gate (neighbor-based), 2=timed gate, 3=mirror, 4=iced
     // Mirror: mechanic 3 OR extras contains "M"

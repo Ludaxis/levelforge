@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import {
   FruitType,
   PixelCell,
+  SinkTile,
   LauncherOrderConfig,
   PixelGroup,
   UnlockStage,
@@ -30,7 +31,9 @@ import {
   Check,
   X,
   Pencil,
+  BarChart3,
 } from 'lucide-react';
+import { OrderDifficultyPanel } from './OrderDifficultyPanel';
 
 // ============================================================================
 // Types
@@ -43,6 +46,10 @@ interface LauncherOrderEditorProps {
   config: LauncherOrderConfig | null;
   onChange: (config: LauncherOrderConfig) => void;
   onPixelArtChange?: (pixelArt: PixelCell[]) => void;
+  // Optional: sink stacks for difficulty analysis
+  sinkStacks?: SinkTile[][];
+  waitingStandSlots?: number;
+  onSinkStacksChange?: (stacks: SinkTile[][]) => void;
 }
 
 // ============================================================================
@@ -615,6 +622,9 @@ export function LauncherOrderEditor({
   config,
   onChange,
   onPixelArtChange,
+  sinkStacks,
+  waitingStandSlots = 7,
+  onSinkStacksChange,
 }: LauncherOrderEditorProps) {
   const [showGroups, setShowGroups] = useState(true);
   const [showStages, setShowStages] = useState(false);
@@ -1295,6 +1305,17 @@ export function LauncherOrderEditor({
           </CardContent>
         )}
       </Card>
+
+      {/* Order Difficulty Analysis */}
+      {sinkStacks && sinkStacks.length > 0 && (
+        <OrderDifficultyPanel
+          pixelArt={pixelArt}
+          sinkStacks={sinkStacks}
+          waitingStandSlots={waitingStandSlots}
+          launcherOrderConfig={currentConfig}
+          onSinkStacksChange={onSinkStacksChange}
+        />
+      )}
 
       {/* Launcher Queue */}
       <Card>

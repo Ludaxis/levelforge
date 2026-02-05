@@ -27,7 +27,16 @@ import {
 } from '@/lib/squareGrid';
 import { Slider } from '@/components/ui/slider';
 import { useSyncedLevelCollection } from '@/lib/storage/useSyncedLevelCollection';
-import { SyncState } from '@/lib/storage/types';
+import { useMultipleCollections } from '@/lib/storage/useMultipleCollections';
+import { SyncState, CollectionMetadata } from '@/lib/storage/types';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Layers,
   Download,
@@ -49,6 +58,9 @@ import {
   Cloud,
   CloudOff,
   Share2,
+  Plus,
+  FolderOpen,
+  ChevronDown as ChevronDownIcon,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { ShareModal } from '@/components/sharing/ShareModal';
@@ -68,6 +80,13 @@ interface SquareBlockLevelCollectionProps {
   onSawtoothConfigChange?: (config: SawtoothConfig) => void;
   syncState?: SyncState;
   onForceSync?: () => Promise<void>;
+  // Multiple collections support
+  collections?: CollectionMetadata[];
+  activeCollectionId?: string | null;
+  onCollectionChange?: (collectionId: string) => void;
+  onCreateCollection?: (name: string, description?: string) => string;
+  onRenameCollection?: (id: string, name: string, description?: string) => void;
+  onDeleteCollection?: (id: string) => void;
 }
 
 // Export the config type and default for use in parent components
@@ -132,6 +151,9 @@ export function useLevelCollection() {
     maxLevels: MAX_LEVELS,
   });
 
+  // Multiple collections support
+  const multiCollections = useMultipleCollections<DesignedLevel>('square-block', MAX_LEVELS);
+
   // Add duplicateLevel for backwards compatibility
   const duplicateLevel = useCallback((level: DesignedLevel) => {
     collection.setLevels((prev: DesignedLevel[]) => {
@@ -150,6 +172,17 @@ export function useLevelCollection() {
   return {
     ...collection,
     duplicateLevel,
+    // Multiple collections
+    collections: multiCollections.collections,
+    activeCollectionId: multiCollections.activeCollectionId,
+    activeCollection: multiCollections.activeCollection,
+    createCollection: multiCollections.createCollection,
+    renameCollection: multiCollections.renameCollection,
+    deleteCollection: multiCollections.deleteCollection,
+    setActiveCollection: multiCollections.setActiveCollection,
+    getLevelsForCollection: multiCollections.getLevelsForCollection,
+    saveLevelsForCollection: multiCollections.saveLevelsForCollection,
+    collectionsLoaded: multiCollections.isLoaded,
   };
 }
 
@@ -256,6 +289,12 @@ export function SquareBlockLevelCollection({
   onSawtoothConfigChange,
   syncState,
   onForceSync,
+  collections,
+  activeCollectionId,
+  onCollectionChange,
+  onCreateCollection,
+  onRenameCollection,
+  onDeleteCollection,
 }: SquareBlockLevelCollectionProps) {
   const { isAuthenticated, isSupabaseAvailable } = useAuth();
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -267,6 +306,14 @@ export function SquareBlockLevelCollection({
   const [showShareModal, setShowShareModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [collectionId, setCollectionId] = useState<string | null>(null);
+  // Collection management dialogs
+  const [showNewCollectionDialog, setShowNewCollectionDialog] = useState(false);
+  const [showManageDialog, setShowManageDialog] = useState(false);
+  const [newCollectionName, setNewCollectionName] = useState('');
+  const [newCollectionDesc, setNewCollectionDesc] = useState('');
+  const [editingCollectionId, setEditingCollectionId] = useState<string | null>(null);
+  const [editCollectionName, setEditCollectionName] = useState('');
+  const [editCollectionDesc, setEditCollectionDesc] = useState('');
 
   // Get collection ID for sharing
   useEffect(() => {
@@ -641,7 +688,173 @@ export function SquareBlockLevelCollection({
 
       {/* Auth Modal */}
       <AuthModal open={showAuthModal} onOpenChange={setShowAuthModal} />
+
+      {/* New Collection Dialog */}
+      <Dialog open={showNewCollectionDialog} onOpenChange={setShowNewCollectionDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Collection</DialogTitle>
+            <DialogDescription>Create a new collection to organize your levels</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Collection Name</label>
+              <Input
+                placeholder="e.g., Easy Levels, Draft, etc."
+                value={newCollectionName}
+                onChange={e => setNewCollectionName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Description (optional)</label>
+              <Input
+                placeholder="A brief description of this collection"
+                value={newCollectionDesc}
+                onChange={e => setNewCollectionDesc(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowNewCollectionDialog(false)}>Cancel</Button>
+              <Button
+                disabled={!newCollectionName.trim()}
+                onClick={() => {
+                  if (onCreateCollection && newCollectionName.trim()) {
+                    const id = onCreateCollection(newCollectionName.trim(), newCollectionDesc.trim() || undefined);
+                    setShowNewCollectionDialog(false);
+                    setNewCollectionName('');
+                    setNewCollectionDesc('');
+                    if (onCollectionChange) onCollectionChange(id);
+                  }
+                }}
+              >
+                Create
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manage Collections Dialog */}
+      <Dialog open={showManageDialog} onOpenChange={setShowManageDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Manage Collections</DialogTitle>
+            <DialogDescription>Rename or delete collections</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 pt-2 max-h-[300px] overflow-y-auto">
+            {collections?.map(c => (
+              <div key={c.id} className="flex items-center gap-2 p-2 rounded-lg border">
+                {editingCollectionId === c.id ? (
+                  <>
+                    <div className="flex-1 space-y-1">
+                      <Input
+                        value={editCollectionName}
+                        onChange={e => setEditCollectionName(e.target.value)}
+                        className="h-8"
+                        placeholder="Collection name"
+                      />
+                      <Input
+                        value={editCollectionDesc}
+                        onChange={e => setEditCollectionDesc(e.target.value)}
+                        className="h-8"
+                        placeholder="Description (optional)"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        if (onRenameCollection && editCollectionName.trim()) {
+                          onRenameCollection(c.id, editCollectionName.trim(), editCollectionDesc.trim() || undefined);
+                        }
+                        setEditingCollectionId(null);
+                      }}
+                    >
+                      Save
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setEditingCollectionId(null)}>
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <FolderOpen className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{c.name}</p>
+                      <p className="text-xs text-muted-foreground">{c.levelCount} levels</p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => {
+                        setEditingCollectionId(c.id);
+                        setEditCollectionName(c.name);
+                        setEditCollectionDesc(c.description || '');
+                      }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 text-destructive"
+                      onClick={() => {
+                        if (onDeleteCollection && confirm(`Delete "${c.name}"? This cannot be undone.`)) {
+                          onDeleteCollection(c.id);
+                        }
+                      }}
+                      disabled={collections.length <= 1}
+                      title={collections.length <= 1 ? "Cannot delete last collection" : "Delete collection"}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <CardContent className="space-y-4">
+        {/* Collection Selector (only shown when multiple collections enabled) */}
+        {collections && collections.length > 0 && (
+          <div className="flex items-center gap-2 pb-2 border-b">
+            <FolderOpen className="h-4 w-4 text-muted-foreground" />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="flex-1 justify-between">
+                  <span className="truncate">
+                    {collections.find(c => c.id === activeCollectionId)?.name || 'Select collection'}
+                  </span>
+                  <ChevronDownIcon className="h-4 w-4 ml-2 shrink-0" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                {collections.map(c => (
+                  <DropdownMenuItem
+                    key={c.id}
+                    onClick={() => onCollectionChange?.(c.id)}
+                    className={c.id === activeCollectionId ? 'bg-accent' : ''}
+                  >
+                    <span className="flex-1 truncate">{c.name}</span>
+                    <Badge variant="outline" className="ml-2">{c.levelCount}</Badge>
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setShowNewCollectionDialog(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Collection
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowManageDialog(true)}>
+                  <Settings className="h-4 w-4 mr-2" />
+                  Manage Collections
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
+
         {/* Search and Settings Toggle */}
         <div className="flex gap-2">
           <div className="relative flex-1">

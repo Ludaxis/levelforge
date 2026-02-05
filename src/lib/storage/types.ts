@@ -3,6 +3,32 @@
  */
 
 /**
+ * Game type identifier
+ */
+export type GameType = 'fruit-match' | 'hexa-block' | 'square-block';
+
+/**
+ * Collection metadata for multiple collections
+ */
+export interface CollectionMetadata {
+  id: string;
+  name: string;
+  description?: string;
+  gameType: GameType;
+  createdAt: number;
+  updatedAt: number;
+  levelCount: number;
+}
+
+/**
+ * Index of all collections for a game type
+ */
+export interface CollectionIndex {
+  collections: CollectionMetadata[];
+  activeCollectionId: string | null;
+}
+
+/**
  * Sync status indicator
  */
 export type SyncStatus = 'synced' | 'pending' | 'conflict' | 'offline' | 'error';

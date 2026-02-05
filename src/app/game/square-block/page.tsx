@@ -71,6 +71,7 @@ function GameContainer({ level, onBack }: { level: SquareBlockLevel; onBack?: ()
               isBlockUnlocked={game.isBlockUnlocked}
               getRemainingIce={game.getRemainingIce}
               isBlockMirror={game.isBlockMirror}
+              deadlockInfo={game.deadlockInfo}
             />
           </CardContent>
         </Card>
@@ -184,7 +185,22 @@ function SquareBlockPageContent() {
   const [sawtoothConfig, setSawtoothConfig] = useState<SawtoothConfig>(DEFAULT_SAWTOOTH_CONFIG);
 
   // Level collection state
-  const { levels, setLevels, isLoaded, addLevel, importLevels, syncState, forceSync } = useLevelCollection();
+  const {
+    levels,
+    setLevels,
+    isLoaded,
+    addLevel,
+    importLevels,
+    syncState,
+    forceSync,
+    // Multiple collections
+    collections,
+    activeCollectionId,
+    createCollection,
+    renameCollection,
+    deleteCollection,
+    setActiveCollection,
+  } = useLevelCollection();
 
   // Handle shared import
   useEffect(() => {
@@ -311,6 +327,8 @@ function SquareBlockPageContent() {
             maxLevelNumber={100}
             editingLevel={editingLevel}
             showMetricsPanel={false}
+            collections={collections}
+            activeCollectionId={activeCollectionId}
           />
         </TabsContent>
 
@@ -331,6 +349,12 @@ function SquareBlockPageContent() {
               onSawtoothConfigChange={setSawtoothConfig}
               syncState={syncState}
               onForceSync={forceSync}
+              collections={collections}
+              activeCollectionId={activeCollectionId}
+              onCollectionChange={setActiveCollection}
+              onCreateCollection={createCollection}
+              onRenameCollection={renameCollection}
+              onDeleteCollection={deleteCollection}
             />
           </div>
         </TabsContent>

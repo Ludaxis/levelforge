@@ -49,6 +49,15 @@ import {
   ZoomIn, ZoomOut, Maximize, Move
 } from 'lucide-react';
 import { downloadLevelAsJSON, parseAndImportLevel } from '@/lib/squareBlockExport';
+import { CollectionMetadata } from '@/lib/storage/types';
+import { DeadlockInfo, StuckReason } from '@/lib/useSquareBlockGame';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { ChevronDown, FolderOpen } from 'lucide-react';
 
 // ============================================================================
 // Constants
@@ -86,18 +95,43 @@ const SAWTOOTH_EXPECTED_DISPLAY = {
   6: 'medium', 7: 'medium', 8: 'hard', 9: 'hard', 10: 'superHard',
 } as const;
 
+// Helper function to convert hex color to grayscale
+function toGrayscale(hexColor: string): string {
+  if (!hexColor.startsWith('#')) return hexColor;
+  const r = parseInt(hexColor.slice(1, 3), 16);
+  const g = parseInt(hexColor.slice(3, 5), 16);
+  const b = parseInt(hexColor.slice(5, 7), 16);
+  const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+  return `#${gray.toString(16).padStart(2, '0').repeat(3)}`;
+}
+
 // ============================================================================
 // Types
 // ============================================================================
 
+interface StagedLevel {
+  id: string;
+  filename: string;
+  levelData: { rows: number; cols: number; blocks: SquareBlock[] };
+  blockCount: number;
+  solvable: boolean;
+  difficultyScore: number | null;
+  difficultyTier: DifficultyTier | null;
+  selected: boolean;
+  error?: string;
+}
+
 interface SquareBlockLevelDesignerProps {
   onPlayLevel: (level: SquareBlockLevel) => void;
-  onAddToCollection?: (level: DesignedLevel) => void;
+  onAddToCollection?: (level: DesignedLevel, collectionId?: string) => void;
   levelNumber?: number;
   onLevelNumberChange?: (num: number) => void;
   maxLevelNumber?: number;
   editingLevel?: DesignedLevel | null;
   showMetricsPanel?: boolean;
+  // Multiple collections support
+  collections?: CollectionMetadata[];
+  activeCollectionId?: string | null;
 }
 
 // ============================================================================
@@ -112,10 +146,22 @@ export function SquareBlockLevelDesigner({
   maxLevelNumber = 100,
   editingLevel,
   showMetricsPanel = false,
+  collections,
+  activeCollectionId,
 }: SquareBlockLevelDesignerProps) {
   // Grid configuration
   const [rows, setRows] = useState(5);
   const [cols, setCols] = useState(5);
+
+  // Target collection for adding levels
+  const [targetCollectionId, setTargetCollectionId] = useState<string | undefined>(activeCollectionId ?? undefined);
+
+  // Update target collection when active collection changes
+  useEffect(() => {
+    if (activeCollectionId && !targetCollectionId) {
+      setTargetCollectionId(activeCollectionId);
+    }
+  }, [activeCollectionId, targetCollectionId]);
 
 
 
@@ -129,6 +175,9 @@ export function SquareBlockLevelDesigner({
   // Placed blocks and holes
   const [blocks, setBlocks] = useState<Map<string, SquareBlock>>(new Map());
   const [holes, setHoles] = useState<Set<string>>(new Set());
+
+  // Multi-file import staging
+  const [stagedLevels, setStagedLevels] = useState<StagedLevel[]>([]);
 
   // Load editing level when it changes
   useEffect(() => {
@@ -334,6 +383,138 @@ export function SquareBlockLevelDesigner({
       };
     }
   }, [blocks, holes, rows, cols]);
+
+  // Get path info for a single direction (for deadlock analysis)
+  const getDirectionPath = useCallback((
+    startCoord: GridCoord,
+    direction: SquareDirection,
+    currentBlocks: Map<string, SquareBlock>,
+    currentHoles: Set<string>
+  ): { blocked: boolean; blockerCoord: GridCoord | null; holeCoord: GridCoord | null } => {
+    const dirVec = SQUARE_DIRECTIONS[direction];
+    let current = gridAdd(startCoord, dirVec);
+    let blockerCoord: GridCoord | null = null;
+    let holeCoord: GridCoord | null = null;
+
+    while (isInBounds(current, rows, cols)) {
+      const key = gridKey(current);
+      if (currentHoles.has(key)) {
+        holeCoord = current;
+        return { blocked: false, blockerCoord: null, holeCoord };
+      }
+      if (currentBlocks.has(key)) {
+        blockerCoord = current;
+        return { blocked: true, blockerCoord, holeCoord: null };
+      }
+      current = gridAdd(current, dirVec);
+    }
+    return { blocked: false, blockerCoord: null, holeCoord: null };
+  }, [rows, cols]);
+
+  // Get the best path for a block (handles bidirectional)
+  const getBlockPath = useCallback((
+    block: SquareBlock,
+    currentBlocks: Map<string, SquareBlock>,
+    currentHoles: Set<string>
+  ): { blocked: boolean; blockerCoord: GridCoord | null; holeCoord: GridCoord | null } => {
+    if (isBidirectional(block.direction)) {
+      const [dir1, dir2] = getAxisDirections(block.direction);
+      const path1 = getDirectionPath(block.coord, dir1, currentBlocks, currentHoles);
+      const path2 = getDirectionPath(block.coord, dir2, currentBlocks, currentHoles);
+
+      // If either direction is clear, block is not stuck
+      if (!path1.blocked || path1.holeCoord) {
+        return path1;
+      }
+      if (!path2.blocked || path2.holeCoord) {
+        return path2;
+      }
+      // Both blocked - return the first one's blocker info
+      return path1;
+    }
+    return getDirectionPath(block.coord, block.direction as SquareDirection, currentBlocks, currentHoles);
+  }, [getDirectionPath]);
+
+  // Compute deadlock info for enhanced visualization
+  const deadlockInfo = useMemo((): DeadlockInfo => {
+    const emptyResult: DeadlockInfo = {
+      stuckBlocks: new Map(),
+      blockerBlocks: new Set(),
+      hasDeadlock: false,
+    };
+
+    if (solvability.solvable) return emptyResult;
+
+    const stuckBlocks = new Map<string, StuckReason>();
+    const blockerBlocks = new Set<string>();
+
+    for (const [key, block] of blocks) {
+      // Skip if currently clearable
+      if (canClearBlock(block, blocks, holes)) continue;
+
+      // Iced blocks with ice remaining are "waiting" (not stuck yet)
+      if (block.iceCount && block.iceCount > 0) continue;
+
+      // Gate blocks with neighbors are "waiting" for neighbors to clear
+      if (block.locked) {
+        const hasNeighbor = ['N', 'E', 'S', 'W'].some(dir => {
+          const neighborCoord = gridAdd(block.coord, SQUARE_DIRECTIONS[dir as SquareDirection]);
+          return blocks.has(gridKey(neighborCoord));
+        });
+        if (hasNeighbor) continue;
+      }
+
+      // Block is stuck - determine why
+      const pathInfo = getBlockPath(block, blocks, holes);
+
+      if (pathInfo.blocked && pathInfo.blockerCoord) {
+        const blockerKey = gridKey(pathInfo.blockerCoord);
+        stuckBlocks.set(key, {
+          type: 'blocked_by',
+          blockedBy: blockerKey,
+          message: `Blocked by block at ${blockerKey}`,
+        });
+        blockerBlocks.add(blockerKey);
+      } else {
+        stuckBlocks.set(key, {
+          type: 'both_directions_blocked',
+          message: 'Both exit directions blocked',
+        });
+      }
+    }
+
+    // Detect mutual blocks
+    for (const [key, reason] of stuckBlocks) {
+      if (reason.blockedBy && stuckBlocks.has(reason.blockedBy)) {
+        const otherReason = stuckBlocks.get(reason.blockedBy);
+        if (otherReason?.blockedBy === key) {
+          reason.type = 'mutual_block';
+          reason.message = `Mutual deadlock with ${reason.blockedBy}`;
+        }
+      }
+    }
+
+    return {
+      stuckBlocks,
+      blockerBlocks,
+      hasDeadlock: stuckBlocks.size > 0,
+    };
+  }, [blocks, holes, solvability.solvable, canClearBlock, getBlockPath]);
+
+  // For backward compatibility
+  const stuckBlocks = useMemo(() => new Set(deadlockInfo.stuckBlocks.keys()), [deadlockInfo]);
+
+  // Block type counts for display
+  const blockTypeCounts = useMemo(() => {
+    const blocksArray = Array.from(blocks.values());
+    return {
+      total: blocksArray.length,
+      normal: blocksArray.filter(b => !b.locked && !(b.iceCount && b.iceCount > 0) && !b.mirror).length,
+      gate: blocksArray.filter(b => b.locked).length,
+      ice: blocksArray.filter(b => b.iceCount && b.iceCount > 0).length,
+      mirror: blocksArray.filter(b => b.mirror).length,
+    };
+  }, [blocks]);
 
   // Deep puzzle analysis for difficulty scoring
   const puzzleAnalysis = useMemo(() => {
@@ -884,7 +1065,7 @@ export function SquareBlockLevelDesigner({
     downloadLevelAsJSON(levelData, filename);
   };
 
-  // Import level from JSON
+  // Import level from JSON (single file - loads into designer)
   const handleImportJSON = () => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -917,6 +1098,130 @@ export function SquareBlockLevelDesigner({
       }
     };
     input.click();
+  };
+
+  // Import multiple files (adds to staging area)
+  const handleImportMultipleFiles = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.multiple = true;
+    input.onchange = async (e) => {
+      const files = (e.target as HTMLInputElement).files;
+      if (!files) return;
+
+      const newStaged: StagedLevel[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        try {
+          const content = await file.text();
+          const imported = parseAndImportLevel(content);
+          if (imported) {
+            const blockMap = new Map<string, SquareBlock>();
+            for (const block of imported.blocks) {
+              blockMap.set(gridKey(block.coord), block);
+            }
+            const result = analyzerQuickSolve(blockMap, new Set(), imported.rows, imported.cols);
+            let difficultyScore: number | null = null;
+            let difficultyTier: DifficultyTier | null = null;
+            if (result.solvable) {
+              const analysis = analyzePuzzle(blockMap, new Set(), imported.rows, imported.cols);
+              if (analysis.solvable) {
+                const breakdown = calculateDifficultyScore(analysis);
+                difficultyScore = breakdown.score;
+                difficultyTier = breakdown.tier;
+              }
+            }
+            newStaged.push({
+              id: `staged-${Date.now()}-${i}`,
+              filename: file.name,
+              levelData: imported,
+              blockCount: imported.blocks.length,
+              solvable: result.solvable,
+              difficultyScore,
+              difficultyTier,
+              selected: result.solvable,
+            });
+          } else {
+            newStaged.push({
+              id: `staged-${Date.now()}-${i}`,
+              filename: file.name,
+              levelData: { rows: 0, cols: 0, blocks: [] },
+              blockCount: 0, solvable: false, difficultyScore: null, difficultyTier: null,
+              selected: false, error: 'Invalid format',
+            });
+          }
+        } catch {
+          newStaged.push({
+            id: `staged-${Date.now()}-${i}`,
+            filename: file.name,
+            levelData: { rows: 0, cols: 0, blocks: [] },
+            blockCount: 0, solvable: false, difficultyScore: null, difficultyTier: null,
+            selected: false, error: 'Parse error',
+          });
+        }
+      }
+      setStagedLevels(prev => [...prev, ...newStaged]);
+    };
+    input.click();
+  };
+
+  // Add staged levels to collection
+  const handleAddStagedToCollection = () => {
+    if (!onAddToCollection) return;
+    const selected = stagedLevels.filter(s => s.selected && !s.error && s.solvable);
+    let currentLevelNum = levelNumber;
+    for (const staged of selected) {
+      const blockMap = new Map<string, SquareBlock>();
+      for (const block of staged.levelData.blocks) {
+        blockMap.set(gridKey(block.coord), block);
+      }
+      const analysis = analyzePuzzle(blockMap, new Set(), staged.levelData.rows, staged.levelData.cols);
+      const breakdown = analysis.solvable ? calculateDifficultyScore(analysis) : null;
+      const sawtoothPosition = getSawtoothPosition(currentLevelNum);
+      const flowZone = breakdown ? calculateFlowZone(breakdown.tier, currentLevelNum) : 'flow';
+      const lockedCount = staged.levelData.blocks.filter(b => b.locked).length;
+      const icedCount = staged.levelData.blocks.filter(b => b.iceCount && b.iceCount > 0).length;
+      const mirrorCount = staged.levelData.blocks.filter(b => b.mirror).length;
+
+      const metrics: LevelMetrics = {
+        cellCount: staged.levelData.blocks.length,
+        holeCount: 0,
+        lockedCount,
+        icedCount,
+        mirrorCount,
+        gridSize: staged.levelData.rows * staged.levelData.cols,
+        density: analysis?.density ?? 0,
+        initialClearability: analysis?.initialClearability ?? 0,
+        solutionCount: analysis?.solutionCount ?? 0,
+        avgBranchingFactor: analysis?.avgBranchingFactor ?? 0,
+        forcedMoveRatio: analysis?.forcedMoveRatio ?? 0,
+        solutionDepth: analysis?.solutionDepth ?? 0,
+        difficultyScore: breakdown?.score ?? 0,
+        difficulty: breakdown?.tier ?? 'easy',
+        flowZone,
+        sawtoothPosition,
+      };
+
+      const designedLevel: DesignedLevel = {
+        id: `level-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        name: `Level ${currentLevelNum}`,
+        levelNumber: currentLevelNum,
+        rows: staged.levelData.rows,
+        cols: staged.levelData.cols,
+        blocks: staged.levelData.blocks,
+        gameMode: 'classic',
+        metrics,
+        createdAt: Date.now(),
+      };
+
+      onAddToCollection(designedLevel, targetCollectionId);
+      currentLevelNum++;
+    }
+    setStagedLevels([]); // Clear staging after adding
+    if (onLevelNumberChange) {
+      onLevelNumberChange(currentLevelNum);
+    }
   };
 
   // Add to collection
@@ -967,7 +1272,7 @@ export function SquareBlockLevelDesigner({
       createdAt: editingLevel?.createdAt || Date.now(),
     };
 
-    onAddToCollection(designedLevel);
+    onAddToCollection(designedLevel, targetCollectionId);
     // Clear the designer after adding
     setBlocks(new Map());
     setHoles(new Set());
@@ -1000,6 +1305,106 @@ export function SquareBlockLevelDesigner({
 
   return (
     <div className="space-y-4">
+      {/* Import Staging Area - TOP of Design section */}
+      {stagedLevels.length > 0 && (
+        <Card className="border-blue-500/30">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Upload className="h-4 w-4" />
+                Imported Files ({stagedLevels.length})
+              </CardTitle>
+              <Button variant="ghost" size="sm" onClick={() => setStagedLevels([])}>
+                Clear All
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="max-h-[250px] overflow-y-auto space-y-2">
+              {stagedLevels.map(staged => (
+                <div key={staged.id} className={`flex items-center gap-3 p-2 rounded-lg border ${
+                  staged.error ? 'bg-red-500/10 border-red-500/30' :
+                  staged.solvable ? 'bg-green-500/10 border-green-500/30' :
+                  'bg-amber-500/10 border-amber-500/30'
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={staged.selected}
+                    disabled={!!staged.error || !staged.solvable}
+                    onChange={(e) => setStagedLevels(prev =>
+                      prev.map(s => s.id === staged.id ? { ...s, selected: e.target.checked } : s)
+                    )}
+                    className="h-4 w-4"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{staged.filename}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {staged.levelData.rows}×{staged.levelData.cols} · {staged.blockCount} blocks
+                    </p>
+                  </div>
+                  {staged.error ? (
+                    <Badge variant="destructive">{staged.error}</Badge>
+                  ) : !staged.solvable ? (
+                    <Badge variant="outline" className="text-amber-500">Deadlock</Badge>
+                  ) : (
+                    <Badge className={
+                      staged.difficultyTier === 'easy' ? 'bg-green-500' :
+                      staged.difficultyTier === 'medium' ? 'bg-yellow-500 text-black' :
+                      staged.difficultyTier === 'hard' ? 'bg-orange-500' : 'bg-red-500'
+                    }>
+                      {staged.difficultyScore}
+                    </Badge>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    onClick={() => {
+                      // Load into designer for preview/editing
+                      setRows(staged.levelData.rows);
+                      setCols(staged.levelData.cols);
+                      const blockMap = new Map<string, SquareBlock>();
+                      for (const block of staged.levelData.blocks) {
+                        blockMap.set(gridKey(block.coord), block);
+                      }
+                      setBlocks(blockMap);
+                      setHoles(new Set());
+                    }}
+                    title="Load into designer"
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0 text-destructive"
+                    onClick={() => setStagedLevels(prev => prev.filter(s => s.id !== staged.id))}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 pt-2 border-t">
+              <Button variant="outline" size="sm" onClick={handleImportMultipleFiles}>
+                <Plus className="h-4 w-4 mr-1" /> Add More Files
+              </Button>
+              <div className="flex-1" />
+              <span className="text-xs text-muted-foreground">
+                {stagedLevels.filter(s => s.selected).length} selected
+              </span>
+              <Button
+                size="sm"
+                disabled={stagedLevels.filter(s => s.selected).length === 0 || !onAddToCollection}
+                onClick={handleAddStagedToCollection}
+              >
+                Add to Collection
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Solvability Check */}
       <div
         className={`flex items-center gap-2 p-3 rounded-lg ${
@@ -1015,13 +1420,49 @@ export function SquareBlockLevelDesigner({
           <p className={`text-sm font-medium ${solvability.solvable ? 'text-green-500' : 'text-amber-500'}`}>
             {solvability.solvable ? 'Level is solvable!' : 'Not solvable'}
           </p>
-          <p className="text-xs text-muted-foreground">{solvability.message}</p>
+          <p className="text-xs text-muted-foreground">
+            {!solvability.solvable && deadlockInfo.hasDeadlock
+              ? (() => {
+                  const mutualCount = Array.from(deadlockInfo.stuckBlocks.values()).filter(r => r.type === 'mutual_block').length / 2;
+                  const blockedCount = deadlockInfo.stuckBlocks.size - (mutualCount * 2);
+                  const blockerOnlyCount = Array.from(deadlockInfo.blockerBlocks).filter(k => !deadlockInfo.stuckBlocks.has(k)).length;
+                  const parts: string[] = [];
+                  if (mutualCount > 0) parts.push(`${Math.floor(mutualCount)} mutual`);
+                  if (blockedCount > 0) parts.push(`${blockedCount} blocked`);
+                  if (blockerOnlyCount > 0) parts.push(`${blockerOnlyCount} blocker${blockerOnlyCount > 1 ? 's' : ''}`);
+                  return `Deadlock: ${parts.join(', ')}`;
+                })()
+              : solvability.message}
+          </p>
         </div>
         <div className="flex gap-2 items-center">
           <Badge variant="outline">{blocks.size} blocks</Badge>
           {holes.size > 0 && <Badge variant="outline">{holes.size} holes</Badge>}
         </div>
       </div>
+
+      {/* Block Type Counts */}
+      {blocks.size > 0 && (
+        <div className="flex items-center gap-4 p-3 bg-muted/30 rounded-lg text-sm">
+          <span className="text-muted-foreground font-medium">Block Types:</span>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-3 rounded bg-cyan-500" />
+            <span>{blockTypeCounts.normal}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-3 rounded bg-amber-500" />
+            <span className="text-amber-400">{blockTypeCounts.gate} gate</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-3 rounded bg-blue-400" />
+            <span className="text-blue-400">{blockTypeCounts.ice} ice</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-3 rounded bg-purple-500" />
+            <span className="text-purple-400">{blockTypeCounts.mirror} mirror</span>
+          </div>
+        </div>
+      )}
 
       {/* Design Canvas */}
       <Card>
@@ -1303,6 +1744,16 @@ export function SquareBlockLevelDesigner({
                 const canClear = canClearBlock(block, blocks, holes);
                 const isBlockHovered = hoveredCell === key;
 
+                // Deadlock state
+                const hasDeadlock = deadlockInfo.hasDeadlock;
+                const stuckReason = deadlockInfo.stuckBlocks.get(key);
+                const isBlocker = deadlockInfo.blockerBlocks.has(key);
+                const isStuck = !!stuckReason;
+                const isMutualBlock = stuckReason?.type === 'mutual_block';
+
+                // Apply grayscale when in deadlock state
+                const blockColor = hasDeadlock ? toGrayscale(block.color) : block.color;
+
                 return (
                   <g
                     key={key}
@@ -1316,7 +1767,7 @@ export function SquareBlockLevelDesigner({
                       y={pixel.y - cellSize / 2 + 4}
                       width={cellSize - 8}
                       height={cellSize - 8}
-                      fill={block.color}
+                      fill={blockColor}
                       stroke={isBlockHovered ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.3)'}
                       strokeWidth={isBlockHovered ? 2 : 1.5}
                       rx={4}
@@ -1366,6 +1817,7 @@ export function SquareBlockLevelDesigner({
                     {/* Mirror overlay for mirror blocks */}
                     {block.mirror && (
                       <g pointerEvents="none">
+                        {/* Purple dashed border */}
                         <rect
                           x={pixel.x - cellSize / 2 + 2}
                           y={pixel.y - cellSize / 2 + 2}
@@ -1377,10 +1829,13 @@ export function SquareBlockLevelDesigner({
                           strokeDasharray="4 2"
                           rx={4}
                         />
-                        {/* Small mirror icon in corner */}
-                        <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
-                          <circle cx={0} cy={0} r={5} fill="rgba(168, 85, 247, 0.9)" />
-                          <path d="M -2 0 L 0 -1.5 L 0 -0.5 L 1.5 -0.5 L 1.5 -1.5 L 2 0 L 1.5 1.5 L 1.5 0.5 L 0 0.5 L 0 1.5 Z" fill="white" transform="scale(0.6)" />
+                        {/* Mirror icon in BOTTOM-LEFT corner */}
+                        <g transform={`translate(${pixel.x - cellSize / 2 + 10}, ${pixel.y + cellSize / 2 - 10})`}>
+                          <circle cx={0} cy={0} r={7} fill="rgba(168, 85, 247, 0.95)" stroke="white" strokeWidth={1.5} />
+                          {/* Flip horizontal arrows icon */}
+                          <g transform="scale(0.8)">
+                            <path d="M -3 0 L -1 -2 L -1 -0.8 L 1 -0.8 L 1 -2 L 3 0 L 1 2 L 1 0.8 L -1 0.8 L -1 2 Z" fill="white" />
+                          </g>
                         </g>
                       </g>
                     )}
@@ -1428,6 +1883,70 @@ export function SquareBlockLevelDesigner({
                         rx={4}
                         pointerEvents="none"
                       />
+                    )}
+                    {/* ENHANCED DEADLOCK indicators */}
+                    {/* Mutual Block: Purple solid border with circular arrow icon */}
+                    {isMutualBlock && (
+                      <g pointerEvents="none">
+                        <rect
+                          x={pixel.x - cellSize / 2 + 1}
+                          y={pixel.y - cellSize / 2 + 1}
+                          width={cellSize - 2}
+                          height={cellSize - 2}
+                          fill="rgba(139, 92, 246, 0.15)"
+                          stroke="rgba(139, 92, 246, 0.9)"
+                          strokeWidth={3}
+                          rx={5}
+                        />
+                        {/* Circular arrows icon in corner */}
+                        <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
+                          <circle cx={0} cy={0} r={6} fill="rgba(139, 92, 246, 0.95)" />
+                          <text x={0} y={1} textAnchor="middle" fontSize={8} fill="white" fontWeight="bold">↻</text>
+                        </g>
+                      </g>
+                    )}
+
+                    {/* Blocker Block (not mutual): Orange solid border with chain icon */}
+                    {isBlocker && !isMutualBlock && !isStuck && (
+                      <g pointerEvents="none">
+                        <rect
+                          x={pixel.x - cellSize / 2 + 1}
+                          y={pixel.y - cellSize / 2 + 1}
+                          width={cellSize - 2}
+                          height={cellSize - 2}
+                          fill="rgba(245, 158, 11, 0.15)"
+                          stroke="rgba(245, 158, 11, 0.9)"
+                          strokeWidth={3}
+                          rx={5}
+                        />
+                        {/* Chain link icon in corner */}
+                        <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
+                          <circle cx={0} cy={0} r={6} fill="rgba(245, 158, 11, 0.95)" />
+                          <text x={0} y={1} textAnchor="middle" fontSize={8} fill="white" fontWeight="bold">⛓</text>
+                        </g>
+                      </g>
+                    )}
+
+                    {/* Blocked Block (not mutual): Red dashed border with warning icon */}
+                    {isStuck && !isMutualBlock && (
+                      <g pointerEvents="none">
+                        <rect
+                          x={pixel.x - cellSize / 2 + 1}
+                          y={pixel.y - cellSize / 2 + 1}
+                          width={cellSize - 2}
+                          height={cellSize - 2}
+                          fill="rgba(239, 68, 68, 0.15)"
+                          stroke="rgba(239, 68, 68, 0.9)"
+                          strokeWidth={3}
+                          strokeDasharray={isBlocker ? "none" : "5 2"}
+                          rx={5}
+                        />
+                        {/* Warning or chain icon in corner */}
+                        <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
+                          <circle cx={0} cy={0} r={6} fill={isBlocker ? "rgba(245, 158, 11, 0.95)" : "rgba(239, 68, 68, 0.95)"} />
+                          <text x={0} y={1} textAnchor="middle" fontSize={10} fill="white" fontWeight="bold">{isBlocker ? "⛓" : "!"}</text>
+                        </g>
+                      </g>
                     )}
                   </g>
                 );
@@ -1724,6 +2243,34 @@ export function SquareBlockLevelDesigner({
                   {getExpectedDifficulty(levelNumber)}
                 </span> (Position {getSawtoothPosition(levelNumber)} in cycle)
               </div>
+              {/* Collection Target Selector */}
+              {collections && collections.length > 1 && (
+                <div className="flex items-center gap-2">
+                  <FolderOpen className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" className="flex-1 justify-between h-8">
+                        <span className="truncate text-xs">
+                          {collections.find(c => c.id === targetCollectionId)?.name || 'Select collection'}
+                        </span>
+                        <ChevronDown className="h-3 w-3 ml-1 shrink-0" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-56">
+                      {collections.map(c => (
+                        <DropdownMenuItem
+                          key={c.id}
+                          onClick={() => setTargetCollectionId(c.id)}
+                          className={c.id === targetCollectionId ? 'bg-accent' : ''}
+                        >
+                          <span className="flex-1 truncate">{c.name}</span>
+                          <span className="text-xs text-muted-foreground ml-2">{c.levelCount}</span>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              )}
               <Button
                 size="sm"
                 variant="secondary"
@@ -1732,7 +2279,7 @@ export function SquareBlockLevelDesigner({
                 className="w-full"
               >
                 <Plus className="h-4 w-4 mr-2" />
-                {editingLevel ? 'Update Level' : 'Add to Collection'}
+                {editingLevel ? 'Update Level' : `Add to ${collections?.find(c => c.id === targetCollectionId)?.name || 'Collection'}`}
               </Button>
             </div>
           )}
@@ -1743,11 +2290,12 @@ export function SquareBlockLevelDesigner({
               <Button
                 size="sm"
                 variant="outline"
-                onClick={handleImportJSON}
+                onClick={handleImportMultipleFiles}
                 className="flex-1"
+                title="Import multiple JSON files"
               >
                 <Upload className="h-4 w-4 mr-2" />
-                Import JSON
+                Import Files
               </Button>
               <Button
                 size="sm"

@@ -23,6 +23,22 @@ import {
   getOppositeDirection,
 } from '@/lib/squareGrid';
 
+// ============================================================================
+// Deadlock Info Types
+// ============================================================================
+
+export interface StuckReason {
+  type: 'blocked_by' | 'mutual_block' | 'both_directions_blocked';
+  blockedBy?: string;  // Key of the blocking block (e.g., "2,3")
+  message: string;     // Human-readable explanation
+}
+
+export interface DeadlockInfo {
+  stuckBlocks: Map<string, StuckReason>;  // Map of block key -> reason
+  blockerBlocks: Set<string>;              // Blocks causing others to be stuck
+  hasDeadlock: boolean;
+}
+
 const MAX_CANVAS_SIZE = 500;
 const MIN_CELL_SIZE = 10;
 const MAX_CELL_SIZE = 50;
@@ -502,6 +518,88 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
   // Check if level is solvable
   const isSolvable = clearableBlocks.length > 0 || state.isComplete;
 
+  // Compute deadlock info for enhanced deadlock visualization
+  const deadlockInfo = useMemo((): DeadlockInfo => {
+    const emptyResult: DeadlockInfo = {
+      stuckBlocks: new Map(),
+      blockerBlocks: new Set(),
+      hasDeadlock: false,
+    };
+
+    // Only analyze deadlock when there are no clearable blocks and game is not complete
+    if (clearableBlocks.length > 0 || state.isComplete || state.isLost) {
+      return emptyResult;
+    }
+
+    const stuckBlocks = new Map<string, StuckReason>();
+    const blockerBlocks = new Set<string>();
+
+    for (const [key, block] of state.blocks) {
+      // Skip if block can be cleared
+      if (canClearBlock(block)) continue;
+
+      // Ice blocks still frozen are "waiting" not stuck
+      if (block.iceCount !== undefined && block.iceCount > 0) {
+        const remainingIce = block.iceCount - state.moveCount;
+        if (remainingIce > 0) continue;
+      }
+
+      // Gate blocks with neighbors are "waiting"
+      if (block.locked && !isBlockUnlocked(block)) {
+        if (hasNeighbors(block.coord)) continue;
+      }
+
+      // Block is stuck - determine why using getBlockPath
+      const pathInfo = getBlockPath(block);
+
+      if (pathInfo.blocked && pathInfo.blockerCoord) {
+        // Blocked by another block
+        const blockerKey = gridKey(pathInfo.blockerCoord);
+        stuckBlocks.set(key, {
+          type: 'blocked_by',
+          blockedBy: blockerKey,
+          message: `Blocked by block at ${blockerKey}`,
+        });
+        blockerBlocks.add(blockerKey);
+      } else if (pathInfo.blocked && !pathInfo.holeCoord) {
+        // For bidirectional blocks, both directions are blocked
+        stuckBlocks.set(key, {
+          type: 'both_directions_blocked',
+          message: 'Both exit directions blocked',
+        });
+      } else {
+        // Fallback - shouldn't happen if canClearBlock is accurate
+        stuckBlocks.set(key, {
+          type: 'both_directions_blocked',
+          message: 'Cannot exit',
+        });
+      }
+    }
+
+    // Detect mutual blocks (A blocks B, B blocks A)
+    for (const [key, reason] of stuckBlocks) {
+      if (reason.blockedBy && stuckBlocks.has(reason.blockedBy)) {
+        const otherReason = stuckBlocks.get(reason.blockedBy);
+        if (otherReason?.blockedBy === key) {
+          // Mutual block detected - update both to mutual_block type
+          reason.type = 'mutual_block';
+          reason.message = `Mutual deadlock with ${reason.blockedBy}`;
+        }
+      }
+    }
+
+    return {
+      stuckBlocks,
+      blockerBlocks,
+      hasDeadlock: stuckBlocks.size > 0,
+    };
+  }, [state.blocks, state.moveCount, state.isComplete, state.isLost, clearableBlocks, canClearBlock, hasNeighbors, isBlockUnlocked, getBlockPath]);
+
+  // For backward compatibility, provide stuckBlocks as a Set (derived from deadlockInfo)
+  const stuckBlocks = useMemo(() => {
+    return new Set(deadlockInfo.stuckBlocks.keys());
+  }, [deadlockInfo]);
+
   return {
     state,
     tapBlock,
@@ -511,6 +609,8 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
     canClearBlock,
     clearableBlocks,
     isSolvable,
+    stuckBlocks,
+    deadlockInfo,
     getBlockPath,
     isBlockUnlocked,
     getRemainingIce,

@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   FruitType,
   PixelCell,
+  SinkTile,
   FruitMatchLevel,
   DesignedFruitMatchLevel,
   LauncherOrderConfig,
@@ -151,6 +152,9 @@ export function FruitMatchLevelDesigner({
   // Launcher order config state
   const [launcherOrderConfig, setLauncherOrderConfig] = useState<LauncherOrderConfig | null>(null);
 
+  // Sink stacks state (for order difficulty analysis)
+  const [customSinkStacks, setCustomSinkStacks] = useState<SinkTile[][] | null>(null);
+
   // Painting state (for click-and-hold)
   const [isPainting, setIsPainting] = useState(false);
   const lastPaintedCell = useRef<{ row: number; col: number } | null>(null);
@@ -216,14 +220,23 @@ export function FruitMatchLevelDesigner({
     return getRequiredFruitCounts(pixelArtArray.map(c => ({ ...c, filled: false })));
   }, [pixelArtArray]);
 
+  // Generate or use custom sink stacks
+  const sinkStacks = useMemo(() => {
+    if (pixelArtArray.length === 0) return [];
+
+    // Use custom stacks if available and valid
+    if (customSinkStacks && customSinkStacks.length > 0) {
+      return customSinkStacks;
+    }
+
+    return generateSinkStacks(sinkWidth, fruitCounts, minStackHeight, maxStackHeight);
+  }, [pixelArtArray, customSinkStacks, sinkWidth, fruitCounts, minStackHeight, maxStackHeight]);
+
   // Calculate level metrics
   const metrics = useMemo(() => {
-    if (pixelArtArray.length === 0) return null;
-
-    // Generate sink stacks for metric calculation
-    const sinkStacks = generateSinkStacks(sinkWidth, fruitCounts, minStackHeight, maxStackHeight);
+    if (pixelArtArray.length === 0 || sinkStacks.length === 0) return null;
     return calculateLevelMetrics(pixelArtArray, sinkStacks, waitingStandSlots);
-  }, [pixelArtArray, sinkWidth, fruitCounts, minStackHeight, maxStackHeight, waitingStandSlots]);
+  }, [pixelArtArray, sinkStacks, waitingStandSlots]);
 
   // Check if level is valid
   const isValid = useMemo(() => {
@@ -232,9 +245,7 @@ export function FruitMatchLevelDesigner({
 
   // Create a preview level for difficulty analysis
   const previewLevel = useMemo((): FruitMatchLevel | null => {
-    if (!isValid || pixelArtArray.length === 0) return null;
-
-    const sinkStacks = generateSinkStacks(sinkWidth, fruitCounts, minStackHeight, maxStackHeight);
+    if (!isValid || pixelArtArray.length === 0 || sinkStacks.length === 0) return null;
 
     return {
       id: `preview-${Date.now()}`,
@@ -247,7 +258,7 @@ export function FruitMatchLevelDesigner({
       waitingStandSlots,
       difficulty: metrics?.difficulty || 'medium',
     };
-  }, [isValid, pixelArtArray, gridWidth, gridHeight, sinkWidth, fruitCounts, minStackHeight, maxStackHeight, waitingStandSlots, metrics]);
+  }, [isValid, pixelArtArray, gridWidth, gridHeight, sinkWidth, sinkStacks, waitingStandSlots, metrics]);
 
   // Detailed difficulty metrics
   const difficultyMetrics = useMemo((): DifficultyMetrics | null => {
@@ -366,6 +377,7 @@ export function FruitMatchLevelDesigner({
     setSelectedEmoji('');
     setDesignMode('edit');
     setLauncherOrderConfig(null);
+    setCustomSinkStacks(null);
   }, []);
 
   // Export design as JSON (reference format)
@@ -649,9 +661,7 @@ export function FruitMatchLevelDesigner({
 
   // Create playable level
   const createLevel = useCallback((): FruitMatchLevel | null => {
-    if (!isValid) return null;
-
-    const sinkStacks = generateSinkStacks(sinkWidth, fruitCounts, minStackHeight, maxStackHeight);
+    if (!isValid || sinkStacks.length === 0) return null;
 
     // Generate a default launcher config if none exists
     let finalConfig = launcherOrderConfig;
@@ -712,7 +722,7 @@ export function FruitMatchLevelDesigner({
       difficulty: metrics?.difficulty || 'medium',
       launcherOrderConfig: finalConfig || undefined,
     };
-  }, [isValid, pixelArtArray, gridWidth, gridHeight, sinkWidth, fruitCounts, minStackHeight, maxStackHeight, waitingStandSlots, levelNumber, metrics, launcherOrderConfig]);
+  }, [isValid, pixelArtArray, gridWidth, gridHeight, sinkWidth, sinkStacks, waitingStandSlots, levelNumber, metrics, launcherOrderConfig]);
 
   // Play level
   const handlePlay = useCallback(() => {
@@ -724,9 +734,7 @@ export function FruitMatchLevelDesigner({
 
   // Add to collection
   const handleAddToCollection = useCallback(() => {
-    if (!onAddToCollection || !metrics) return;
-
-    const sinkStacks = generateSinkStacks(sinkWidth, fruitCounts, minStackHeight, maxStackHeight);
+    if (!onAddToCollection || !metrics || sinkStacks.length === 0) return;
 
     const designedLevel: DesignedFruitMatchLevel = {
       id: editingLevel?.id || `level-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -745,7 +753,7 @@ export function FruitMatchLevelDesigner({
 
     onAddToCollection(designedLevel);
     clearAll();
-  }, [onAddToCollection, metrics, pixelArtArray, gridWidth, gridHeight, sinkWidth, fruitCounts, minStackHeight, maxStackHeight, waitingStandSlots, levelNumber, editingLevel, clearAll, launcherOrderConfig]);
+  }, [onAddToCollection, metrics, pixelArtArray, gridWidth, gridHeight, sinkWidth, sinkStacks, waitingStandSlots, levelNumber, editingLevel, clearAll, launcherOrderConfig]);
 
   // Cell size for grid - scale based on grid size, min 1px for large grids
   const maxCanvasSize = 600;
@@ -1082,6 +1090,9 @@ export function FruitMatchLevelDesigner({
                   }
                   setPixelArt(map);
                 }}
+                sinkStacks={sinkStacks}
+                waitingStandSlots={waitingStandSlots}
+                onSinkStacksChange={setCustomSinkStacks}
               />
             </TabsContent>
           </Tabs>

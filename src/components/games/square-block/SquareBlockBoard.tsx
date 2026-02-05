@@ -15,6 +15,7 @@ import {
   AXIS_ANGLES,
   isBidirectional,
 } from '@/lib/squareGrid';
+import { DeadlockInfo } from '@/lib/useSquareBlockGame';
 
 // ============================================================================
 // Types
@@ -28,6 +29,7 @@ interface SquareBlockBoardProps {
   isBlockUnlocked: (block: SquareBlock) => boolean;
   getRemainingIce: (block: SquareBlock) => number | null;
   isBlockMirror: (block: SquareBlock) => boolean;
+  deadlockInfo?: DeadlockInfo;  // Enhanced deadlock information
 }
 
 // ============================================================================
@@ -41,6 +43,19 @@ const FIXED_CELL_SIZE = 36;
 // Component
 // ============================================================================
 
+// Helper function to convert hex color to grayscale
+function toGrayscale(hexColor: string): string {
+  // Handle non-hex colors
+  if (!hexColor.startsWith('#')) return hexColor;
+
+  const r = parseInt(hexColor.slice(1, 3), 16);
+  const g = parseInt(hexColor.slice(3, 5), 16);
+  const b = parseInt(hexColor.slice(5, 7), 16);
+  // Use luminance formula for perceptually accurate grayscale
+  const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+  return `#${gray.toString(16).padStart(2, '0').repeat(3)}`;
+}
+
 export function SquareBlockBoard({
   state,
   onTapBlock,
@@ -49,6 +64,7 @@ export function SquareBlockBoard({
   isBlockUnlocked,
   getRemainingIce,
   isBlockMirror,
+  deadlockInfo,
 }: SquareBlockBoardProps) {
   const { level, blocks, holes, animatingBlock, animationPhase, animationData, mistakes, lastMistakeBlockId } = state;
   const { rows, cols } = level;
@@ -279,6 +295,16 @@ export function SquareBlockBoard({
           const isFrozen = getRemainingIce(block) !== null && (getRemainingIce(block) ?? 0) > 0;
           const isMirror = isBlockMirror(block);
 
+          // Deadlock state
+          const hasDeadlock = deadlockInfo?.hasDeadlock ?? false;
+          const stuckReason = deadlockInfo?.stuckBlocks.get(key);
+          const isBlocker = deadlockInfo?.blockerBlocks.has(key) ?? false;
+          const isStuck = !!stuckReason;
+          const isMutualBlock = stuckReason?.type === 'mutual_block';
+
+          // Apply grayscale to block color when in deadlock state
+          const blockColor = hasDeadlock ? toGrayscale(block.color) : block.color;
+
           // Calculate animation transform
           let animationStyle: React.CSSProperties = {};
           const isShaking = shakingBlockId === block.id;
@@ -335,7 +361,7 @@ export function SquareBlockBoard({
                 y={pixel.y - cellSize / 2 + 4}
                 width={cellSize - 8}
                 height={cellSize - 8}
-                fill={block.color}
+                fill={blockColor}
                 stroke="rgba(0, 0, 0, 0.3)"
                 strokeWidth={2}
                 rx={6}
@@ -418,7 +444,7 @@ export function SquareBlockBoard({
               {/* Mirror indicator for mirror blocks */}
               {isMirror && (
                 <g pointerEvents="none">
-                  {/* Mirror border effect - purple dashed */}
+                  {/* Purple dashed border */}
                   <rect
                     x={pixel.x - cellSize / 2 + 2}
                     y={pixel.y - cellSize / 2 + 2}
@@ -430,20 +456,13 @@ export function SquareBlockBoard({
                     strokeDasharray="4 2"
                     rx={6}
                   />
-                  {/* Small mirror icon in corner */}
-                  <g transform={`translate(${pixel.x + cellSize / 2 - 10}, ${pixel.y - cellSize / 2 + 10})`}>
-                    <circle
-                      cx={0}
-                      cy={0}
-                      r={6}
-                      fill="rgba(168, 85, 247, 0.9)"
-                    />
-                    {/* Flip arrows icon */}
-                    <path
-                      d="M -3 0 L 0 -2 L 0 -1 L 2 -1 L 2 -2 L 3 0 L 2 2 L 2 1 L 0 1 L 0 2 Z"
-                      fill="white"
-                      transform="scale(0.7)"
-                    />
+                  {/* Mirror icon in BOTTOM-LEFT corner */}
+                  <g transform={`translate(${pixel.x - cellSize / 2 + 12}, ${pixel.y + cellSize / 2 - 12})`}>
+                    <circle cx={0} cy={0} r={7} fill="rgba(168, 85, 247, 0.95)" stroke="white" strokeWidth={1.5} />
+                    {/* Flip horizontal arrows icon */}
+                    <g transform="scale(0.8)">
+                      <path d="M -3 0 L -1 -2 L -1 -0.8 L 1 -0.8 L 1 -2 L 3 0 L 1 2 L 1 0.8 L -1 0.8 L -1 2 Z" fill="white" />
+                    </g>
                   </g>
                 </g>
               )}
@@ -463,6 +482,72 @@ export function SquareBlockBoard({
                   pointerEvents="none"
                   className="animate-pulse"
                 />
+              )}
+
+              {/* ENHANCED DEADLOCK indicators */}
+              {/* Mutual Block: Purple solid border with circular arrow icon */}
+              {isMutualBlock && (
+                <g pointerEvents="none">
+                  <rect
+                    x={pixel.x - cellSize / 2 + 1}
+                    y={pixel.y - cellSize / 2 + 1}
+                    width={cellSize - 2}
+                    height={cellSize - 2}
+                    fill="rgba(139, 92, 246, 0.15)"
+                    stroke="rgba(139, 92, 246, 0.9)"
+                    strokeWidth={3}
+                    rx={6}
+                  />
+                  {/* Circular arrows icon in corner */}
+                  <g transform={`translate(${pixel.x + cellSize / 2 - 10}, ${pixel.y - cellSize / 2 + 10})`}>
+                    <circle cx={0} cy={0} r={7} fill="rgba(139, 92, 246, 0.95)" />
+                    {/* Circular arrows symbol */}
+                    <text x={0} y={1} textAnchor="middle" fontSize={9} fill="white" fontWeight="bold">↻</text>
+                  </g>
+                </g>
+              )}
+
+              {/* Blocker Block (not mutual): Orange solid border with chain icon */}
+              {isBlocker && !isMutualBlock && !isStuck && (
+                <g pointerEvents="none">
+                  <rect
+                    x={pixel.x - cellSize / 2 + 1}
+                    y={pixel.y - cellSize / 2 + 1}
+                    width={cellSize - 2}
+                    height={cellSize - 2}
+                    fill="rgba(245, 158, 11, 0.15)"
+                    stroke="rgba(245, 158, 11, 0.9)"
+                    strokeWidth={3}
+                    rx={6}
+                  />
+                  {/* Chain link icon in corner */}
+                  <g transform={`translate(${pixel.x + cellSize / 2 - 10}, ${pixel.y - cellSize / 2 + 10})`}>
+                    <circle cx={0} cy={0} r={7} fill="rgba(245, 158, 11, 0.95)" />
+                    <text x={0} y={1} textAnchor="middle" fontSize={9} fill="white" fontWeight="bold">⛓</text>
+                  </g>
+                </g>
+              )}
+
+              {/* Blocked Block (not mutual, not a blocker itself): Red dashed border with warning icon */}
+              {isStuck && !isMutualBlock && (
+                <g pointerEvents="none">
+                  <rect
+                    x={pixel.x - cellSize / 2 + 1}
+                    y={pixel.y - cellSize / 2 + 1}
+                    width={cellSize - 2}
+                    height={cellSize - 2}
+                    fill="rgba(239, 68, 68, 0.15)"
+                    stroke="rgba(239, 68, 68, 0.9)"
+                    strokeWidth={3}
+                    strokeDasharray={isBlocker ? "none" : "6 3"}
+                    rx={6}
+                  />
+                  {/* Warning icon in corner */}
+                  <g transform={`translate(${pixel.x + cellSize / 2 - 10}, ${pixel.y - cellSize / 2 + 10})`}>
+                    <circle cx={0} cy={0} r={7} fill={isBlocker ? "rgba(245, 158, 11, 0.95)" : "rgba(239, 68, 68, 0.95)"} />
+                    <text x={0} y={1} textAnchor="middle" fontSize={11} fill="white" fontWeight="bold">{isBlocker ? "⛓" : "!"}</text>
+                  </g>
+                </g>
               )}
             </g>
           );
