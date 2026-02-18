@@ -85,7 +85,7 @@ export const PixelArtCanvas = forwardRef<PixelArtCanvasRef, PixelArtCanvasProps>
           ctx.fillStyle = 'rgba(255, 255, 255, 0.02)';
           ctx.fillRect(x, y, cellSize, cellSize);
         } else {
-          const color = FRUIT_COLORS[cell.fruitType];
+          const color = cell.colorHex ? `#${cell.colorHex}` : FRUIT_COLORS[cell.fruitType];
           const isFilled = cell.filled;
 
           if (isFilled) {

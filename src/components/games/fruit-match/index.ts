@@ -7,3 +7,5 @@ export { FruitMatchLevelDesigner } from './FruitMatchLevelDesigner';
 export { FruitMatchLevelCollection, useFruitMatchLevelCollection } from './FruitMatchLevelCollection';
 export { LauncherOrderEditor } from './LauncherOrderEditor';
 export { OrderDifficultyPanel } from './OrderDifficultyPanel';
+export { LevelDesignerV2 } from './LevelDesignerV2';
+export { StudioGameBoard } from './StudioGameBoard';

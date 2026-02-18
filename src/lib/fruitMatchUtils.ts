@@ -16,6 +16,10 @@ import {
   pixelKey,
   calculateFruitMatchDifficulty,
 } from '@/types/fruitMatch';
+import {
+  StudioDifficultyParams,
+  calculateStudioDifficulty,
+} from '@/lib/useStudioGame';
 
 // ============================================================================
 // Fruit Type Migration (for backward compatibility with old type names)
@@ -549,7 +553,8 @@ export function checkGameOver(
 export function calculateLevelMetrics(
   pixelArt: PixelCell[],
   sinkStacks: SinkTile[][],
-  waitingStandSlots: number
+  waitingStandSlots: number,
+  studioParams?: StudioDifficultyParams,
 ): FruitMatchLevelMetrics {
   // Count fruit distribution in pixel art
   const fruitDistribution: Record<FruitType, number> = {
@@ -564,11 +569,22 @@ export function calculateLevelMetrics(
   const totalTilesInSink = countSinkTiles(sinkStacks);
   const estimatedMatches = totalPixels;
 
-  const { score, tier } = calculateFruitMatchDifficulty(
-    totalPixels,
-    waitingStandSlots,
-    uniqueFruitTypes
-  );
+  let score: number;
+  let tier: import('@/types/fruitMatch').DifficultyTier;
+
+  if (studioParams) {
+    const result = calculateStudioDifficulty(studioParams);
+    score = result.score;
+    tier = result.tier;
+  } else {
+    const result = calculateFruitMatchDifficulty(
+      totalPixels,
+      waitingStandSlots,
+      uniqueFruitTypes
+    );
+    score = result.score;
+    tier = result.tier;
+  }
 
   return {
     totalPixels,

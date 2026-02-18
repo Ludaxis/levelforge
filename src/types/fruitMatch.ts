@@ -19,12 +19,12 @@ export const FRUIT_EMOJI: Record<FruitType, string> = {
   blueberry: '🫐',     // Blue (ColorType 0)
   orange: '🍊',        // Orange (ColorType 1)
   strawberry: '🍓',    // Red (ColorType 2)
-  dragonfruit: '🩷',   // Pink (ColorType 3) - pink heart as placeholder
+  dragonfruit: '🍑',   // Pink (ColorType 3) - peach
   banana: '🍌',        // Yellow (ColorType 4)
   apple: '🍏',         // Green (ColorType 5)
-  plum: '🍇',          // Purple/Violet (ColorType 6) - grape emoji for purple
-  pear: '🍐',          // Cream/White (ColorType 7)
-  blackberry: '🖤',    // Dark/Black (ColorType 8) - black heart
+  plum: '🍇',          // Purple/Violet (ColorType 6) - grape
+  pear: '🥥',          // Cream/White (ColorType 7) - coconut
+  blackberry: '🍆',    // Dark/Black (ColorType 8) - eggplant
 };
 
 export const FRUIT_COLORS: Record<FruitType, string> = {
@@ -42,6 +42,19 @@ export const FRUIT_COLORS: Record<FruitType, string> = {
 // Ordered by ColorType enum value (0-8)
 export const ALL_FRUITS: FruitType[] = ['blueberry', 'orange', 'strawberry', 'dragonfruit', 'banana', 'apple', 'plum', 'pear', 'blackberry'];
 
+// 3 variant names per color type (for Studio item pool)
+export const VARIANT_NAMES: Record<FruitType, [string, string, string]> = {
+  blueberry: ['Blueberry', 'Sapphire', 'Ocean'],
+  orange: ['Orange', 'Tangerine', 'Apricot'],
+  strawberry: ['Strawberry', 'Apple', 'Cherry'],
+  dragonfruit: ['Peach', 'Dragonfruit', 'Rose'],
+  banana: ['Banana', 'Lemon', 'Sunflower'],
+  apple: ['Apple', 'Lime', 'Kiwi'],
+  plum: ['Plum', 'Grape', 'Lavender'],
+  pear: ['Coconut', 'Garlic', 'Cauliflower'],
+  blackberry: ['Eggplant', 'Olive', 'Blackberry'],
+};
+
 // ============================================================================
 // Pixel Art Types
 // ============================================================================
@@ -52,6 +65,7 @@ export interface PixelCell {
   fruitType: FruitType;
   filled: boolean;
   groupId?: number; // Optional group assignment for manual launcher ordering
+  colorHex?: string; // Original artwork hex color (without #), used for accurate rendering
 }
 
 // ============================================================================

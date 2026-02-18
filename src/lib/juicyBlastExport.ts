@@ -34,6 +34,7 @@ export interface ReferencePixelData {
   ColorType: number;
   Group: number;
   ColorHex: string;
+  ColorGroup?: number;
 }
 
 export interface ReferenceArtwork {
@@ -459,11 +460,21 @@ export function exportToReferenceFormat(data: ExportLevelData): ReferenceLevel {
     };
   });
 
-  // Build SelectableItems (one per pixel, Layer 0)
-  const selectableItems: ReferenceSelectableItem[] = pixelData.map((pixel) => ({
-    ColorType: pixel.ColorType,
-    Layer: 0,
-  }));
+  // Build SelectableItems: 3 tiles per requirement (launcher), not 1 per pixel
+  const selectableItems: ReferenceSelectableItem[] = [];
+  // Requirements are built below, so we derive from the same grouping
+  const reqMap = new Map<string, { colorType: number; group: number }>();
+  for (const pixel of pixelData) {
+    const key = `${pixel.ColorType}-${pixel.Group}`;
+    if (!reqMap.has(key)) {
+      reqMap.set(key, { colorType: pixel.ColorType, group: pixel.Group });
+    }
+  }
+  for (const { colorType } of reqMap.values()) {
+    for (let i = 0; i < 3; i++) {
+      selectableItems.push({ ColorType: colorType, Layer: 0 });
+    }
+  }
 
   // Build Requirements (count pixels per ColorType and Group)
   const requirementMap = new Map<string, { colorType: number; count: number; group: number }>();
@@ -508,5 +519,189 @@ export function exportToReferenceFormat(data: ExportLevelData): ReferenceLevel {
     SelectableItems: selectableItems,
     Requirements: requirements,
     UnlockStageData: unlockStageData,
+  };
+}
+
+// ============================================================================
+// Full Pixel Art Format (from external converter tool)
+// ============================================================================
+
+export interface FullPixelArtFormat {
+  Palette: string[];
+  Artwork: {
+    Width: number;
+    Height: number;
+    PixelData: {
+      Position: { x: number; y: number };
+      Group: number;
+      ColorGroup: number;
+      ColorType: number;
+      ColorHex: string;
+    }[];
+  };
+}
+
+/**
+ * Detect if JSON is the full pixel art format from the converter tool
+ * (has Palette + Artwork keys but NOT SelectableItems)
+ */
+export function isFullPixelArtFormat(data: unknown): data is FullPixelArtFormat {
+  if (!data || typeof data !== 'object') return false;
+  const obj = data as Record<string, unknown>;
+  return (
+    'Palette' in obj &&
+    Array.isArray(obj.Palette) &&
+    'Artwork' in obj &&
+    typeof obj.Artwork === 'object' &&
+    obj.Artwork !== null &&
+    'PixelData' in (obj.Artwork as Record<string, unknown>) &&
+    !('SelectableItems' in obj)
+  );
+}
+
+export interface FullPixelArtImportResult {
+  palette: string[];
+  width: number;
+  height: number;
+  pixels: {
+    row: number;
+    col: number;
+    colorType: number;
+    colorGroup: number;
+    colorHex: string;
+    group: number;
+    fruitType: FruitType;
+  }[];
+}
+
+/**
+ * Import from the full pixel art format (from converter tool).
+ * No y-flip needed: converter tool uses y=0 at top (screen coordinates).
+ */
+export function importFromFullPixelArtFormat(data: FullPixelArtFormat): FullPixelArtImportResult {
+  const pixels = data.Artwork.PixelData.map((pixel) => {
+    const fruitType = COLOR_TYPE_TO_FRUIT[pixel.ColorType] || 'apple';
+
+    return {
+      row: pixel.Position.y,
+      col: pixel.Position.x,
+      colorType: pixel.ColorType,
+      colorGroup: pixel.ColorGroup,
+      colorHex: pixel.ColorHex,
+      group: pixel.Group,
+      fruitType,
+    };
+  });
+
+  return {
+    palette: data.Palette,
+    width: data.Artwork.Width,
+    height: data.Artwork.Height,
+    pixels,
+  };
+}
+
+// ============================================================================
+// Studio Export Level Format (merged format with all fields)
+// ============================================================================
+
+export interface StudioExportLevel {
+  Palette: string[];
+  LevelId: string;
+  SongId: string;
+  LevelIndex: number;
+  Difficulty: number;
+  GraphicId: string;
+  Artwork: {
+    Width: number;
+    Height: number;
+    PixelData: {
+      Position: { x: number; y: number };
+      Group: number;
+      ColorGroup: number;
+      ColorType: number;
+      ColorHex: string;
+    }[];
+  };
+  SelectableItems: { ColorType: number; Variant: number; Layer: number }[];
+  Requirements: { ColorType: number; Value: number; Group: number }[];
+  UnlockStageData: { RequiredCompletedGroups: number[] }[];
+  MaxSelectableItems: number;
+}
+
+export interface StudioExportData {
+  palette: string[];
+  levelId: string;
+  levelIndex: number;
+  difficulty: DifficultyTier;
+  graphicId: string;
+  width: number;
+  height: number;
+  pixels: {
+    row: number;
+    col: number;
+    colorType: number;
+    colorGroup: number;
+    colorHex: string;
+    group: number;
+  }[];
+  selectableItems: { colorType: number; variant: number; layer: 'A' | 'B' | 'C'; order: number }[];
+  requirements: { colorType: number; value: number; group: number }[];
+  unlockStageData: { requiredCompletedGroups: number[] }[];
+  maxSelectableItems: number;
+}
+
+/**
+ * Export a studio level in the merged JSON format
+ */
+export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
+  const height = data.height;
+
+  const pixelData = data.pixels.map((pixel) => {
+    const flippedY = (height - 1) - pixel.row;
+    return {
+      Position: { x: pixel.col, y: flippedY },
+      Group: pixel.group,
+      ColorGroup: pixel.colorGroup,
+      ColorType: pixel.colorType,
+      ColorHex: pixel.colorHex,
+    };
+  });
+
+  const layerMap = { A: 0, B: 1, C: 2 };
+  const selectableItems = data.selectableItems
+    .sort((a, b) => a.order - b.order)
+    .map((item) => ({
+      ColorType: item.colorType,
+      Variant: item.variant,
+      Layer: layerMap[item.layer],
+    }));
+
+  const requirements = data.requirements.map((r) => ({
+    ColorType: r.colorType,
+    Value: r.value,
+    Group: r.group,
+  }));
+
+  const unlockStageData = data.unlockStageData.map((s) => ({
+    RequiredCompletedGroups: s.requiredCompletedGroups,
+  }));
+
+  return {
+    Palette: data.palette,
+    LevelId: data.levelId,
+    SongId: 'song_001',
+    LevelIndex: data.levelIndex,
+    Difficulty: DIFFICULTY_TO_NUMBER[data.difficulty],
+    GraphicId: data.graphicId,
+    Artwork: {
+      Width: data.width,
+      Height: data.height,
+      PixelData: pixelData,
+    },
+    SelectableItems: selectableItems,
+    Requirements: requirements,
+    UnlockStageData: unlockStageData,
+    MaxSelectableItems: data.maxSelectableItems,
   };
 }
