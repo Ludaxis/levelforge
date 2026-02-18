@@ -1278,6 +1278,7 @@ export function LevelDesignerV2({
       filled: false,
       groupId: p.group,
       colorHex: p.colorHex,
+      colorType: p.colorType,
     }));
   }, [pixelArray]);
 

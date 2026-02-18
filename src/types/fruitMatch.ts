@@ -66,6 +66,7 @@ export interface PixelCell {
   filled: boolean;
   groupId?: number; // Optional group assignment for manual launcher ordering
   colorHex?: string; // Original artwork hex color (without #), used for accurate rendering
+  colorType?: number; // Original artwork ColorType (may exceed 0-8 range)
 }
 
 // ============================================================================

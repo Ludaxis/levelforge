@@ -641,6 +641,12 @@ export function initializeState(config: StudioGameConfig): StudioGameState {
 // Pixel filling on fire
 // ============================================================================
 
+function cellColorType(cell: PixelCell): number {
+  // Use the original colorType when available (supports types beyond 0-8),
+  // fall back to deriving from fruitType for backward compatibility.
+  return cell.colorType ?? FRUIT_TO_COLOR_TYPE[cell.fruitType];
+}
+
 function fireLauncher(
   launcher: StudioLauncherState,
   pixelArt: PixelCell[],
@@ -655,7 +661,7 @@ function fireLauncher(
     const cell = result[i];
     if (
       !cell.filled &&
-      FRUIT_TO_COLOR_TYPE[cell.fruitType] === launcher.colorType &&
+      cellColorType(cell) === launcher.colorType &&
       cell.groupId === launcher.group
     ) {
       result[i] = { ...cell, filled: true };
@@ -668,7 +674,7 @@ function fireLauncher(
     const cell = result[i];
     if (
       !cell.filled &&
-      FRUIT_TO_COLOR_TYPE[cell.fruitType] === launcher.colorType
+      cellColorType(cell) === launcher.colorType
     ) {
       result[i] = { ...cell, filled: true };
       remaining--;
