@@ -476,6 +476,66 @@ function verifySolvability(
 }
 
 // ============================================================================
+// Find maximum solvable tile burial depth
+// ============================================================================
+
+/**
+ * Binary-search for the highest mismatchDepth (0–1, step 0.05) that still
+ * produces a solvable tile arrangement.  Returns the depth value (e.g. 0.65).
+ * Used by the Harder button so we never exceed a solvable configuration.
+ */
+export function findMaxSolvableDepth(config: StudioGameConfig): number {
+  const {
+    maxSelectableItems,
+    waitingStandSlots,
+    selectableItems,
+    launchers,
+    activeLauncherCount = 2,
+  } = config;
+
+  const allTiles: StudioTile[] = selectableItems.map((item) => ({
+    id: tileId(),
+    colorType: item.colorType,
+    variant: item.variant,
+    fruitType: COLOR_TYPE_TO_FRUIT[item.colorType] || 'apple',
+  }));
+
+  const sortedLauncherConfigs = [...launchers].sort((a, b) => a.order - b.order);
+
+  const distributeToLayers = (sequence: StudioTile[]) => {
+    const a: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
+    const b: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
+    const c: StudioTile[] = [];
+    sequence.forEach((tile, idx) => {
+      if (idx < maxSelectableItems) a[idx] = tile;
+      else if (idx < 2 * maxSelectableItems) b[idx - maxSelectableItems] = tile;
+      else c.push(tile);
+    });
+    return { a, b, c };
+  };
+
+  const RETRIES = 5;
+
+  const isSolvableAt = (depth: number): boolean => {
+    for (let attempt = 0; attempt < RETRIES; attempt++) {
+      const seq = buildChallengingSequence(allTiles, sortedLauncherConfigs, activeLauncherCount, depth);
+      const layers = distributeToLayers(seq);
+      if (verifySolvability(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Search from high to low in 0.05 steps
+  for (let depth = 1.0; depth > 0; depth -= 0.05) {
+    const d = +depth.toFixed(2);
+    if (isSolvableAt(d)) return d;
+  }
+  return 0;
+}
+
+// ============================================================================
 // Initializer
 // ============================================================================
 
@@ -529,18 +589,56 @@ export function initializeState(config: StudioGameConfig): StudioGameState {
 
   if (mismatchDepth > 0) {
     // Challenging mode: bury matching tiles based on mismatchDepth.
-    // No solvability guarantee — that's the point.
-    const sequence = buildChallengingSequence(
-      allTiles,
-      sortedLauncherConfigs,
-      activeLauncherCount,
-      mismatchDepth,
-    );
-    const layers = distributeToLayers(sequence);
-    layerA = layers.a;
-    layerB = layers.b;
-    layerC = layers.c;
-  } else {
+    // Try requested depth first, then reduce until solvable.
+    const RETRIES_PER_DEPTH = 5;
+    let found = false;
+
+    // Try the requested depth with multiple shuffles
+    for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
+      const sequence = buildChallengingSequence(
+        allTiles,
+        sortedLauncherConfigs,
+        activeLauncherCount,
+        mismatchDepth,
+      );
+      const layers = distributeToLayers(sequence);
+      if (verifySolvability(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
+        layerA = layers.a;
+        layerB = layers.b;
+        layerC = layers.c;
+        found = true;
+      }
+    }
+
+    // If not solvable at requested depth, step down in 0.05 increments
+    if (!found) {
+      for (let depth = mismatchDepth - 0.05; depth > 0 && !found; depth -= 0.05) {
+        for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
+          const sequence = buildChallengingSequence(
+            allTiles,
+            sortedLauncherConfigs,
+            activeLauncherCount,
+            Math.max(0, +depth.toFixed(2)),
+          );
+          const layers = distributeToLayers(sequence);
+          if (verifySolvability(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
+            layerA = layers.a;
+            layerB = layers.b;
+            layerC = layers.c;
+            found = true;
+          }
+        }
+      }
+    }
+
+    // If still not found, fall through to solvable mode below
+    if (found) {
+      // Skip the solvable block
+    }
+  }
+
+  // Solvable mode (depth=0 OR challenging fallback)
+  if (layerA.every((t) => t === null)) {
     // Solvable mode: current behaviour with retry + fallback
     const MAX_RETRIES = 20;
     let solvable = false;

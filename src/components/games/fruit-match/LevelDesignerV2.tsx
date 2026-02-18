@@ -26,6 +26,7 @@ import {
   StudioDifficultyResult,
   calculateStudioDifficulty,
   StudioGameConfig,
+  findMaxSolvableDepth,
 } from '@/lib/useStudioGame';
 import {
   COLOR_TYPE_TO_FRUIT,
@@ -973,10 +974,10 @@ function ItemPoolSection({
           <span className="text-xs text-muted-foreground whitespace-nowrap">Max Selectable:</span>
           <Input
             type="number"
-            min={1}
-            max={50}
+            min={6}
+            max={10}
             value={maxSelectableItems}
-            onChange={(e) => onMaxChange(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+            onChange={(e) => onMaxChange(Math.max(6, Math.min(10, Number(e.target.value) || 6)))}
             className="h-7 w-20 text-xs"
           />
         </div>
@@ -1082,20 +1083,16 @@ function DifficultyComponentBar({ label, value, weight }: { label: string; value
 
 function DifficultyAnalysis({
   difficultyResult,
-  waitingStandSlots,
   maxSelectableItems,
   mismatchDepth,
-  onWaitingStandChange,
   onMaxSelectableChange,
   onMismatchDepthChange,
   onEasier,
   onHarder,
 }: {
   difficultyResult: StudioDifficultyResult | null;
-  waitingStandSlots: number;
   maxSelectableItems: number;
   mismatchDepth: number;
-  onWaitingStandChange: (v: number) => void;
   onMaxSelectableChange: (v: number) => void;
   onMismatchDepthChange: (v: number) => void;
   onEasier: () => void;
@@ -1165,21 +1162,8 @@ function DifficultyAnalysis({
               onValueChange={([v]) => onMismatchDepthChange(v / 100)}
             />
             <p className="text-[10px] text-muted-foreground">
-              0% = matching tiles on top (easy). 100% = matching tiles buried in Layer C (hard).
+              0% = matching tiles on top (easy). Higher = tiles buried deeper. Auto-clamped to max solvable depth.
             </p>
-          </div>
-          <div className="space-y-1">
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Waiting Stand Slots</span>
-              <span className="font-mono">{waitingStandSlots}</span>
-            </div>
-            <Slider
-              value={[waitingStandSlots]}
-              min={3}
-              max={12}
-              step={1}
-              onValueChange={([v]) => onWaitingStandChange(v)}
-            />
           </div>
           <div className="space-y-1">
             <div className="flex justify-between text-xs">
@@ -1189,7 +1173,7 @@ function DifficultyAnalysis({
             <Slider
               value={[maxSelectableItems]}
               min={6}
-              max={20}
+              max={10}
               step={1}
               onValueChange={([v]) => onMaxSelectableChange(v)}
             />
@@ -1236,7 +1220,7 @@ export function LevelDesignerV2({
   const [maxSelectableItems, setMaxSelectableItems] = useState(10);
 
   // Difficulty
-  const [waitingStandSlots, setWaitingStandSlots] = useState(7);
+  const waitingStandSlots = 5; // Fixed at 5
   const [sinkWidth, setSinkWidth] = useState(6);
   const [mismatchDepth, setMismatchDepth] = useState(0);
 
@@ -1460,9 +1444,9 @@ export function LevelDesignerV2({
           }
           setLaunchers(newLaunchers);
 
-          // Set maxSelectableItems based on launcher count (at least 6 per batch of 2 active)
+          // Set maxSelectableItems based on launcher count (capped at 10)
           const totalTiles = newLaunchers.length * 3;
-          const newMaxItems = Math.max(10, Math.min(Math.ceil(totalTiles / 2), 20));
+          const newMaxItems = Math.min(Math.max(6, Math.ceil(totalTiles / 2)), 10);
           setMaxSelectableItems(newMaxItems);
 
           // Auto-generate selectable items: exactly 3 tiles per launcher
@@ -1568,7 +1552,7 @@ export function LevelDesignerV2({
           setArtWidth(data.Artwork.Width);
           setArtHeight(height);
           setPalette(data.Palette || []);
-          setMaxSelectableItems(data.MaxSelectableItems || 10);
+          setMaxSelectableItems(Math.min(data.MaxSelectableItems || 10, 10));
 
           const map = new Map<string, StudioPixelCell>();
           const groupMap = new Map<number, StudioGroup>();
@@ -1855,41 +1839,40 @@ export function LevelDesignerV2({
 
   const handleEasier = useCallback(() => {
     if (!difficultyResult) return;
-    const { tileBurial, standPressure, gridConstraint, layerDepth } = difficultyResult.components;
-    // Priority: reduce the highest adjustable contributor
+    const { tileBurial, gridConstraint } = difficultyResult.components;
+    // Priority: reduce the highest adjustable contributor (tile burial or grid constraint)
     const burialContrib = tileBurial * 0.25;
-    const standContrib = standPressure * 0.20;
-    const gridContrib = layerDepth * 0.10 + gridConstraint * 0.15;
+    const gridContrib = gridConstraint * 0.15;
 
-    if (burialContrib >= standContrib && burialContrib >= gridContrib && mismatchDepth > 0) {
+    if (burialContrib >= gridContrib && mismatchDepth > 0) {
       setMismatchDepth((v) => Math.max(0, +(v - 0.15).toFixed(2)));
-    } else if (standContrib >= gridContrib && waitingStandSlots < 12) {
-      setWaitingStandSlots((v) => Math.min(12, v + 1));
-    } else if (maxSelectableItems < 20) {
-      setMaxSelectableItems((v) => Math.min(20, v + 2));
+    } else if (maxSelectableItems < 10) {
+      setMaxSelectableItems((v) => Math.min(10, v + 1));
     } else if (mismatchDepth > 0) {
       setMismatchDepth((v) => Math.max(0, +(v - 0.15).toFixed(2)));
     }
-  }, [difficultyResult, mismatchDepth, waitingStandSlots, maxSelectableItems]);
+  }, [difficultyResult, mismatchDepth, maxSelectableItems]);
 
   const handleHarder = useCallback(() => {
-    if (!difficultyResult) return;
-    const { tileBurial, standPressure, gridConstraint, layerDepth } = difficultyResult.components;
+    if (!difficultyResult || !studioGameConfig) return;
+    const { tileBurial, gridConstraint } = difficultyResult.components;
     // Priority: increase the adjustable component with the most room to grow
     const burialRoom = (1 - tileBurial) * 0.25;
-    const standRoom = (1 - standPressure) * 0.20;
-    const gridRoom = (1 - layerDepth) * 0.10 + (1 - gridConstraint) * 0.15;
+    const gridRoom = (1 - gridConstraint) * 0.15;
 
-    if (burialRoom >= standRoom && burialRoom >= gridRoom && mismatchDepth < 1) {
-      setMismatchDepth((v) => Math.min(1, +(v + 0.15).toFixed(2)));
-    } else if (standRoom >= gridRoom && waitingStandSlots > 3) {
-      setWaitingStandSlots((v) => Math.max(3, v - 1));
+    if (burialRoom >= gridRoom && mismatchDepth < 1) {
+      // Find the max solvable depth and clamp to it
+      const maxDepth = findMaxSolvableDepth(studioGameConfig);
+      const target = +(mismatchDepth + 0.15).toFixed(2);
+      setMismatchDepth(Math.min(target, maxDepth));
     } else if (maxSelectableItems > 6) {
-      setMaxSelectableItems((v) => Math.max(6, v - 2));
+      setMaxSelectableItems((v) => Math.max(6, v - 1));
     } else if (mismatchDepth < 1) {
-      setMismatchDepth((v) => Math.min(1, +(v + 0.15).toFixed(2)));
+      const maxDepth = findMaxSolvableDepth(studioGameConfig);
+      const target = +(mismatchDepth + 0.15).toFixed(2);
+      setMismatchDepth(Math.min(target, maxDepth));
     }
-  }, [difficultyResult, mismatchDepth, waitingStandSlots, maxSelectableItems]);
+  }, [difficultyResult, studioGameConfig, mismatchDepth, maxSelectableItems]);
 
   // ============================================================================
   // Export JSON
@@ -1984,7 +1967,6 @@ export function LevelDesignerV2({
     setArtWidth(editingLevel.pixelArtWidth);
     setArtHeight(editingLevel.pixelArtHeight);
     setSinkWidth(editingLevel.sinkWidth);
-    setWaitingStandSlots(editingLevel.waitingStandSlots);
     setSelectedGroupId(null);
 
     // Build pixel map
@@ -2046,9 +2028,9 @@ export function LevelDesignerV2({
     }
     setLaunchers(newLaunchers);
 
-    // Regenerate selectable items (3 per launcher)
+    // Regenerate selectable items (3 per launcher, max selectable capped at 10)
     const totalTiles = newLaunchers.length * 3;
-    const newMaxItems = Math.max(10, Math.min(Math.ceil(totalTiles / 2), 20));
+    const newMaxItems = Math.min(Math.max(6, Math.ceil(totalTiles / 2)), 10);
     setMaxSelectableItems(newMaxItems);
 
     const newItems: StudioSelectableItem[] = [];
@@ -2204,10 +2186,8 @@ export function LevelDesignerV2({
       {hasData && (
         <DifficultyAnalysis
           difficultyResult={difficultyResult}
-          waitingStandSlots={waitingStandSlots}
           maxSelectableItems={maxSelectableItems}
           mismatchDepth={mismatchDepth}
-          onWaitingStandChange={setWaitingStandSlots}
           onMaxSelectableChange={setMaxSelectableItems}
           onMismatchDepthChange={setMismatchDepth}
           onEasier={handleEasier}
