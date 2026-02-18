@@ -1084,16 +1084,20 @@ function DifficultyAnalysis({
   difficultyResult,
   waitingStandSlots,
   maxSelectableItems,
+  mismatchDepth,
   onWaitingStandChange,
   onMaxSelectableChange,
+  onMismatchDepthChange,
   onEasier,
   onHarder,
 }: {
   difficultyResult: StudioDifficultyResult | null;
   waitingStandSlots: number;
   maxSelectableItems: number;
+  mismatchDepth: number;
   onWaitingStandChange: (v: number) => void;
   onMaxSelectableChange: (v: number) => void;
+  onMismatchDepthChange: (v: number) => void;
   onEasier: () => void;
   onHarder: () => void;
 }) {
@@ -1138,15 +1142,32 @@ function DifficultyAnalysis({
 
         {/* Component breakdown */}
         <div className="space-y-2">
-          <DifficultyComponentBar label="Stand Pressure" value={components.standPressure} weight={0.30} />
-          <DifficultyComponentBar label="Color Complexity" value={components.colorComplexity} weight={0.20} />
-          <DifficultyComponentBar label="Sequence Length" value={components.sequenceLength} weight={0.20} />
-          <DifficultyComponentBar label="Layer Depth" value={components.layerDepth} weight={0.15} />
+          <DifficultyComponentBar label="Tile Burial" value={components.tileBurial} weight={0.25} />
+          <DifficultyComponentBar label="Stand Pressure" value={components.standPressure} weight={0.20} />
+          <DifficultyComponentBar label="Color Complexity" value={components.colorComplexity} weight={0.15} />
+          <DifficultyComponentBar label="Sequence Length" value={components.sequenceLength} weight={0.15} />
+          <DifficultyComponentBar label="Layer Depth" value={components.layerDepth} weight={0.10} />
           <DifficultyComponentBar label="Grid Constraint" value={components.gridConstraint} weight={0.15} />
         </div>
 
         {/* Sliders */}
         <div className="space-y-2 pt-1 border-t border-border">
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">Tile Burial</span>
+              <span className="font-mono">{Math.round(mismatchDepth * 100)}%</span>
+            </div>
+            <Slider
+              value={[mismatchDepth * 100]}
+              min={0}
+              max={100}
+              step={5}
+              onValueChange={([v]) => onMismatchDepthChange(v / 100)}
+            />
+            <p className="text-[10px] text-muted-foreground">
+              0% = matching tiles on top (easy). 100% = matching tiles buried in Layer C (hard).
+            </p>
+          </div>
           <div className="space-y-1">
             <div className="flex justify-between text-xs">
               <span className="text-muted-foreground">Waiting Stand Slots</span>
@@ -1217,6 +1238,7 @@ export function LevelDesignerV2({
   // Difficulty
   const [waitingStandSlots, setWaitingStandSlots] = useState(7);
   const [sinkWidth, setSinkWidth] = useState(6);
+  const [mismatchDepth, setMismatchDepth] = useState(0);
 
   // Play mode
   const [playMode, setPlayMode] = useState(false);
@@ -1284,8 +1306,9 @@ export function LevelDesignerV2({
       waitingStandSlots,
       maxSelectableItems,
       totalTiles,
+      mismatchDepth,
     };
-  }, [pixelArray, launchers, groups.length, selectableItems, waitingStandSlots, maxSelectableItems]);
+  }, [pixelArray, launchers, groups.length, selectableItems, waitingStandSlots, maxSelectableItems, mismatchDepth]);
 
   // Studio difficulty result
   const difficultyResult = useMemo((): StudioDifficultyResult | null => {
@@ -1364,9 +1387,10 @@ export function LevelDesignerV2({
           group: l.group,
           order: l.order,
         })),
+      mismatchDepth,
       colorTypeToHex,
     };
-  }, [pixelCellArray, artWidth, artHeight, maxSelectableItems, waitingStandSlots, itemsWithLayers, launchers, colorTypeToHex]);
+  }, [pixelCellArray, artWidth, artHeight, maxSelectableItems, waitingStandSlots, itemsWithLayers, launchers, mismatchDepth, colorTypeToHex]);
 
   // ============================================================================
   // JSON Import
@@ -1830,33 +1854,41 @@ export function LevelDesignerV2({
 
   const handleEasier = useCallback(() => {
     if (!difficultyResult) return;
-    const { standPressure, layerDepth, gridConstraint } = difficultyResult.components;
-    // Weighted contribution: stand pressure (0.30) vs grid-related (layerDepth 0.15 + gridConstraint 0.15 = 0.30)
-    const standContribution = standPressure * 0.30;
-    const gridContribution = layerDepth * 0.15 + gridConstraint * 0.15;
-    if (standContribution >= gridContribution && waitingStandSlots < 12) {
+    const { tileBurial, standPressure, gridConstraint, layerDepth } = difficultyResult.components;
+    // Priority: reduce the highest adjustable contributor
+    const burialContrib = tileBurial * 0.25;
+    const standContrib = standPressure * 0.20;
+    const gridContrib = layerDepth * 0.10 + gridConstraint * 0.15;
+
+    if (burialContrib >= standContrib && burialContrib >= gridContrib && mismatchDepth > 0) {
+      setMismatchDepth((v) => Math.max(0, +(v - 0.15).toFixed(2)));
+    } else if (standContrib >= gridContrib && waitingStandSlots < 12) {
       setWaitingStandSlots((v) => Math.min(12, v + 1));
     } else if (maxSelectableItems < 20) {
       setMaxSelectableItems((v) => Math.min(20, v + 2));
-    } else {
-      setWaitingStandSlots((v) => Math.min(12, v + 1));
+    } else if (mismatchDepth > 0) {
+      setMismatchDepth((v) => Math.max(0, +(v - 0.15).toFixed(2)));
     }
-  }, [difficultyResult, waitingStandSlots, maxSelectableItems]);
+  }, [difficultyResult, mismatchDepth, waitingStandSlots, maxSelectableItems]);
 
   const handleHarder = useCallback(() => {
     if (!difficultyResult) return;
-    const { standPressure, layerDepth, gridConstraint } = difficultyResult.components;
-    // Target whichever adjustable component has the most room to grow
-    const standRoom = (1 - standPressure) * 0.30;
-    const gridRoom = (1 - layerDepth) * 0.15 + (1 - gridConstraint) * 0.15;
-    if (standRoom >= gridRoom && waitingStandSlots > 3) {
+    const { tileBurial, standPressure, gridConstraint, layerDepth } = difficultyResult.components;
+    // Priority: increase the adjustable component with the most room to grow
+    const burialRoom = (1 - tileBurial) * 0.25;
+    const standRoom = (1 - standPressure) * 0.20;
+    const gridRoom = (1 - layerDepth) * 0.10 + (1 - gridConstraint) * 0.15;
+
+    if (burialRoom >= standRoom && burialRoom >= gridRoom && mismatchDepth < 1) {
+      setMismatchDepth((v) => Math.min(1, +(v + 0.15).toFixed(2)));
+    } else if (standRoom >= gridRoom && waitingStandSlots > 3) {
       setWaitingStandSlots((v) => Math.max(3, v - 1));
     } else if (maxSelectableItems > 6) {
       setMaxSelectableItems((v) => Math.max(6, v - 2));
-    } else {
-      setWaitingStandSlots((v) => Math.max(3, v - 1));
+    } else if (mismatchDepth < 1) {
+      setMismatchDepth((v) => Math.min(1, +(v + 0.15).toFixed(2)));
     }
-  }, [difficultyResult, waitingStandSlots, maxSelectableItems]);
+  }, [difficultyResult, mismatchDepth, waitingStandSlots, maxSelectableItems]);
 
   // ============================================================================
   // Export JSON
@@ -2173,8 +2205,10 @@ export function LevelDesignerV2({
           difficultyResult={difficultyResult}
           waitingStandSlots={waitingStandSlots}
           maxSelectableItems={maxSelectableItems}
+          mismatchDepth={mismatchDepth}
           onWaitingStandChange={setWaitingStandSlots}
           onMaxSelectableChange={setMaxSelectableItems}
+          onMismatchDepthChange={setMismatchDepth}
           onEasier={handleEasier}
           onHarder={handleHarder}
         />

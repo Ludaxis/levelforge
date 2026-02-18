@@ -14,12 +14,14 @@ export interface StudioDifficultyParams {
   waitingStandSlots: number;
   maxSelectableItems: number;
   totalTiles: number;
+  mismatchDepth: number; // 0-1: how buried matching tiles are
 }
 
 export interface StudioDifficultyResult {
   score: number;       // 0-100
   tier: DifficultyTier;
   components: {
+    tileBurial: number;       // 0-1  (mismatchDepth direct)
     standPressure: number;    // 0-1
     colorComplexity: number;  // 0-1
     sequenceLength: number;   // 0-1
@@ -39,18 +41,22 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
     waitingStandSlots,
     maxSelectableItems,
     totalTiles,
+    mismatchDepth,
   } = params;
 
-  // Stand pressure (0.30): closer to saturation = harder
+  // Tile burial (0.25): direct slider — most impactful lever
+  const tileBurial = clamp01(mismatchDepth);
+
+  // Stand pressure (0.20): closer to saturation = harder
   const standPressure = clamp01(1 - (waitingStandSlots - uniqueColors) / 4);
 
-  // Color complexity (0.20): more colors = harder
+  // Color complexity (0.15): more colors = harder
   const colorComplexity = clamp01((uniqueColors - 2) / 5);
 
-  // Sequence length (0.20): more launchers = longer game
+  // Sequence length (0.15): more launchers = longer game
   const sequenceLength = clamp01((launcherCount - 4) / 12);
 
-  // Layer depth (0.15): hidden tile ratio
+  // Layer depth (0.10): hidden tile ratio
   const layerDepth = totalTiles > 0
     ? clamp01((totalTiles - maxSelectableItems) / totalTiles)
     : 0;
@@ -59,10 +65,11 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
   const gridConstraint = clamp01(1 - (maxSelectableItems - 6) / 14);
 
   const raw =
-    standPressure * 0.30 +
-    colorComplexity * 0.20 +
-    sequenceLength * 0.20 +
-    layerDepth * 0.15 +
+    tileBurial * 0.25 +
+    standPressure * 0.20 +
+    colorComplexity * 0.15 +
+    sequenceLength * 0.15 +
+    layerDepth * 0.10 +
     gridConstraint * 0.15;
 
   const score = Math.round(raw * 100);
@@ -79,6 +86,7 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
     score,
     tier,
     components: {
+      tileBurial,
       standPressure,
       colorComplexity,
       sequenceLength,
@@ -116,7 +124,9 @@ export interface StudioGameConfig {
   waitingStandSlots: number;
   selectableItems: { colorType: number; variant: number; order: number }[];
   launchers: { colorType: number; pixelCount: number; group: number; order: number }[];
-  activeLauncherCount?: number; // default 4
+  activeLauncherCount?: number; // default 2
+  /** 0-1: how much to bury matching tiles. 0=solvable, 1=max burial */
+  mismatchDepth?: number;
   /** Actual hex colors per colorType from the artwork (e.g. { 0: '4C9EF2', 7: 'FFFBF7' }) */
   colorTypeToHex?: Record<number, string>;
 }
@@ -227,6 +237,76 @@ function buildSolvableSequence(
   }
 
   // Leftover tiles that don't match any launcher
+  for (const arr of tilesByColor.values()) {
+    sequence.push(...arr);
+  }
+
+  return sequence;
+}
+
+// ============================================================================
+// Challenging tile arrangement (burial)
+// ============================================================================
+
+/**
+ * Build a tile sequence where matching tiles for early launchers are buried.
+ *
+ * mismatchDepth controls how many launcher batches are reversed:
+ *   0   → identical to solvable order (batch 1 first)
+ *   0.5 → half the batches swapped (moderate challenge)
+ *   1.0 → fully reversed (batch N first, batch 1 last = max burial)
+ *
+ * At high depth the game becomes legitimately hard because the player
+ * must pick non-matching tiles (filling the waiting stand) to uncover
+ * the tiles they actually need.
+ */
+function buildChallengingSequence(
+  allTiles: StudioTile[],
+  launcherConfigs: { colorType: number; order: number }[],
+  activeLauncherCount: number,
+  mismatchDepth: number,
+): StudioTile[] {
+  // Group tiles by colorType
+  const tilesByColor = new Map<number, StudioTile[]>();
+  for (const tile of allTiles) {
+    if (!tilesByColor.has(tile.colorType)) {
+      tilesByColor.set(tile.colorType, []);
+    }
+    tilesByColor.get(tile.colorType)!.push(tile);
+  }
+  for (const arr of tilesByColor.values()) {
+    shuffleArray(arr);
+  }
+
+  const sorted = [...launcherConfigs].sort((a, b) => a.order - b.order);
+
+  // Build batches of tiles (one batch per group of active launchers)
+  const batches: StudioTile[][] = [];
+  for (let i = 0; i < sorted.length; i += activeLauncherCount) {
+    const batch = sorted.slice(i, i + activeLauncherCount);
+    const batchTiles: StudioTile[] = [];
+    for (const cfg of batch) {
+      const pool = tilesByColor.get(cfg.colorType) || [];
+      batchTiles.push(...pool.splice(0, 3));
+    }
+    shuffleArray(batchTiles);
+    batches.push(batchTiles);
+  }
+
+  // Reverse batches proportionally to mismatchDepth
+  // At 1.0: fully reversed. At 0.5: swap outer half of pairs.
+  const n = batches.length;
+  const swapCount = Math.round(mismatchDepth * Math.floor(n / 2));
+  for (let i = 0; i < swapCount; i++) {
+    const j = n - 1 - i;
+    if (i < j) {
+      [batches[i], batches[j]] = [batches[j], batches[i]];
+    }
+  }
+
+  const sequence = batches.flat();
+
+  // Leftover tiles
   for (const arr of tilesByColor.values()) {
     sequence.push(...arr);
   }
@@ -407,6 +487,7 @@ export function initializeState(config: StudioGameConfig): StudioGameState {
     selectableItems,
     launchers,
     activeLauncherCount = 2,
+    mismatchDepth = 0,
   } = config;
 
   // Create all tiles (stable set, rearranged by solvable algorithm)
@@ -422,95 +503,104 @@ export function initializeState(config: StudioGameConfig): StudioGameState {
     (a, b) => a.order - b.order,
   );
 
-  // Build solvable arrangement with retry
-  const MAX_RETRIES = 20;
+  // ------------------------------------------------------------------
+  // Build tile sequence — solvable vs challenging based on mismatchDepth
+  // ------------------------------------------------------------------
+
   let layerA: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
   let layerB: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
   let layerC: StudioTile[] = [];
-  let solvable = false;
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const sequence = buildSolvableSequence(
+  const distributeToLayers = (sequence: StudioTile[]) => {
+    const a: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
+    const b: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
+    const c: StudioTile[] = [];
+    sequence.forEach((tile, idx) => {
+      if (idx < maxSelectableItems) {
+        a[idx] = tile;
+      } else if (idx < 2 * maxSelectableItems) {
+        b[idx - maxSelectableItems] = tile;
+      } else {
+        c.push(tile);
+      }
+    });
+    return { a, b, c };
+  };
+
+  if (mismatchDepth > 0) {
+    // Challenging mode: bury matching tiles based on mismatchDepth.
+    // No solvability guarantee — that's the point.
+    const sequence = buildChallengingSequence(
       allTiles,
       sortedLauncherConfigs,
       activeLauncherCount,
+      mismatchDepth,
     );
+    const layers = distributeToLayers(sequence);
+    layerA = layers.a;
+    layerB = layers.b;
+    layerC = layers.c;
+  } else {
+    // Solvable mode: current behaviour with retry + fallback
+    const MAX_RETRIES = 20;
+    let solvable = false;
 
-    // Distribute into layers
-    const newA: (StudioTile | null)[] = new Array(maxSelectableItems).fill(
-      null,
-    );
-    const newB: (StudioTile | null)[] = new Array(maxSelectableItems).fill(
-      null,
-    );
-    const newC: StudioTile[] = [];
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const sequence = buildSolvableSequence(
+        allTiles,
+        sortedLauncherConfigs,
+        activeLauncherCount,
+      );
+      const layers = distributeToLayers(sequence);
 
-    sequence.forEach((tile, idx) => {
-      if (idx < maxSelectableItems) {
-        newA[idx] = tile;
-      } else if (idx < 2 * maxSelectableItems) {
-        newB[idx - maxSelectableItems] = tile;
-      } else {
-        newC.push(tile);
-      }
-    });
+      solvable = verifySolvability(
+        layers.a,
+        layers.b,
+        layers.c,
+        sortedLauncherConfigs,
+        activeLauncherCount,
+        waitingStandSlots,
+      );
 
-    // Verify solvability via greedy simulation
-    solvable = verifySolvability(
-      newA,
-      newB,
-      newC,
-      sortedLauncherConfigs,
-      activeLauncherCount,
-      waitingStandSlots,
-    );
-
-    if (solvable) {
-      layerA = newA;
-      layerB = newB;
-      layerC = newC;
-      break;
-    }
-  }
-
-  // Fallback: strict batch order (no within-round shuffle) — guaranteed solvable
-  if (!solvable) {
-    const tilesByColor = new Map<number, StudioTile[]>();
-    for (const tile of allTiles) {
-      if (!tilesByColor.has(tile.colorType)) {
-        tilesByColor.set(tile.colorType, []);
-      }
-      tilesByColor.get(tile.colorType)!.push(tile);
-    }
-
-    const strictSequence: StudioTile[] = [];
-    for (
-      let i = 0;
-      i < sortedLauncherConfigs.length;
-      i += activeLauncherCount
-    ) {
-      const batch = sortedLauncherConfigs.slice(i, i + activeLauncherCount);
-      for (const cfg of batch) {
-        const pool = tilesByColor.get(cfg.colorType) || [];
-        strictSequence.push(...pool.splice(0, 3));
+      if (solvable) {
+        layerA = layers.a;
+        layerB = layers.b;
+        layerC = layers.c;
+        break;
       }
     }
-    for (const arr of tilesByColor.values()) {
-      strictSequence.push(...arr);
-    }
 
-    layerA = new Array(maxSelectableItems).fill(null);
-    layerB = new Array(maxSelectableItems).fill(null);
-    layerC = [];
-    strictSequence.forEach((tile, idx) => {
-      if (idx < maxSelectableItems) {
-        layerA[idx] = tile;
-      } else if (idx < 2 * maxSelectableItems) {
-        layerB[idx - maxSelectableItems] = tile;
-      } else {
-        layerC.push(tile);
+    // Fallback: strict batch order (no within-round shuffle)
+    if (!solvable) {
+      const tilesByColor = new Map<number, StudioTile[]>();
+      for (const tile of allTiles) {
+        if (!tilesByColor.has(tile.colorType)) {
+          tilesByColor.set(tile.colorType, []);
+        }
+        tilesByColor.get(tile.colorType)!.push(tile);
       }
-    });
+
+      const strictSequence: StudioTile[] = [];
+      for (
+        let i = 0;
+        i < sortedLauncherConfigs.length;
+        i += activeLauncherCount
+      ) {
+        const batch = sortedLauncherConfigs.slice(i, i + activeLauncherCount);
+        for (const cfg of batch) {
+          const pool = tilesByColor.get(cfg.colorType) || [];
+          strictSequence.push(...pool.splice(0, 3));
+        }
+      }
+      for (const arr of tilesByColor.values()) {
+        strictSequence.push(...arr);
+      }
+
+      const layers = distributeToLayers(strictSequence);
+      layerA = layers.a;
+      layerB = layers.b;
+      layerC = layers.c;
+    }
   }
 
   // Create launcher state objects
