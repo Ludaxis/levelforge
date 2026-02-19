@@ -1,18 +1,21 @@
 import { describe, it, expect } from 'vitest';
 import {
-  mulberry32,
-  seededShuffle,
   DifficultyRecipe,
-  initializeStateSeeded,
-  buildSolvableSequenceSeeded,
-  buildChallengingSequenceSeeded,
   simulateStudioGame,
   targetDifficulty,
   getProgressionTarget,
   generateLevelPack,
   scoreToTier,
 } from '@/lib/studioDifficultyEngine';
-import { StudioGameConfig, StudioTile } from '@/lib/useStudioGame';
+import {
+  StudioGameConfig,
+  StudioTile,
+  mulberry32,
+  seededShuffle,
+  initializeStateSeeded,
+  buildSolvableSequenceSeeded,
+  buildChallengingSequenceSeeded,
+} from '@/lib/useStudioGame';
 import { COLOR_TYPE_TO_FRUIT } from '@/lib/juicyBlastExport';
 import { PixelCell, DifficultyTier } from '@/types/fruitMatch';
 

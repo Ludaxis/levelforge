@@ -539,13 +539,313 @@ export function findMaxSolvableDepth(config: StudioGameConfig): number {
 }
 
 // ============================================================================
+// Seeded PRNG & deterministic helpers
+// ============================================================================
+
+/**
+ * Mulberry32 — fast 32-bit seeded PRNG.
+ * Returns a function that produces deterministic numbers in [0, 1).
+ */
+export function mulberry32(seed: number): () => number {
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Fisher-Yates shuffle using a seeded RNG. Mutates array in place.
+ */
+export function seededShuffle<T>(arr: T[], rng: () => number): void {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+let _seededTileCounter = 0;
+function seededTileId(rng: () => number): string {
+  return `st-${++_seededTileCounter}-${Math.floor(rng() * 1e9).toString(36)}`;
+}
+
+let _seededLauncherCounter = 0;
+function seededLauncherId(rng: () => number): string {
+  return `sl-${++_seededLauncherCounter}-${Math.floor(rng() * 1e9).toString(36)}`;
+}
+
+/** Build a solvable tile sequence using seeded RNG. */
+export function buildSolvableSequenceSeeded(
+  allTiles: StudioTile[],
+  launcherConfigs: { colorType: number; order: number }[],
+  activeLauncherCount: number,
+  rng: () => number,
+): StudioTile[] {
+  const tilesByColor = new Map<number, StudioTile[]>();
+  for (const tile of allTiles) {
+    if (!tilesByColor.has(tile.colorType)) tilesByColor.set(tile.colorType, []);
+    tilesByColor.get(tile.colorType)!.push(tile);
+  }
+  for (const arr of tilesByColor.values()) seededShuffle(arr, rng);
+
+  const sorted = [...launcherConfigs].sort((a, b) => a.order - b.order);
+  const sequence: StudioTile[] = [];
+
+  for (let i = 0; i < sorted.length; i += activeLauncherCount) {
+    const batch = sorted.slice(i, i + activeLauncherCount);
+    const perLauncher: StudioTile[][] = batch.map((cfg) => {
+      const pool = tilesByColor.get(cfg.colorType) || [];
+      return pool.splice(0, 3);
+    });
+    const maxRound = Math.max(...perLauncher.map((t) => t.length), 0);
+    for (let round = 0; round < maxRound; round++) {
+      const roundTiles: StudioTile[] = [];
+      for (const tiles of perLauncher) {
+        if (round < tiles.length) roundTiles.push(tiles[round]);
+      }
+      seededShuffle(roundTiles, rng);
+      sequence.push(...roundTiles);
+    }
+  }
+  for (const arr of tilesByColor.values()) sequence.push(...arr);
+  return sequence;
+}
+
+/** Build a challenging tile sequence with burial, using seeded RNG. */
+export function buildChallengingSequenceSeeded(
+  allTiles: StudioTile[],
+  launcherConfigs: { colorType: number; order: number }[],
+  activeLauncherCount: number,
+  mismatchDepth: number,
+  rng: () => number,
+): StudioTile[] {
+  const tilesByColor = new Map<number, StudioTile[]>();
+  for (const tile of allTiles) {
+    if (!tilesByColor.has(tile.colorType)) tilesByColor.set(tile.colorType, []);
+    tilesByColor.get(tile.colorType)!.push(tile);
+  }
+  for (const arr of tilesByColor.values()) seededShuffle(arr, rng);
+
+  const sorted = [...launcherConfigs].sort((a, b) => a.order - b.order);
+  const batches: StudioTile[][] = [];
+  for (let i = 0; i < sorted.length; i += activeLauncherCount) {
+    const batch = sorted.slice(i, i + activeLauncherCount);
+    const batchTiles: StudioTile[] = [];
+    for (const cfg of batch) {
+      const pool = tilesByColor.get(cfg.colorType) || [];
+      batchTiles.push(...pool.splice(0, 3));
+    }
+    seededShuffle(batchTiles, rng);
+    batches.push(batchTiles);
+  }
+
+  const n = batches.length;
+  const swapCount = Math.round(mismatchDepth * Math.floor(n / 2));
+  for (let i = 0; i < swapCount; i++) {
+    const j = n - 1 - i;
+    if (i < j) [batches[i], batches[j]] = [batches[j], batches[i]];
+  }
+
+  const sequence = batches.flat();
+  for (const arr of tilesByColor.values()) sequence.push(...arr);
+  return sequence;
+}
+
+/** Distribute a tile sequence into three layers. */
+function distributeToLayersSeeded(
+  sequence: StudioTile[],
+  maxSelectableItems: number,
+): { a: (StudioTile | null)[]; b: (StudioTile | null)[]; c: StudioTile[] } {
+  const a: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
+  const b: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
+  const c: StudioTile[] = [];
+  sequence.forEach((tile, idx) => {
+    if (idx < maxSelectableItems) a[idx] = tile;
+    else if (idx < 2 * maxSelectableItems) b[idx - maxSelectableItems] = tile;
+    else c.push(tile);
+  });
+  return { a, b, c };
+}
+
+/** Greedy solvability check for seeded arrangements. */
+function verifySolvabilitySeeded(
+  layerA: (StudioTile | null)[],
+  layerB: (StudioTile | null)[],
+  layerC: StudioTile[],
+  launcherConfigs: { colorType: number; order: number }[],
+  activeLauncherCount: number,
+  waitingStandSlots: number,
+): boolean {
+  const simA = layerA.map((t) => (t ? { ...t } : null));
+  const simB = layerB.map((t) => (t ? { ...t } : null));
+  const simC = layerC.map((t) => ({ ...t }));
+  const sorted = [...launcherConfigs].sort((a, b) => a.order - b.order);
+  interface SimLauncher { colorType: number; collected: number }
+  const active: SimLauncher[] = sorted.slice(0, activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0 }));
+  const queue: SimLauncher[] = sorted.slice(activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0 }));
+  const stand: number[] = [];
+  let fired = 0;
+  const totalLaunchers = sorted.length;
+  const maxIter = layerA.length * 4 + layerC.length + 200;
+  for (let iter = 0; iter < maxIter; iter++) {
+    if (fired >= totalLaunchers) return true;
+    const available: { idx: number; tile: StudioTile }[] = [];
+    for (let i = 0; i < simA.length; i++) { if (simA[i]) available.push({ idx: i, tile: simA[i]! }); }
+    if (available.length === 0) break;
+    let bestIdx = -1, bestScore = -Infinity;
+    for (const { idx, tile } of available) {
+      const launcher = active.find((l) => l.colorType === tile.colorType && l.collected < 3);
+      const score = launcher ? (launcher.collected === 2 ? 200 : 100) : (stand.length < waitingStandSlots ? 0 : -1000);
+      if (score > bestScore) { bestScore = score; bestIdx = idx; }
+    }
+    if (bestIdx === -1) break;
+    if (bestScore <= -1000) {
+      const match = available.find(({ tile }) => active.some((l) => l.colorType === tile.colorType && l.collected < 3));
+      if (match) bestIdx = match.idx; else return false;
+    }
+    const tile = simA[bestIdx]!;
+    simA[bestIdx] = null;
+    if (simB[bestIdx]) { simA[bestIdx] = simB[bestIdx]; simB[bestIdx] = null; if (simC.length > 0) simB[bestIdx] = simC.shift()!; }
+    const matchLauncher = active.find((l) => l.colorType === tile.colorType && l.collected < 3);
+    if (matchLauncher) {
+      matchLauncher.collected++;
+      if (matchLauncher.collected >= 3) {
+        fired++; active.splice(active.indexOf(matchLauncher), 1);
+        if (queue.length > 0) active.push(queue.shift()!);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const l of active) {
+            if (l.collected >= 3) continue;
+            const indices: number[] = [];
+            for (let i = 0; i < stand.length && indices.length < 3 - l.collected; i++) { if (stand[i] === l.colorType) indices.push(i); }
+            if (indices.length > 0) { l.collected += indices.length; for (let j = indices.length - 1; j >= 0; j--) stand.splice(indices[j], 1); changed = true; }
+          }
+          const nowFiring = active.filter((l) => l.collected >= 3);
+          for (const l of nowFiring) { fired++; active.splice(active.indexOf(l), 1); if (queue.length > 0) active.push(queue.shift()!); changed = true; }
+        }
+      }
+    } else {
+      if (stand.length >= waitingStandSlots) return false;
+      stand.push(tile.colorType);
+    }
+  }
+  return fired >= totalLaunchers;
+}
+
+/**
+ * Deterministic version of initializeState.
+ * Uses the seed from config to produce identical tile arrangements.
+ */
+export function initializeStateSeeded(config: StudioGameConfig): StudioGameState {
+  const {
+    pixelArt,
+    maxSelectableItems,
+    waitingStandSlots,
+    selectableItems,
+    launchers,
+    activeLauncherCount = 2,
+    mismatchDepth = 0,
+    seed = 42,
+  } = config;
+
+  const rng = mulberry32(seed);
+
+  const allTiles: StudioTile[] = selectableItems.map((item) => ({
+    id: seededTileId(rng),
+    colorType: item.colorType,
+    variant: item.variant,
+    fruitType: COLOR_TYPE_TO_FRUIT[item.colorType] || 'apple',
+  }));
+
+  const sortedLauncherConfigs = [...launchers].sort((a, b) => a.order - b.order);
+
+  let layerA: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
+  let layerB: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
+  let layerC: StudioTile[] = [];
+
+  if (mismatchDepth > 0) {
+    const RETRIES_PER_DEPTH = 5;
+    let found = false;
+    for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
+      const sequence = buildChallengingSequenceSeeded(allTiles, sortedLauncherConfigs, activeLauncherCount, mismatchDepth, rng);
+      const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
+      if (verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
+        layerA = layers.a; layerB = layers.b; layerC = layers.c; found = true;
+      }
+    }
+    if (!found) {
+      for (let depth = mismatchDepth - 0.05; depth > 0 && !found; depth -= 0.05) {
+        for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
+          const sequence = buildChallengingSequenceSeeded(allTiles, sortedLauncherConfigs, activeLauncherCount, Math.max(0, +depth.toFixed(2)), rng);
+          const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
+          if (verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
+            layerA = layers.a; layerB = layers.b; layerC = layers.c; found = true;
+          }
+        }
+      }
+    }
+  }
+
+  if (layerA.every((t) => t === null)) {
+    const MAX_RETRIES = 20;
+    let solvable = false;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const sequence = buildSolvableSequenceSeeded(allTiles, sortedLauncherConfigs, activeLauncherCount, rng);
+      const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
+      solvable = verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots);
+      if (solvable) { layerA = layers.a; layerB = layers.b; layerC = layers.c; break; }
+    }
+    if (!solvable) {
+      const tilesByColor = new Map<number, StudioTile[]>();
+      for (const tile of allTiles) { if (!tilesByColor.has(tile.colorType)) tilesByColor.set(tile.colorType, []); tilesByColor.get(tile.colorType)!.push(tile); }
+      const strictSequence: StudioTile[] = [];
+      for (let i = 0; i < sortedLauncherConfigs.length; i += activeLauncherCount) {
+        const batch = sortedLauncherConfigs.slice(i, i + activeLauncherCount);
+        for (const cfg of batch) { const pool = tilesByColor.get(cfg.colorType) || []; strictSequence.push(...pool.splice(0, 3)); }
+      }
+      for (const arr of tilesByColor.values()) strictSequence.push(...arr);
+      const layers = distributeToLayersSeeded(strictSequence, maxSelectableItems);
+      layerA = layers.a; layerB = layers.b; layerC = layers.c;
+    }
+  }
+
+  const allLaunchers: StudioLauncherState[] = sortedLauncherConfigs.map((l) => ({
+    id: seededLauncherId(rng),
+    colorType: l.colorType,
+    fruitType: COLOR_TYPE_TO_FRUIT[l.colorType] || 'apple',
+    pixelCount: l.pixelCount,
+    group: l.group,
+    collected: [],
+  }));
+
+  const freshPixelArt = pixelArt.map((cell) => ({ ...cell, filled: false }));
+
+  return {
+    layerA,
+    layerB,
+    layerC,
+    waitingStand: [],
+    activeLaunchers: allLaunchers.slice(0, activeLauncherCount),
+    launcherQueue: allLaunchers.slice(activeLauncherCount),
+    pixelArt: freshPixelArt,
+    moveCount: 0,
+    matchCount: 0,
+    isWon: false,
+    isLost: false,
+    waitingStandSlots,
+  };
+}
+
+// ============================================================================
 // Initializer
 // ============================================================================
 
 export function initializeState(config: StudioGameConfig): StudioGameState {
-  // If seed is present, delegate to the engine's seeded initializer
+  // If seed is present, use deterministic initialization
   if (config.seed !== undefined) {
-    const { initializeStateSeeded } = require('./studioDifficultyEngine');
     return initializeStateSeeded(config);
   }
 
