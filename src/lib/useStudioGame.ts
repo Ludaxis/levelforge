@@ -44,16 +44,17 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
     mismatchDepth,
   } = params;
 
-  // Tile burial (0.25): direct slider — most impactful lever
+  // Tile burial (0.35): direct slider — most impactful lever
   const tileBurial = clamp01(mismatchDepth);
 
-  // Stand pressure (0.20): closer to saturation = harder
-  const standPressure = clamp01(1 - (waitingStandSlots - uniqueColors) / 4);
+  // Stand pressure (0.15): how tight the stand is vs active colors
+  // Uses softer curve: +2 buffer so moderate color counts don't saturate
+  const standPressure = clamp01((uniqueColors - waitingStandSlots + 2) / 6);
 
-  // Color complexity (0.15): more colors = harder
+  // Color complexity (0.10): more colors = harder
   const colorComplexity = clamp01((uniqueColors - 2) / 5);
 
-  // Sequence length (0.15): more launchers = longer game
+  // Sequence length (0.10): more launchers = longer game
   const sequenceLength = clamp01((launcherCount - 4) / 12);
 
   // Layer depth (0.10): hidden tile ratio
@@ -61,16 +62,16 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
     ? clamp01((totalTiles - maxSelectableItems) / totalTiles)
     : 0;
 
-  // Grid constraint (0.15): smaller grid = harder
-  const gridConstraint = clamp01(1 - (maxSelectableItems - 6) / 14);
+  // Grid constraint (0.20): smaller grid = harder (range 6-10)
+  const gridConstraint = clamp01(1 - (maxSelectableItems - 6) / 4);
 
   const raw =
-    tileBurial * 0.25 +
-    standPressure * 0.20 +
-    colorComplexity * 0.15 +
-    sequenceLength * 0.15 +
+    tileBurial * 0.35 +
+    standPressure * 0.15 +
+    colorComplexity * 0.10 +
+    sequenceLength * 0.10 +
     layerDepth * 0.10 +
-    gridConstraint * 0.15;
+    gridConstraint * 0.20;
 
   const score = Math.round(raw * 100);
 
@@ -129,6 +130,8 @@ export interface StudioGameConfig {
   mismatchDepth?: number;
   /** Actual hex colors per colorType from the artwork (e.g. { 0: '4C9EF2', 7: 'FFFBF7' }) */
   colorTypeToHex?: Record<number, string>;
+  /** Optional seed for deterministic tile arrangement */
+  seed?: number;
 }
 
 export interface StudioGameState {
@@ -540,6 +543,12 @@ export function findMaxSolvableDepth(config: StudioGameConfig): number {
 // ============================================================================
 
 export function initializeState(config: StudioGameConfig): StudioGameState {
+  // If seed is present, delegate to the engine's seeded initializer
+  if (config.seed !== undefined) {
+    const { initializeStateSeeded } = require('./studioDifficultyEngine');
+    return initializeStateSeeded(config);
+  }
+
   const {
     pixelArt,
     maxSelectableItems,
@@ -745,7 +754,7 @@ function cellColorType(cell: PixelCell): number {
   return cell.colorType ?? FRUIT_TO_COLOR_TYPE[cell.fruitType];
 }
 
-function fireLauncher(
+export function fireLauncher(
   launcher: StudioLauncherState,
   pixelArt: PixelCell[],
 ): PixelCell[] {
@@ -786,7 +795,7 @@ function fireLauncher(
 // Find matching launcher for a tile
 // ============================================================================
 
-function findMatchingLauncher(
+export function findMatchingLauncher(
   colorType: number,
   activeLaunchers: StudioLauncherState[],
 ): StudioLauncherState | null {
@@ -799,7 +808,7 @@ function findMatchingLauncher(
 // After fire: shift launchers, auto-fill from waiting stand, cascade
 // ============================================================================
 
-function postFireCascade(
+export function postFireCascade(
   activeLaunchers: StudioLauncherState[],
   launcherQueue: StudioLauncherState[],
   waitingStand: StudioTile[],
@@ -874,7 +883,7 @@ function postFireCascade(
 // Core game logic — pickTile
 // ============================================================================
 
-function pickTileLogic(state: StudioGameState, slotIndex: number): StudioGameState {
+export function pickTileLogic(state: StudioGameState, slotIndex: number): StudioGameState {
   if (state.isWon || state.isLost) return state;
 
   const tile = state.layerA[slotIndex];

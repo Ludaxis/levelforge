@@ -627,6 +627,11 @@ export interface StudioExportLevel {
   Requirements: { ColorType: number; Value: number; Group: number }[];
   UnlockStageData: { RequiredCompletedGroups: number[] }[];
   MaxSelectableItems: number;
+  /** Recipe fields for deterministic reconstruction */
+  Seed?: number;
+  MismatchDepth?: number;
+  WaitingStandSlots?: number;
+  ActiveLauncherCount?: number;
 }
 
 export interface StudioExportData {
@@ -649,6 +654,11 @@ export interface StudioExportData {
   requirements: { colorType: number; value: number; group: number }[];
   unlockStageData: { requiredCompletedGroups: number[] }[];
   maxSelectableItems: number;
+  /** Recipe fields for deterministic reconstruction */
+  seed?: number;
+  mismatchDepth?: number;
+  waitingStandSlots?: number;
+  activeLauncherCount?: number;
 }
 
 /**
@@ -687,7 +697,7 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
     RequiredCompletedGroups: s.requiredCompletedGroups,
   }));
 
-  return {
+  const result: StudioExportLevel = {
     Palette: data.palette,
     LevelId: data.levelId,
     SongId: 'song_001',
@@ -704,4 +714,12 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
     UnlockStageData: unlockStageData,
     MaxSelectableItems: data.maxSelectableItems,
   };
+
+  // Include recipe fields when present
+  if (data.seed !== undefined) result.Seed = data.seed;
+  if (data.mismatchDepth !== undefined) result.MismatchDepth = data.mismatchDepth;
+  if (data.waitingStandSlots !== undefined) result.WaitingStandSlots = data.waitingStandSlots;
+  if (data.activeLauncherCount !== undefined) result.ActiveLauncherCount = data.activeLauncherCount;
+
+  return result;
 }

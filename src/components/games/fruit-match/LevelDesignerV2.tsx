@@ -29,6 +29,13 @@ import {
   findMaxSolvableDepth,
 } from '@/lib/useStudioGame';
 import {
+  targetDifficulty,
+  simulateStudioGame,
+  StudioSimulationResult,
+  DifficultyRecipe,
+  scoreToTier,
+} from '@/lib/studioDifficultyEngine';
+import {
   COLOR_TYPE_TO_FRUIT,
   COLOR_TYPE_TO_HEX,
   FRUIT_TO_COLOR_TYPE,
@@ -63,6 +70,10 @@ import {
   Play,
   Paintbrush,
   MousePointer,
+  Target,
+  Zap,
+  Hash,
+  Loader2,
 } from 'lucide-react';
 
 // ============================================================================
@@ -834,7 +845,7 @@ function LauncherSection({
           </div>
         )}
         <p className="text-xs text-muted-foreground mt-2">
-          First 2 = active, next 2 = locked by default. Drag to reorder.
+          First {launchers.length > 0 ? Math.min(launchers.length, 2) : 2} = active, rest = locked by default. Drag to reorder. Active count controlled in Difficulty Analysis.
         </p>
       </CardContent>
     </Card>
@@ -1085,19 +1096,43 @@ function DifficultyAnalysis({
   difficultyResult,
   maxSelectableItems,
   mismatchDepth,
+  waitingStandSlots,
+  activeLauncherCount,
+  seed,
+  simulationResult,
+  isTargeting,
+  isSimulating,
   onMaxSelectableChange,
   onMismatchDepthChange,
+  onWaitingStandSlotsChange,
+  onActiveLauncherCountChange,
+  onSeedChange,
   onEasier,
   onHarder,
+  onAutoTarget,
+  onSimulate,
 }: {
   difficultyResult: StudioDifficultyResult | null;
   maxSelectableItems: number;
   mismatchDepth: number;
+  waitingStandSlots: number;
+  activeLauncherCount: number;
+  seed: number | undefined;
+  simulationResult: StudioSimulationResult | null;
+  isTargeting: boolean;
+  isSimulating: boolean;
   onMaxSelectableChange: (v: number) => void;
   onMismatchDepthChange: (v: number) => void;
+  onWaitingStandSlotsChange: (v: number) => void;
+  onActiveLauncherCountChange: (v: number) => void;
+  onSeedChange: (v: number | undefined) => void;
   onEasier: () => void;
   onHarder: () => void;
+  onAutoTarget: (targetScore: number) => void;
+  onSimulate: () => void;
 }) {
+  const [targetInput, setTargetInput] = useState('50');
+
   if (!difficultyResult) {
     return (
       <Card>
@@ -1118,9 +1153,16 @@ function DifficultyAnalysis({
             <BarChart3 className="h-4 w-4" />
             Difficulty Analysis
           </div>
-          <Badge className={DIFFICULTY_COLORS[tier] || 'bg-gray-500'}>
-            {score}/100 ({tier})
-          </Badge>
+          <div className="flex items-center gap-1.5">
+            {simulationResult && (
+              <Badge variant="outline" className="text-[10px]">
+                WR: {Math.round(simulationResult.winRate * 100)}%
+              </Badge>
+            )}
+            <Badge className={DIFFICULTY_COLORS[tier] || 'bg-gray-500'}>
+              {score}/100 ({tier})
+            </Badge>
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -1137,14 +1179,78 @@ function DifficultyAnalysis({
           </Button>
         </div>
 
+        {/* Auto Target */}
+        <div className="flex items-center gap-2 pt-1 border-t border-border">
+          <Input
+            type="number"
+            min={0}
+            max={100}
+            value={targetInput}
+            onChange={(e) => setTargetInput(e.target.value)}
+            className="h-7 w-20 text-xs"
+            placeholder="Score"
+          />
+          <Button
+            variant="default"
+            size="sm"
+            className="flex-1 h-7"
+            onClick={() => onAutoTarget(Math.max(0, Math.min(100, Number(targetInput) || 50)))}
+            disabled={isTargeting}
+          >
+            {isTargeting ? (
+              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+            ) : (
+              <Target className="h-3.5 w-3.5 mr-1" />
+            )}
+            Auto Target
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7"
+            onClick={onSimulate}
+            disabled={isSimulating}
+            title="Run simulation"
+          >
+            {isSimulating ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Zap className="h-3.5 w-3.5" />
+            )}
+          </Button>
+        </div>
+
+        {/* Simulation Results */}
+        {simulationResult && (
+          <div className="p-2 bg-muted/30 rounded-lg space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">Win Rate</span>
+              <span className="font-mono">{Math.round(simulationResult.winRate * 100)}% ({Math.round(simulationResult.confidenceInterval[0] * 100)}-{Math.round(simulationResult.confidenceInterval[1] * 100)}%)</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">Avg Moves</span>
+              <span className="font-mono">{Math.round(simulationResult.avgMoves)}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">Peak Stand</span>
+              <span className="font-mono">{simulationResult.peakStandUsage}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">Near-Loss Rate</span>
+              <span className="font-mono">{Math.round(simulationResult.nearLossRate * 100)}%</span>
+            </div>
+            <div className="text-[10px] text-muted-foreground text-right">{simulationResult.runs} runs</div>
+          </div>
+        )}
+
         {/* Component breakdown */}
         <div className="space-y-2">
-          <DifficultyComponentBar label="Tile Burial" value={components.tileBurial} weight={0.25} />
-          <DifficultyComponentBar label="Stand Pressure" value={components.standPressure} weight={0.20} />
-          <DifficultyComponentBar label="Color Complexity" value={components.colorComplexity} weight={0.15} />
-          <DifficultyComponentBar label="Sequence Length" value={components.sequenceLength} weight={0.15} />
+          <DifficultyComponentBar label="Tile Burial" value={components.tileBurial} weight={0.35} />
+          <DifficultyComponentBar label="Stand Pressure" value={components.standPressure} weight={0.15} />
+          <DifficultyComponentBar label="Color Complexity" value={components.colorComplexity} weight={0.10} />
+          <DifficultyComponentBar label="Sequence Length" value={components.sequenceLength} weight={0.10} />
           <DifficultyComponentBar label="Layer Depth" value={components.layerDepth} weight={0.10} />
-          <DifficultyComponentBar label="Grid Constraint" value={components.gridConstraint} weight={0.15} />
+          <DifficultyComponentBar label="Grid Constraint" value={components.gridConstraint} weight={0.20} />
         </div>
 
         {/* Sliders */}
@@ -1162,7 +1268,7 @@ function DifficultyAnalysis({
               onValueChange={([v]) => onMismatchDepthChange(v / 100)}
             />
             <p className="text-[10px] text-muted-foreground">
-              0% = matching tiles on top (easy). Higher = tiles buried deeper. Auto-clamped to max solvable depth.
+              0% = matching tiles on top (easy). Higher = tiles buried deeper.
             </p>
           </div>
           <div className="space-y-1">
@@ -1177,6 +1283,59 @@ function DifficultyAnalysis({
               step={1}
               onValueChange={([v]) => onMaxSelectableChange(v)}
             />
+          </div>
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">Waiting Stand Slots</span>
+              <span className="font-mono">{waitingStandSlots}</span>
+            </div>
+            <Slider
+              value={[waitingStandSlots]}
+              min={3}
+              max={7}
+              step={1}
+              onValueChange={([v]) => onWaitingStandSlotsChange(v)}
+            />
+          </div>
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">Active Launchers</span>
+              <span className="font-mono">{activeLauncherCount}</span>
+            </div>
+            <Slider
+              value={[activeLauncherCount]}
+              min={1}
+              max={3}
+              step={1}
+              onValueChange={([v]) => onActiveLauncherCountChange(v)}
+            />
+          </div>
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">Seed</span>
+              <span className="font-mono">{seed ?? 'random'}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                value={seed ?? ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  onSeedChange(val === '' ? undefined : Number(val));
+                }}
+                placeholder="Random"
+                className="h-7 text-xs flex-1"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => onSeedChange(Math.floor(Math.random() * 2147483647))}
+              >
+                <Hash className="h-3 w-3 mr-1" />
+                New
+              </Button>
+            </div>
           </div>
         </div>
       </CardContent>
@@ -1220,9 +1379,14 @@ export function LevelDesignerV2({
   const [maxSelectableItems, setMaxSelectableItems] = useState(10);
 
   // Difficulty
-  const waitingStandSlots = 5; // Fixed at 5
+  const [waitingStandSlots, setWaitingStandSlots] = useState(5);
+  const [activeLauncherCount, setActiveLauncherCount] = useState(2);
   const [sinkWidth, setSinkWidth] = useState(6);
   const [mismatchDepth, setMismatchDepth] = useState(0);
+  const [seed, setSeed] = useState<number | undefined>(undefined);
+  const [simulationResult, setSimulationResult] = useState<StudioSimulationResult | null>(null);
+  const [isTargeting, setIsTargeting] = useState(false);
+  const [isSimulating, setIsSimulating] = useState(false);
 
   // Play mode
   const [playMode, setPlayMode] = useState(false);
@@ -1372,10 +1536,12 @@ export function LevelDesignerV2({
           group: l.group,
           order: l.order,
         })),
+      activeLauncherCount,
       mismatchDepth,
       colorTypeToHex,
+      seed,
     };
-  }, [pixelCellArray, artWidth, artHeight, maxSelectableItems, waitingStandSlots, itemsWithLayers, launchers, mismatchDepth, colorTypeToHex]);
+  }, [pixelCellArray, artWidth, artHeight, maxSelectableItems, waitingStandSlots, itemsWithLayers, launchers, activeLauncherCount, mismatchDepth, colorTypeToHex, seed]);
 
   // ============================================================================
   // JSON Import
@@ -1874,6 +2040,48 @@ export function LevelDesignerV2({
     }
   }, [difficultyResult, studioGameConfig, mismatchDepth, maxSelectableItems]);
 
+  const handleAutoTarget = useCallback((targetScore: number) => {
+    if (!studioGameConfig) return;
+    setIsTargeting(true);
+    // Use setTimeout to let the UI show the loading state
+    setTimeout(() => {
+      try {
+        const result = targetDifficulty(studioGameConfig, targetScore, {
+          seed: seed ?? Math.floor(Math.random() * 2147483647),
+        });
+        setMismatchDepth(result.recipe.mismatchDepth);
+        setMaxSelectableItems(result.recipe.maxSelectableItems);
+        setWaitingStandSlots(result.recipe.waitingStandSlots);
+        setActiveLauncherCount(result.recipe.activeLauncherCount);
+        if (result.recipe.seed && seed === undefined) {
+          setSeed(result.recipe.seed);
+        }
+      } finally {
+        setIsTargeting(false);
+      }
+    }, 10);
+  }, [studioGameConfig, seed]);
+
+  const handleSimulate = useCallback(() => {
+    if (!studioGameConfig) return;
+    setIsSimulating(true);
+    setTimeout(() => {
+      try {
+        const recipe: DifficultyRecipe = {
+          mismatchDepth,
+          maxSelectableItems,
+          waitingStandSlots,
+          activeLauncherCount,
+          seed: seed ?? Math.floor(Math.random() * 2147483647),
+        };
+        const result = simulateStudioGame(studioGameConfig, recipe, 100);
+        setSimulationResult(result);
+      } finally {
+        setIsSimulating(false);
+      }
+    }, 10);
+  }, [studioGameConfig, mismatchDepth, maxSelectableItems, waitingStandSlots, activeLauncherCount, seed]);
+
   // ============================================================================
   // Export JSON
   // ============================================================================
@@ -1910,6 +2118,10 @@ export function LevelDesignerV2({
         })),
       unlockStageData: [{ requiredCompletedGroups: groups.map((g) => g.id) }],
       maxSelectableItems,
+      seed,
+      mismatchDepth,
+      waitingStandSlots,
+      activeLauncherCount,
     };
 
     const result = exportStudioLevel(exportData);
@@ -1920,7 +2132,7 @@ export function LevelDesignerV2({
     a.download = `level_${levelNumber}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [palette, levelNumber, difficultyResult, artWidth, artHeight, pixelArray, itemsWithLayers, launchers, groups, maxSelectableItems]);
+  }, [palette, levelNumber, difficultyResult, artWidth, artHeight, pixelArray, itemsWithLayers, launchers, groups, maxSelectableItems, seed, mismatchDepth, waitingStandSlots, activeLauncherCount]);
 
   // ============================================================================
   // Add to Collection
@@ -2188,10 +2400,21 @@ export function LevelDesignerV2({
           difficultyResult={difficultyResult}
           maxSelectableItems={maxSelectableItems}
           mismatchDepth={mismatchDepth}
+          waitingStandSlots={waitingStandSlots}
+          activeLauncherCount={activeLauncherCount}
+          seed={seed}
+          simulationResult={simulationResult}
+          isTargeting={isTargeting}
+          isSimulating={isSimulating}
           onMaxSelectableChange={setMaxSelectableItems}
           onMismatchDepthChange={setMismatchDepth}
+          onWaitingStandSlotsChange={setWaitingStandSlots}
+          onActiveLauncherCountChange={setActiveLauncherCount}
+          onSeedChange={setSeed}
           onEasier={handleEasier}
           onHarder={handleHarder}
+          onAutoTarget={handleAutoTarget}
+          onSimulate={handleSimulate}
         />
       )}
 
