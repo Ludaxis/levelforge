@@ -1048,17 +1048,42 @@ export function SquareBlockLevelDesigner({
     return Array.from(blocks.values()).some(b => b.locked || b.iceCount || b.mirror);
   }, [blocks, difficultyBreakdown]);
 
-  // Handle cell click - always in block placement mode
+  // Handle cell click - update existing block's properties (preserving color) or place/remove
   const handleCellClick = (coord: GridCoord) => {
     const key = gridKey(coord);
 
     if (blocks.has(key)) {
-      // Remove existing block
-      const newBlocks = new Map(blocks);
-      newBlocks.delete(key);
-      setBlocks(newBlocks);
+      const existingBlock = blocks.get(key)!;
+
+      // Check if toolbar settings differ from the existing block
+      const newLocked = selectedLocked || undefined;
+      const newIceCount = selectedIceCount > 0 ? selectedIceCount : undefined;
+      const newMirror = selectedMirror || undefined;
+
+      const isSameDirection = existingBlock.direction === selectedDirection;
+      const isSameLocked = !!existingBlock.locked === selectedLocked;
+      const isSameIce = (existingBlock.iceCount ?? 0) === selectedIceCount;
+      const isSameMirror = !!existingBlock.mirror === selectedMirror;
+
+      if (isSameDirection && isSameLocked && isSameIce && isSameMirror) {
+        // Same settings as toolbar → remove the block
+        const newBlocks = new Map(blocks);
+        newBlocks.delete(key);
+        setBlocks(newBlocks);
+      } else {
+        // Different settings → update block in-place, preserving its color
+        const newBlocks = new Map(blocks);
+        newBlocks.set(key, {
+          ...existingBlock,
+          direction: selectedDirection,
+          locked: newLocked,
+          iceCount: newIceCount,
+          mirror: newMirror,
+        });
+        setBlocks(newBlocks);
+      }
     } else if (!holes.has(key)) {
-      // Place new block
+      // Place new block on empty cell
       const newBlock: SquareBlock = {
         id: `block-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         coord,
