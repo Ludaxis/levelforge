@@ -789,7 +789,7 @@ function LauncherSection({
 }: {
   launchers: StudioLauncher[];
   groups: StudioGroup[];
-  onAdd: () => void;
+  onAdd: (colorType: number, pixelCount: number, group: number) => void;
   onDelete: (id: string) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
   onUpdate: (id: string, updates: Partial<Pick<StudioLauncher, 'colorType' | 'pixelCount' | 'group'>>) => void;
@@ -798,6 +798,9 @@ function LauncherSection({
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [addColorType, setAddColorType] = useState(0);
+  const [addPixelCount, setAddPixelCount] = useState(20);
+  const [addGroup, setAddGroup] = useState(groups[0]?.id ?? 1);
 
   const sorted = useMemo(() => [...launchers].sort((a, b) => a.order - b.order), [launchers]);
 
@@ -809,10 +812,6 @@ function LauncherSection({
             Launcher (Requirement)
             <Badge variant="outline" className="text-[10px]">{launchers.length}</Badge>
           </div>
-          <Button variant="outline" size="sm" className="h-7" onClick={onAdd}>
-            <Plus className="h-3 w-3 mr-1" />
-            Add
-          </Button>
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -920,8 +919,41 @@ function LauncherSection({
             ))}
           </div>
         )}
+        {/* Add Launcher form */}
+        <div className="flex items-center gap-2 flex-wrap mt-2 pt-2 border-t border-border/50">
+          <select
+            value={addColorType}
+            onChange={(e) => setAddColorType(Number(e.target.value))}
+            className="h-7 text-xs bg-background border rounded px-2"
+          >
+            {Array.from({ length: 9 }, (_, i) => i).map((ct) => (
+              <option key={ct} value={ct}>{COLOR_TYPE_TO_NAME[ct]}</option>
+            ))}
+          </select>
+          <Input
+            type="number"
+            min={1}
+            value={addPixelCount}
+            onChange={(e) => setAddPixelCount(Math.max(1, Number(e.target.value) || 1))}
+            className="h-7 w-16 text-xs"
+            placeholder="Value"
+          />
+          <select
+            value={addGroup}
+            onChange={(e) => setAddGroup(Number(e.target.value))}
+            className="h-7 text-xs bg-background border rounded px-2"
+          >
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>{g.name}</option>
+            ))}
+          </select>
+          <Button variant="outline" size="sm" className="h-7" onClick={() => onAdd(addColorType, addPixelCount, addGroup)}>
+            <Plus className="h-3 w-3 mr-1" />
+            Add
+          </Button>
+        </div>
         <p className="text-xs text-muted-foreground mt-2">
-          First {launchers.length > 0 ? Math.min(launchers.length, 2) : 2} = active, rest = locked by default. Drag to reorder. Active count controlled in Difficulty Analysis.
+          Click a launcher to edit. Drag to reorder. First 2 = active, rest = locked.
         </p>
       </CardContent>
     </Card>
@@ -2008,20 +2040,20 @@ export function LevelDesignerV2({
   // Launcher handlers
   // ============================================================================
 
-  const handleAddLauncher = useCallback(() => {
+  const handleAddLauncher = useCallback((colorType: number, pixelCount: number, group: number) => {
     const newOrder = launchers.length;
     setLaunchers((prev) => [
       ...prev,
       {
         id: uid('launcher'),
-        colorType: 0,
-        pixelCount: 20,
-        group: groups[0]?.id ?? 1,
+        colorType,
+        pixelCount,
+        group,
         isLocked: newOrder >= 2,
         order: newOrder,
       },
     ]);
-  }, [launchers.length, groups]);
+  }, [launchers.length]);
 
   const handleDeleteLauncher = useCallback((id: string) => {
     setLaunchers((prev) => {
