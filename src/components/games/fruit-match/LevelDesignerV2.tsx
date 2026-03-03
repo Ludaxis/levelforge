@@ -150,8 +150,8 @@ function uid(prefix: string): string {
 // ColorSquare helper
 // ============================================================================
 
-function ColorSwatch({ colorType, size = 20, className = '' }: { colorType: number; size?: number; className?: string }) {
-  const hex = COLOR_TYPE_TO_HEX[colorType] || '888888';
+function ColorSwatch({ colorType, size = 20, className = '', hex: hexOverride }: { colorType: number; size?: number; className?: string; hex?: string }) {
+  const hex = hexOverride || COLOR_TYPE_TO_HEX[colorType] || '888888';
   return (
     <div
       className={`rounded-sm border border-white/20 shrink-0 ${className}`}
@@ -584,6 +584,7 @@ function GroupingSection({
   onDeleteGroup,
   onRenameGroup,
   onReorder,
+  colorTypeToHex,
 }: {
   groups: StudioGroup[];
   selectedGroupId: number | null;
@@ -592,6 +593,7 @@ function GroupingSection({
   onDeleteGroup: (id: number) => void;
   onRenameGroup: (id: number, name: string) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
+  colorTypeToHex?: Record<number, string>;
 }) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
@@ -698,7 +700,8 @@ function GroupingSection({
                       const entries = Object.entries(g.pixelsByColor);
                       if (entries.length === 0) return groupColor;
                       const dominant = entries.reduce((best, cur) => cur[1] > best[1] ? cur : best);
-                      const hex = COLOR_TYPE_TO_HEX[Number(dominant[0])];
+                      const ct = Number(dominant[0]);
+                      const hex = colorTypeToHex?.[ct] || COLOR_TYPE_TO_HEX[ct];
                       return hex ? `#${hex}` : groupColor;
                     })() }}
                   />
@@ -706,7 +709,7 @@ function GroupingSection({
                   {/* Color breakdown dots */}
                   <div className="flex gap-0.5 shrink-0">
                     {Object.entries(g.pixelsByColor).map(([ct]) => (
-                      <ColorSwatch key={ct} colorType={Number(ct)} size={14} />
+                      <ColorSwatch key={ct} colorType={Number(ct)} size={14} hex={colorTypeToHex?.[Number(ct)]} />
                     ))}
                   </div>
 
@@ -777,17 +780,24 @@ function GroupingSection({
 
 function LauncherSection({
   launchers,
+  groups,
   onAdd,
   onDelete,
   onReorder,
+  onUpdate,
+  colorTypeToHex,
 }: {
   launchers: StudioLauncher[];
+  groups: StudioGroup[];
   onAdd: () => void;
   onDelete: (id: string) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
+  onUpdate: (id: string, updates: Partial<Pick<StudioLauncher, 'colorType' | 'pixelCount' | 'group'>>) => void;
+  colorTypeToHex?: Record<number, string>;
 }) {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const sorted = useMemo(() => [...launchers].sort((a, b) => a.order - b.order), [launchers]);
 
@@ -830,40 +840,82 @@ function LauncherSection({
                   setDraggedIdx(null);
                   setDragOverIdx(null);
                 }}
-                className={`flex items-center gap-2 p-2 rounded-lg border bg-card text-sm transition-all ${
+                className={`rounded-lg border bg-card text-sm transition-all ${
                   draggedIdx === idx ? 'opacity-50' : ''
                 } ${dragOverIdx === idx ? 'border-primary border-2' : 'border-border'}`}
               >
-                <div className="cursor-grab active:cursor-grabbing shrink-0 text-muted-foreground">
-                  <GripVertical className="h-4 w-4" />
+                <div
+                  className="flex items-center gap-2 p-2 cursor-pointer"
+                  onClick={() => setExpandedId(expandedId === launcher.id ? null : launcher.id)}
+                >
+                  <div
+                    className="cursor-grab active:cursor-grabbing shrink-0 text-muted-foreground"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <GripVertical className="h-4 w-4" />
+                  </div>
+
+                  <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-medium shrink-0">
+                    {idx + 1}
+                  </span>
+
+                  <ColorSwatch colorType={launcher.colorType} size={20} hex={colorTypeToHex?.[launcher.colorType]} />
+
+                  <span className="text-xs flex-1">
+                    {COLOR_TYPE_TO_NAME[launcher.colorType]} x{launcher.pixelCount}
+                  </span>
+
+                  {launcher.isLocked && (
+                    <Lock className="h-3 w-3 text-muted-foreground shrink-0" />
+                  )}
+
+                  <Badge variant={launcher.isLocked ? 'outline' : 'default'} className="text-[10px] shrink-0">
+                    {launcher.isLocked ? 'Locked' : 'Active'}
+                  </Badge>
+
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive shrink-0"
+                    onClick={(e) => { e.stopPropagation(); onDelete(launcher.id); }}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
                 </div>
 
-                <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-medium shrink-0">
-                  {idx + 1}
-                </span>
-
-                <ColorSwatch colorType={launcher.colorType} size={20} />
-
-                <span className="text-xs flex-1">
-                  {COLOR_TYPE_TO_NAME[launcher.colorType]} x{launcher.pixelCount}
-                </span>
-
-                {launcher.isLocked && (
-                  <Lock className="h-3 w-3 text-muted-foreground shrink-0" />
+                {/* Expanded edit panel */}
+                {expandedId === launcher.id && (
+                  <div className="px-2 pb-2 pt-1 border-t border-border/50 flex items-center gap-2 flex-wrap">
+                    <label className="text-[10px] text-muted-foreground">Color:</label>
+                    <select
+                      value={launcher.colorType}
+                      onChange={(e) => onUpdate(launcher.id, { colorType: Number(e.target.value) })}
+                      className="h-6 text-xs bg-background border rounded px-1"
+                    >
+                      {Array.from({ length: 9 }, (_, i) => i).map((ct) => (
+                        <option key={ct} value={ct}>{COLOR_TYPE_TO_NAME[ct]}</option>
+                      ))}
+                    </select>
+                    <label className="text-[10px] text-muted-foreground">Value:</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={launcher.pixelCount}
+                      onChange={(e) => onUpdate(launcher.id, { pixelCount: Math.max(1, Number(e.target.value) || 1) })}
+                      className="h-6 w-16 text-xs"
+                    />
+                    <label className="text-[10px] text-muted-foreground">Group:</label>
+                    <select
+                      value={launcher.group}
+                      onChange={(e) => onUpdate(launcher.id, { group: Number(e.target.value) })}
+                      className="h-6 text-xs bg-background border rounded px-1"
+                    >
+                      {groups.map((g) => (
+                        <option key={g.id} value={g.id}>{g.name}</option>
+                      ))}
+                    </select>
+                  </div>
                 )}
-
-                <Badge variant={launcher.isLocked ? 'outline' : 'default'} className="text-[10px] shrink-0">
-                  {launcher.isLocked ? 'Locked' : 'Active'}
-                </Badge>
-
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive shrink-0"
-                  onClick={() => onDelete(launcher.id)}
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
               </div>
             ))}
           </div>
@@ -933,6 +985,7 @@ function ItemPoolSection({
   onAddItem,
   onDeleteItem,
   onReorder,
+  colorTypeToHex,
 }: {
   items: StudioSelectableItem[];
   maxSelectableItems: number;
@@ -940,6 +993,7 @@ function ItemPoolSection({
   onAddItem: (colorType: number, variant: number) => void;
   onDeleteItem: (id: string) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
+  colorTypeToHex?: Record<number, string>;
 }) {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -981,7 +1035,7 @@ function ItemPoolSection({
         } ${dragOverIdx === globalIdx ? 'border-primary border-2' : 'border-border'}`}
       >
         <GripVertical className="h-3 w-3 text-muted-foreground cursor-grab shrink-0" />
-        <ColorSwatch colorType={item.colorType} size={16} />
+        <ColorSwatch colorType={item.colorType} size={16} hex={colorTypeToHex?.[item.colorType]} />
         <span className="truncate flex-1">{variantName}</span>
         <Button
           variant="ghost"
@@ -1988,6 +2042,10 @@ export function LevelDesignerV2({
     });
   }, []);
 
+  const handleUpdateLauncher = useCallback((id: string, updates: Partial<Pick<StudioLauncher, 'colorType' | 'pixelCount' | 'group'>>) => {
+    setLaunchers((prev) => prev.map((l) => (l.id === id ? { ...l, ...updates } : l)));
+  }, []);
+
   // ============================================================================
   // Item Pool handlers
   // ============================================================================
@@ -2365,6 +2423,7 @@ export function LevelDesignerV2({
           onDeleteGroup={handleDeleteGroup}
           onRenameGroup={handleRenameGroup}
           onReorder={handleReorderGroup}
+          colorTypeToHex={colorTypeToHex}
         />
       )}
 
@@ -2372,9 +2431,12 @@ export function LevelDesignerV2({
       {hasData && (
         <LauncherSection
           launchers={launchers}
+          groups={recomputedGroups}
           onAdd={handleAddLauncher}
           onDelete={handleDeleteLauncher}
           onReorder={handleReorderLauncher}
+          onUpdate={handleUpdateLauncher}
+          colorTypeToHex={colorTypeToHex}
         />
       )}
 
@@ -2415,6 +2477,7 @@ export function LevelDesignerV2({
           onAddItem={handleAddItem}
           onDeleteItem={handleDeleteItem}
           onReorder={handleReorderItem}
+          colorTypeToHex={colorTypeToHex}
         />
       )}
 
