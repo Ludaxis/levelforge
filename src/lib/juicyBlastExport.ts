@@ -117,6 +117,12 @@ export const COLOR_TYPE_TO_FRUIT: Record<number, FruitType> = {
   8: 'blackberry',   // Black/Dark
 };
 
+// Human-readable color names for display (not fruit names)
+export const COLOR_TYPE_TO_NAME: Record<number, string> = {
+  0: 'Blue', 1: 'Orange', 2: 'Red', 3: 'Pink', 4: 'Yellow',
+  5: 'Green', 6: 'Purple', 7: 'White', 8: 'Black',
+};
+
 // Difficulty tier to number mapping
 export const DIFFICULTY_TO_NUMBER: Record<DifficultyTier, number> = {
   trivial: 1,

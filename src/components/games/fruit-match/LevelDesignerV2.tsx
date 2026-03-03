@@ -38,6 +38,7 @@ import {
 import {
   COLOR_TYPE_TO_FRUIT,
   COLOR_TYPE_TO_HEX,
+  COLOR_TYPE_TO_NAME,
   FRUIT_TO_COLOR_TYPE,
   DIFFICULTY_TO_NUMBER,
   NUMBER_TO_DIFFICULTY,
@@ -155,7 +156,7 @@ function ColorSwatch({ colorType, size = 20, className = '' }: { colorType: numb
     <div
       className={`rounded-sm border border-white/20 shrink-0 ${className}`}
       style={{ backgroundColor: `#${hex}`, width: size, height: size }}
-      title={COLOR_TYPE_TO_FRUIT[colorType] || `Color ${colorType}`}
+      title={COLOR_TYPE_TO_NAME[colorType] || `Color ${colorType}`}
     />
   );
 }
@@ -186,7 +187,7 @@ function PaintToolBar({
                   : 'border-white/20 hover:border-white/50'
               }`}
               style={{ backgroundColor: `#${COLOR_TYPE_TO_HEX[ct]}` }}
-              title={COLOR_TYPE_TO_FRUIT[ct]}
+              title={COLOR_TYPE_TO_NAME[ct]}
             />
           ))}
           <button
@@ -299,28 +300,45 @@ function ArtworkCanvas({
 
     if (!groupPaintMode) return;
 
-    pixels.forEach((cell) => {
-      const gIdx = groupIndexMap.get(cell.group);
-      if (gIdx === undefined) return;
-      const color = getGroupColor(gIdx);
-      const isSelectedGroup = cell.group === selectedGroupId;
+    const hasSelection = selectedGroupId != null;
 
-      // Semi-transparent overlay
-      ctx.fillStyle = isSelectedGroup ? `${color}55` : `${color}30`;
-      ctx.fillRect(cell.col * cellSize, cell.row * cellSize, cellSize - 0.5, cellSize - 0.5);
-
-      // Border for selected group pixels
-      if (isSelectedGroup && cellSize >= 4) {
-        ctx.strokeStyle = `${color}CC`;
-        ctx.lineWidth = 1;
-        ctx.strokeRect(
-          cell.col * cellSize + 0.5,
-          cell.row * cellSize + 0.5,
-          cellSize - 1.5,
-          cellSize - 1.5,
-        );
-      }
-    });
+    if (hasSelection) {
+      // Dim all non-selected pixels with 55% black overlay
+      pixels.forEach((cell) => {
+        const isSelected = cell.group === selectedGroupId;
+        if (!isSelected) {
+          ctx.fillStyle = 'rgba(0,0,0,0.55)';
+          ctx.fillRect(cell.col * cellSize, cell.row * cellSize, cellSize - 0.5, cellSize - 0.5);
+        }
+      });
+      // Highlight selected group pixels with yellow tint + white border
+      pixels.forEach((cell) => {
+        if (cell.group !== selectedGroupId) return;
+        // Subtle yellow tint
+        ctx.fillStyle = 'rgba(255,255,100,0.18)';
+        ctx.fillRect(cell.col * cellSize, cell.row * cellSize, cellSize - 0.5, cellSize - 0.5);
+        // High-contrast white border (visible on any color)
+        if (cellSize >= 2) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+          ctx.lineWidth = Math.max(1, cellSize >= 6 ? 1.5 : 1);
+          ctx.strokeRect(
+            cell.col * cellSize + 0.5,
+            cell.row * cellSize + 0.5,
+            cellSize - 1.5,
+            cellSize - 1.5,
+          );
+        }
+      });
+    } else {
+      // No selection: show all groups with colored overlays
+      pixels.forEach((cell) => {
+        const gIdx = groupIndexMap.get(cell.group);
+        if (gIdx === undefined) return;
+        const color = getGroupColor(gIdx);
+        ctx.fillStyle = `${color}35`;
+        ctx.fillRect(cell.col * cellSize, cell.row * cellSize, cellSize - 0.5, cellSize - 0.5);
+      });
+    }
   }, [pixels, groupPaintMode, groupIndexMap, selectedGroupId, cellSize, canvasWidth, canvasHeight]);
 
   const getCellFromEvent = useCallback(
@@ -530,8 +548,8 @@ function ArtworkInfoPanel({
                     className="w-4 h-4 rounded-sm border border-white/20 shrink-0"
                     style={{ backgroundColor: `#${hex}` }}
                   />
-                  <span className="text-xs text-muted-foreground capitalize flex-1">
-                    {COLOR_TYPE_TO_FRUIT[colorType] || `Type ${colorType}`}
+                  <span className="text-xs text-muted-foreground flex-1">
+                    {COLOR_TYPE_TO_NAME[colorType] || `Type ${colorType}`}
                   </span>
                   <span className="text-xs font-mono">{count}</span>
                 </div>
@@ -673,15 +691,21 @@ function GroupingSection({
                     <GripVertical className="h-4 w-4" />
                   </div>
 
-                  {/* Group color indicator */}
+                  {/* Group color indicator (dominant color) */}
                   <div
                     className="w-3 h-3 rounded-full shrink-0 border border-white/30"
-                    style={{ backgroundColor: groupColor }}
+                    style={{ backgroundColor: (() => {
+                      const entries = Object.entries(g.pixelsByColor);
+                      if (entries.length === 0) return groupColor;
+                      const dominant = entries.reduce((best, cur) => cur[1] > best[1] ? cur : best);
+                      const hex = COLOR_TYPE_TO_HEX[Number(dominant[0])];
+                      return hex ? `#${hex}` : groupColor;
+                    })() }}
                   />
 
                   {/* Color breakdown dots */}
                   <div className="flex gap-0.5 shrink-0">
-                    {Object.entries(g.pixelsByColor).slice(0, 4).map(([ct]) => (
+                    {Object.entries(g.pixelsByColor).map(([ct]) => (
                       <ColorSwatch key={ct} colorType={Number(ct)} size={14} />
                     ))}
                   </div>
@@ -820,8 +844,8 @@ function LauncherSection({
 
                 <ColorSwatch colorType={launcher.colorType} size={20} />
 
-                <span className="text-xs flex-1 capitalize">
-                  {COLOR_TYPE_TO_FRUIT[launcher.colorType]} x{launcher.pixelCount}
+                <span className="text-xs flex-1">
+                  {COLOR_TYPE_TO_NAME[launcher.colorType]} x{launcher.pixelCount}
                 </span>
 
                 {launcher.isLocked && (
@@ -1005,7 +1029,7 @@ function ItemPoolSection({
           >
             {Array.from({ length: 9 }, (_, i) => i).map((ct) => (
               <option key={ct} value={ct}>
-                {COLOR_TYPE_TO_FRUIT[ct]}
+                {COLOR_TYPE_TO_NAME[ct]}
               </option>
             ))}
           </select>

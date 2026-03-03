@@ -19,12 +19,12 @@ export const FRUIT_EMOJI: Record<FruitType, string> = {
   blueberry: '🫐',     // Blue (ColorType 0)
   orange: '🍊',        // Orange (ColorType 1)
   strawberry: '🍓',    // Red (ColorType 2)
-  dragonfruit: '🍑',   // Pink (ColorType 3) - peach
+  dragonfruit: '🐉',   // Pink (ColorType 3) - dragon
   banana: '🍌',        // Yellow (ColorType 4)
   apple: '🍏',         // Green (ColorType 5)
   plum: '🍇',          // Purple/Violet (ColorType 6) - grape
-  pear: '🥥',          // Cream/White (ColorType 7) - coconut
-  blackberry: '🍆',    // Dark/Black (ColorType 8) - eggplant
+  pear: '🍐',          // Cream/White (ColorType 7) - pear
+  blackberry: '🫒',    // Dark/Black (ColorType 8) - olive
 };
 
 export const FRUIT_COLORS: Record<FruitType, string> = {
@@ -44,15 +44,15 @@ export const ALL_FRUITS: FruitType[] = ['blueberry', 'orange', 'strawberry', 'dr
 
 // 3 variant names per color type (for Studio item pool)
 export const VARIANT_NAMES: Record<FruitType, [string, string, string]> = {
-  blueberry: ['Blueberry', 'Sapphire', 'Ocean'],
-  orange: ['Orange', 'Tangerine', 'Apricot'],
-  strawberry: ['Strawberry', 'Apple', 'Cherry'],
-  dragonfruit: ['Peach', 'Dragonfruit', 'Rose'],
-  banana: ['Banana', 'Lemon', 'Sunflower'],
-  apple: ['Apple', 'Lime', 'Kiwi'],
-  plum: ['Plum', 'Grape', 'Lavender'],
-  pear: ['Coconut', 'Garlic', 'Cauliflower'],
-  blackberry: ['Eggplant', 'Olive', 'Blackberry'],
+  blueberry: ['Blueberry', 'Fig', 'Grape'],
+  orange: ['Orange', 'Persimmon', 'Mango'],
+  strawberry: ['Strawberry', 'Cherry', 'Tomato'],
+  dragonfruit: ['Dragon Fruit', 'Peach', 'Bell Fruit'],
+  banana: ['Banana', 'Lemon', 'Carambola'],
+  apple: ['Apple', 'Avocado', 'Gooseberry'],
+  plum: ['Plum', 'Passion Fruit', 'Mangosteen'],
+  pear: ['Pear', 'White Strawberry', 'Snowberry'],
+  blackberry: ['Blackberry', 'Olive', 'Blackcurrant'],
 };
 
 // ============================================================================

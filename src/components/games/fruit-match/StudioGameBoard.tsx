@@ -53,12 +53,12 @@ const EMOJI_COLOR_REFS: { emoji: string; r: number; g: number; b: number }[] = [
   { emoji: '\u{1FAD0}', r: 76, g: 158, b: 242 },   // Blue -> blueberry
   { emoji: '\u{1F34A}', r: 249, g: 157, b: 0 },     // Orange -> orange
   { emoji: '\u{1F353}', r: 223, g: 70, b: 36 },     // Red -> strawberry
-  { emoji: '\u{1F351}', r: 222, g: 76, b: 126 },    // Pink -> peach
+  { emoji: '\u{1F409}', r: 222, g: 76, b: 126 },    // Pink -> dragon
   { emoji: '\u{1F34C}', r: 243, g: 222, b: 0 },     // Yellow -> banana
   { emoji: '\u{1F34F}', r: 144, g: 202, b: 0 },     // Green -> apple
   { emoji: '\u{1F347}', r: 142, g: 104, b: 224 },   // Violet -> grape
-  { emoji: '\u{1F965}', r: 240, g: 235, b: 230 },   // White/Cream -> coconut
-  { emoji: '\u{1F346}', r: 76, g: 67, b: 67 },      // Dark/Black -> eggplant
+  { emoji: '\u{1F350}', r: 240, g: 235, b: 230 },   // White/Cream -> pear
+  { emoji: '\u{1FAD2}', r: 76, g: 67, b: 67 },      // Dark/Black -> olive
 ];
 
 function resolveEmoji(
