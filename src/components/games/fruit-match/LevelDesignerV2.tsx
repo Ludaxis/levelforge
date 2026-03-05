@@ -49,6 +49,7 @@ import {
   exportStudioLevel,
   StudioExportData,
   hexToColorName,
+  hexToColorType,
 } from '@/lib/juicyBlastExport';
 import { StudioGameBoard } from './StudioGameBoard';
 import {
@@ -1648,16 +1649,28 @@ export function LevelDesignerV2({
     });
   }, [selectableItems, maxSelectableItems]);
 
-  // Build colorType → hex mapping from actual pixel data
+  // Build colorType → hex mapping from palette (preferred) or standard colors
+  // The palette contains the canonical colors; individual pixel colorHex values
+  // are actual rendered colors (outlines, shading) and shouldn't be used for swatches.
   const colorTypeToHex = useMemo((): Record<number, string> => {
     const map: Record<number, string> = {};
+    if (palette.length > 0) {
+      // Map each palette entry to a game colorType and store the palette hex
+      palette.forEach((hex) => {
+        const gameColorType = hexToColorType(hex);
+        if (!(gameColorType in map)) {
+          map[gameColorType] = hex;
+        }
+      });
+    }
+    // Fill in any missing colorTypes from the standard map
     pixelArray.forEach((p) => {
-      if (!map[p.colorType]) {
-        map[p.colorType] = p.colorHex;
+      if (!(p.colorType in map)) {
+        map[p.colorType] = COLOR_TYPE_TO_HEX[p.colorType] || p.colorHex;
       }
     });
     return map;
-  }, [pixelArray]);
+  }, [palette, pixelArray]);
 
   // Build StudioGameConfig for play mode
   const studioGameConfig = useMemo((): StudioGameConfig | null => {

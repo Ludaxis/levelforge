@@ -146,7 +146,9 @@ export const NUMBER_TO_DIFFICULTY: Record<number, DifficultyTier> = {
 // Hex Color Utilities
 // ============================================================================
 
-// Find closest ColorType for a hex color
+// Find closest ColorType for a hex color using weighted RGB distance.
+// Standard Euclidean RGB distance can mismap saturated colors (e.g. bright green
+// mapping to black). We use redmean-weighted distance for better perceptual matching.
 export function hexToColorType(hex: string): number {
   const cleanHex = hex.replace('#', '').toUpperCase();
 
@@ -157,17 +159,22 @@ export function hexToColorType(hex: string): number {
     }
   }
 
-  // Find closest color by RGB distance
-  const targetRgb = hexToRgb(cleanHex);
+  // Find closest color by weighted RGB distance (redmean approximation)
+  const target = hexToRgb(cleanHex);
   let closestType = 0;
   let minDistance = Infinity;
 
   for (const [typeStr, colorHex] of Object.entries(COLOR_TYPE_TO_HEX)) {
-    const rgb = hexToRgb(colorHex);
+    const c = hexToRgb(colorHex);
+    const rmean = (target.r + c.r) / 2;
+    const dr = target.r - c.r;
+    const dg = target.g - c.g;
+    const db = target.b - c.b;
+    // Redmean weighted distance — better perceptual approximation than plain Euclidean
     const distance = Math.sqrt(
-      Math.pow(rgb.r - targetRgb.r, 2) +
-      Math.pow(rgb.g - targetRgb.g, 2) +
-      Math.pow(rgb.b - targetRgb.b, 2)
+      (2 + rmean / 256) * dr * dr +
+      4 * dg * dg +
+      (2 + (255 - rmean) / 256) * db * db
     );
     if (distance < minDistance) {
       minDistance = distance;
@@ -612,25 +619,42 @@ export interface FullPixelArtImportResult {
     colorHex: string;
     group: number;
     fruitType: FruitType;
+    paletteIndex: number;
   }[];
 }
 
 /**
  * Import from the full pixel art format (from converter tool).
  * No y-flip needed: converter tool uses y=0 at top (screen coordinates).
+ *
+ * IMPORTANT: In this format, `ColorType` is a palette index (into the Palette array),
+ * NOT the game's color enum. We resolve the actual game ColorType by looking up the
+ * palette hex and finding the closest match.
  */
 export function importFromFullPixelArtFormat(data: FullPixelArtFormat): FullPixelArtImportResult {
+  // Build a mapping from palette index → game ColorType
+  const paletteToGameColorType = new Map<number, number>();
+  data.Palette.forEach((hex, index) => {
+    paletteToGameColorType.set(index, hexToColorType(hex));
+  });
+
   const pixels = data.Artwork.PixelData.map((pixel) => {
-    const fruitType = COLOR_TYPE_TO_FRUIT[pixel.ColorType] || 'apple';
+    // Resolve palette index to game ColorType
+    // Fallback chain: palette[ColorType] → palette[ColorGroup] → closest match to pixel hex
+    const gameColorType = paletteToGameColorType.get(pixel.ColorType)
+      ?? paletteToGameColorType.get(pixel.ColorGroup)
+      ?? hexToColorType(pixel.ColorHex);
+    const fruitType = COLOR_TYPE_TO_FRUIT[gameColorType] || 'apple';
 
     return {
       row: pixel.Position.y,
       col: pixel.Position.x,
-      colorType: pixel.ColorType,
+      colorType: gameColorType,
       colorGroup: pixel.ColorGroup,
       colorHex: pixel.ColorHex,
       group: pixel.Group,
       fruitType,
+      paletteIndex: pixel.ColorType,
     };
   });
 
