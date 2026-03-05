@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { PixelArtCanvas } from './PixelArtCanvas';
 import { FRUIT_EMOJI, FruitType, PixelCell, FRUIT_COLORS } from '@/types/fruitMatch';
-import { COLOR_TYPE_TO_HEX, COLOR_TYPE_TO_FRUIT } from '@/lib/juicyBlastExport';
+import { COLOR_TYPE_TO_HEX, COLOR_TYPE_TO_FRUIT, hexToColorName } from '@/lib/juicyBlastExport';
 import {
   useStudioGame,
   StudioGameConfig,
@@ -61,11 +61,15 @@ const EMOJI_COLOR_REFS: { emoji: string; r: number; g: number; b: number }[] = [
   { emoji: '\u{1FAD2}', r: 76, g: 67, b: 67 },      // Dark/Black -> olive
 ];
 
+/**
+ * Pick the emoji whose reference color is closest to the ACTUAL hex color.
+ * This avoids mismatches when artwork hex ≠ standard palette hex for a given colorType.
+ */
 function resolveEmoji(
   colorType: number,
   colorTypeToHex: Record<number, string> | undefined,
 ): string {
-  const hex = colorTypeToHex?.[colorType];
+  const hex = colorTypeToHex?.[colorType] ?? COLOR_TYPE_TO_HEX[colorType];
   if (!hex) {
     return FRUIT_EMOJI[COLOR_TYPE_TO_FRUIT[colorType] as FruitType] ?? '\u2B1C';
   }

@@ -48,6 +48,7 @@ import {
   importFromFullPixelArtFormat,
   exportStudioLevel,
   StudioExportData,
+  hexToColorName,
 } from '@/lib/juicyBlastExport';
 import { StudioGameBoard } from './StudioGameBoard';
 import {
@@ -156,7 +157,7 @@ function ColorSwatch({ colorType, size = 20, className = '', hex: hexOverride }:
     <div
       className={`rounded-sm border border-white/20 shrink-0 ${className}`}
       style={{ backgroundColor: `#${hex}`, width: size, height: size }}
-      title={COLOR_TYPE_TO_NAME[colorType] || `Color ${colorType}`}
+      title={hexToColorName(hex)}
     />
   );
 }
@@ -549,7 +550,7 @@ function ArtworkInfoPanel({
                     style={{ backgroundColor: `#${hex}` }}
                   />
                   <span className="text-xs text-muted-foreground flex-1">
-                    {COLOR_TYPE_TO_NAME[colorType] || `Type ${colorType}`}
+                    {hexToColorName(hex)}
                   </span>
                   <span className="text-xs font-mono">{count}</span>
                 </div>
@@ -585,6 +586,7 @@ function GroupingSection({
   onRenameGroup,
   onReorder,
   colorTypeToHex,
+  totalPixels,
 }: {
   groups: StudioGroup[];
   selectedGroupId: number | null;
@@ -594,6 +596,7 @@ function GroupingSection({
   onRenameGroup: (id: number, name: string) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
   colorTypeToHex?: Record<number, string>;
+  totalPixels: number;
 }) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
@@ -766,6 +769,21 @@ function GroupingSection({
             })}
           </div>
         )}
+        {/* Total pixel count comparison */}
+        {groups.length > 0 && (() => {
+          const groupTotal = groups.reduce((sum, g) => sum + g.totalPixels, 0);
+          const match = groupTotal === totalPixels;
+          const diff = groupTotal - totalPixels;
+          return (
+            <div className={`mt-2 flex items-center gap-2 text-xs px-2 py-1.5 rounded border ${
+              match ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
+            }`}>
+              <Hash className="h-3 w-3 shrink-0" />
+              <span>Groups total: <strong>{groupTotal}px</strong> / Artwork: <strong>{totalPixels}px</strong></span>
+              {!match && <span className="ml-auto">({diff > 0 ? '+' : ''}{diff})</span>}
+            </div>
+          );
+        })()}
         <p className="text-xs text-muted-foreground mt-2">
           Click a group to select it, then paint pixels on the canvas. Drag to reorder.
         </p>
@@ -786,6 +804,7 @@ function LauncherSection({
   onReorder,
   onUpdate,
   colorTypeToHex,
+  totalPixels,
 }: {
   launchers: StudioLauncher[];
   groups: StudioGroup[];
@@ -794,6 +813,7 @@ function LauncherSection({
   onReorder: (fromIndex: number, toIndex: number) => void;
   onUpdate: (id: string, updates: Partial<Pick<StudioLauncher, 'colorType' | 'pixelCount' | 'group'>>) => void;
   colorTypeToHex?: Record<number, string>;
+  totalPixels: number;
 }) {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -861,7 +881,7 @@ function LauncherSection({
                   <ColorSwatch colorType={launcher.colorType} size={20} hex={colorTypeToHex?.[launcher.colorType]} />
 
                   <span className="text-xs flex-1">
-                    {COLOR_TYPE_TO_NAME[launcher.colorType]} x{launcher.pixelCount}
+                    {hexToColorName(colorTypeToHex?.[launcher.colorType] || COLOR_TYPE_TO_HEX[launcher.colorType] || '888888')} x{launcher.pixelCount}
                   </span>
 
                   {launcher.isLocked && (
@@ -892,7 +912,7 @@ function LauncherSection({
                       className="h-6 text-xs bg-background border rounded px-1"
                     >
                       {Array.from({ length: 9 }, (_, i) => i).map((ct) => (
-                        <option key={ct} value={ct}>{COLOR_TYPE_TO_NAME[ct]}</option>
+                        <option key={ct} value={ct}>{hexToColorName(colorTypeToHex?.[ct] || COLOR_TYPE_TO_HEX[ct] || '888888')}</option>
                       ))}
                     </select>
                     <label className="text-[10px] text-muted-foreground">Value:</label>
@@ -927,7 +947,7 @@ function LauncherSection({
             className="h-7 text-xs bg-background border rounded px-2"
           >
             {Array.from({ length: 9 }, (_, i) => i).map((ct) => (
-              <option key={ct} value={ct}>{COLOR_TYPE_TO_NAME[ct]}</option>
+              <option key={ct} value={ct}>{hexToColorName(colorTypeToHex?.[ct] || COLOR_TYPE_TO_HEX[ct] || '888888')}</option>
             ))}
           </select>
           <Input
@@ -952,6 +972,21 @@ function LauncherSection({
             Add
           </Button>
         </div>
+        {/* Total pixel count comparison */}
+        {launchers.length > 0 && (() => {
+          const launcherTotal = launchers.reduce((sum, l) => sum + l.pixelCount, 0);
+          const match = launcherTotal === totalPixels;
+          const diff = launcherTotal - totalPixels;
+          return (
+            <div className={`mt-2 flex items-center gap-2 text-xs px-2 py-1.5 rounded border ${
+              match ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
+            }`}>
+              <Hash className="h-3 w-3 shrink-0" />
+              <span>Launchers total: <strong>{launcherTotal}px</strong> / Artwork: <strong>{totalPixels}px</strong></span>
+              {!match && <span className="ml-auto">({diff > 0 ? '+' : ''}{diff})</span>}
+            </div>
+          );
+        })()}
         <p className="text-xs text-muted-foreground mt-2">
           Click a launcher to edit. Drag to reorder. First 2 = active, rest = locked.
         </p>
@@ -1115,7 +1150,7 @@ function ItemPoolSection({
           >
             {Array.from({ length: 9 }, (_, i) => i).map((ct) => (
               <option key={ct} value={ct}>
-                {COLOR_TYPE_TO_NAME[ct]}
+                {hexToColorName(colorTypeToHex?.[ct] || COLOR_TYPE_TO_HEX[ct] || '888888')}
               </option>
             ))}
           </select>
@@ -2456,6 +2491,7 @@ export function LevelDesignerV2({
           onRenameGroup={handleRenameGroup}
           onReorder={handleReorderGroup}
           colorTypeToHex={colorTypeToHex}
+          totalPixels={pixelArray.length}
         />
       )}
 
@@ -2469,6 +2505,7 @@ export function LevelDesignerV2({
           onReorder={handleReorderLauncher}
           onUpdate={handleUpdateLauncher}
           colorTypeToHex={colorTypeToHex}
+          totalPixels={pixelArray.length}
         />
       )}
 

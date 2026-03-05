@@ -1264,8 +1264,13 @@ export function pickTileLogic(state: StudioGameState, slotIndex: number): Studio
     newWaitingStand.push(tile);
   }
 
-  // Win check
-  const isWon = newPixelArt.every((cell) => cell.filled);
+  // Win check: all launchers fulfilled (no active + no queued remaining)
+  // This allows "fake" items (items with no matching launcher) without blocking completion.
+  const allLaunchersFired =
+    activeLaunchers.every((l) => l.collected.length >= 3) &&
+    launcherQueue.length === 0;
+  const allPixelsFilled = newPixelArt.every((cell) => cell.filled);
+  const isWon = allLaunchersFired || allPixelsFilled;
 
   // Lose check: stand full + no active launcher matches any stand tile
   let isLost = false;
@@ -1279,7 +1284,7 @@ export function pickTileLogic(state: StudioGameState, slotIndex: number): Studio
     }
   }
 
-  // Check if no tiles remain and pixels aren't all filled
+  // Check if no tiles remain and launchers are still not all fulfilled
   if (!isWon && !isLost) {
     const hasAnyTilesLeft =
       newLayerA.some((t) => t !== null) ||
@@ -1291,8 +1296,7 @@ export function pickTileLogic(state: StudioGameState, slotIndex: number): Studio
       newWaitingStand.length === 0 &&
       activeLaunchers.every((l) => l.collected.length === 0)
     ) {
-      const allFilled = newPixelArt.every((cell) => cell.filled);
-      if (!allFilled) isLost = true;
+      if (!allPixelsFilled) isLost = true;
     }
   }
 

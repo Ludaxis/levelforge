@@ -178,13 +178,48 @@ export function hexToColorType(hex: string): number {
   return closestType;
 }
 
-function hexToRgb(hex: string): { r: number; g: number; b: number } {
+export function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const cleanHex = hex.replace('#', '');
   return {
     r: parseInt(cleanHex.substring(0, 2), 16),
     g: parseInt(cleanHex.substring(2, 4), 16),
     b: parseInt(cleanHex.substring(4, 6), 16),
   };
+}
+
+// Reference colors for name detection (by visual appearance, not ColorType)
+const COLOR_NAME_REFS: { name: string; r: number; g: number; b: number }[] = [
+  { name: 'Blue', r: 76, g: 158, b: 242 },
+  { name: 'Orange', r: 249, g: 157, b: 0 },
+  { name: 'Red', r: 223, g: 70, b: 36 },
+  { name: 'Pink', r: 222, g: 76, b: 126 },
+  { name: 'Yellow', r: 243, g: 222, b: 0 },
+  { name: 'Green', r: 144, g: 202, b: 0 },
+  { name: 'Purple', r: 142, g: 104, b: 224 },
+  { name: 'White', r: 240, g: 235, b: 230 },
+  { name: 'Black', r: 76, g: 67, b: 67 },
+];
+
+/**
+ * Derive a human-readable color name from a hex value by visual similarity,
+ * NOT by ColorType index. This avoids mismatches when artwork uses
+ * non-standard hex values for a given ColorType.
+ */
+export function hexToColorName(hex: string): string {
+  const { r, g, b } = hexToRgb(hex);
+  let bestName = 'Unknown';
+  let bestDist = Infinity;
+  for (const ref of COLOR_NAME_REFS) {
+    const dr = r - ref.r;
+    const dg = g - ref.g;
+    const db = b - ref.b;
+    const dist = dr * dr + dg * dg + db * db;
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestName = ref.name;
+    }
+  }
+  return bestName;
 }
 
 // ============================================================================
