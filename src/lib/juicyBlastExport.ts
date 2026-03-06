@@ -627,23 +627,14 @@ export interface FullPixelArtImportResult {
  * Import from the full pixel art format (from converter tool).
  * No y-flip needed: converter tool uses y=0 at top (screen coordinates).
  *
- * IMPORTANT: In this format, `ColorType` is a palette index (into the Palette array),
- * NOT the game's color enum. We resolve the actual game ColorType by looking up the
- * palette hex and finding the closest match.
+ * In this format, `ColorType` is the game's 9-color enum directly
+ * (Blue=0, Orange=1, Red=2, Pink=3, Yellow=4, Green=5, Violet=6, White=7, Black=8),
+ * NOT a palette index. We use it as-is.
  */
 export function importFromFullPixelArtFormat(data: FullPixelArtFormat): FullPixelArtImportResult {
-  // Build a mapping from palette index → game ColorType
-  const paletteToGameColorType = new Map<number, number>();
-  data.Palette.forEach((hex, index) => {
-    paletteToGameColorType.set(index, hexToColorType(hex));
-  });
-
   const pixels = data.Artwork.PixelData.map((pixel) => {
-    // Resolve palette index to game ColorType
-    // Fallback chain: palette[ColorType] → palette[ColorGroup] → closest match to pixel hex
-    const gameColorType = paletteToGameColorType.get(pixel.ColorType)
-      ?? paletteToGameColorType.get(pixel.ColorGroup)
-      ?? hexToColorType(pixel.ColorHex);
+    // ColorType is already the game's color enum (0-8), use directly
+    const gameColorType = pixel.ColorType;
     const fruitType = COLOR_TYPE_TO_FRUIT[gameColorType] || 'apple';
 
     return {
