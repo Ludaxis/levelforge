@@ -548,10 +548,10 @@ function ArtworkInfoPanel({
                 <div key={colorType} className="flex items-center gap-2 text-sm">
                   <div
                     className="w-4 h-4 rounded-sm border border-white/20 shrink-0"
-                    style={{ backgroundColor: `#${hex}` }}
+                    style={{ backgroundColor: `#${COLOR_TYPE_TO_HEX[colorType] || hex}` }}
                   />
                   <span className="text-xs text-muted-foreground flex-1">
-                    {hexToColorName(hex)}
+                    {COLOR_TYPE_TO_NAME[colorType] || hexToColorName(hex)}
                   </span>
                   <span className="text-xs font-mono">{count}</span>
                 </div>
