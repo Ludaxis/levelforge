@@ -317,8 +317,8 @@ describe('Difficulty targeting', () => {
       const r = result.recipe;
       expect(r.mismatchDepth).toBeGreaterThanOrEqual(0);
       expect(r.mismatchDepth).toBeLessThanOrEqual(1);
-      expect(r.maxSelectableItems).toBeGreaterThanOrEqual(6);
-      expect(r.maxSelectableItems).toBeLessThanOrEqual(10);
+      expect(r.maxSelectableItems).toBeGreaterThanOrEqual(1);
+      expect(r.maxSelectableItems).toBeLessThanOrEqual(20);
       expect(r.waitingStandSlots).toBeGreaterThanOrEqual(3);
       expect(r.waitingStandSlots).toBeLessThanOrEqual(7);
       expect(r.activeLauncherCount).toBeGreaterThanOrEqual(1);

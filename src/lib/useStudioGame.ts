@@ -62,8 +62,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
     ? clamp01((totalTiles - maxSelectableItems) / totalTiles)
     : 0;
 
-  // Grid constraint (0.20): smaller grid = harder (range 6-10)
-  const gridConstraint = clamp01(1 - (maxSelectableItems - 6) / 4);
+  // Grid constraint (0.20): smaller grid = harder (range 1-20)
+  const gridConstraint = clamp01(1 - (maxSelectableItems - 1) / 19);
 
   const raw =
     tileBurial * 0.35 +
