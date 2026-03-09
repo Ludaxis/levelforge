@@ -662,32 +662,20 @@ export function importFromFullPixelArtFormat(data: FullPixelArtFormat): FullPixe
 // ============================================================================
 
 export interface StudioExportLevel {
-  Palette: string[];
   LevelId: string;
-  SongId: string;
-  LevelIndex: number;
-  Difficulty: number;
-  GraphicId: string;
+  MaxSelectableItems: number;
   Artwork: {
     Width: number;
     Height: number;
     PixelData: {
       Position: { x: number; y: number };
-      Group: number;
-      ColorGroup: number;
       ColorType: number;
+      Group: number;
       ColorHex: string;
     }[];
   };
-  SelectableItems: { ColorType: number; Variant: number; Layer: number }[];
   Requirements: { ColorType: number; Value: number; Group: number }[];
-  UnlockStageData: { RequiredCompletedGroups: number[] }[];
-  MaxSelectableItems: number;
-  /** Recipe fields for deterministic reconstruction */
-  Seed?: number;
-  MismatchDepth?: number;
-  WaitingStandSlots?: number;
-  ActiveLauncherCount?: number;
+  SelectableItems: { ColorType: number; Variant: number }[];
 }
 
 export interface StudioExportData {
@@ -718,7 +706,7 @@ export interface StudioExportData {
 }
 
 /**
- * Export a studio level in the merged JSON format
+ * Export a studio level in the game JSON format
  */
 export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
   const height = data.height;
@@ -727,20 +715,17 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
     const flippedY = (height - 1) - pixel.row;
     return {
       Position: { x: pixel.col, y: flippedY },
-      Group: pixel.group,
-      ColorGroup: pixel.colorGroup,
       ColorType: pixel.colorType,
+      Group: pixel.group,
       ColorHex: pixel.colorHex,
     };
   });
 
-  const layerMap = { A: 0, B: 1, C: 2 };
   const selectableItems = data.selectableItems
     .sort((a, b) => a.order - b.order)
     .map((item) => ({
       ColorType: item.colorType,
       Variant: item.variant,
-      Layer: layerMap[item.layer],
     }));
 
   const requirements = data.requirements.map((r) => ({
@@ -749,33 +734,15 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
     Group: r.group,
   }));
 
-  const unlockStageData = data.unlockStageData.map((s) => ({
-    RequiredCompletedGroups: s.requiredCompletedGroups,
-  }));
-
-  const result: StudioExportLevel = {
-    Palette: data.palette,
+  return {
     LevelId: data.levelId,
-    SongId: 'song_001',
-    LevelIndex: data.levelIndex,
-    Difficulty: DIFFICULTY_TO_NUMBER[data.difficulty],
-    GraphicId: data.graphicId,
+    MaxSelectableItems: data.maxSelectableItems,
     Artwork: {
       Width: data.width,
       Height: data.height,
       PixelData: pixelData,
     },
-    SelectableItems: selectableItems,
     Requirements: requirements,
-    UnlockStageData: unlockStageData,
-    MaxSelectableItems: data.maxSelectableItems,
+    SelectableItems: selectableItems,
   };
-
-  // Include recipe fields when present
-  if (data.seed !== undefined) result.Seed = data.seed;
-  if (data.mismatchDepth !== undefined) result.MismatchDepth = data.mismatchDepth;
-  if (data.waitingStandSlots !== undefined) result.WaitingStandSlots = data.waitingStandSlots;
-  if (data.activeLauncherCount !== undefined) result.ActiveLauncherCount = data.activeLauncherCount;
-
-  return result;
 }
