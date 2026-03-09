@@ -1131,10 +1131,10 @@ function ItemPoolSection({
           <span className="text-xs text-muted-foreground whitespace-nowrap">Max Selectable:</span>
           <Input
             type="number"
-            min={6}
-            max={10}
+            min={1}
+            max={20}
             value={maxSelectableItems}
-            onChange={(e) => onMaxChange(Math.max(6, Math.min(10, Number(e.target.value) || 6)))}
+            onChange={(e) => onMaxChange(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
             className="h-7 w-20 text-xs"
           />
         </div>
@@ -1424,8 +1424,8 @@ function DifficultyAnalysis({
             </div>
             <Slider
               value={[maxSelectableItems]}
-              min={6}
-              max={10}
+              min={1}
+              max={20}
               step={1}
               onValueChange={([v]) => onMaxSelectableChange(v)}
             />
@@ -1768,9 +1768,9 @@ export function LevelDesignerV2({
           }
           setLaunchers(newLaunchers);
 
-          // Set maxSelectableItems based on launcher count (capped at 10)
+          // Set maxSelectableItems based on launcher count (capped at 20)
           const totalTiles = newLaunchers.length * 3;
-          const newMaxItems = Math.min(Math.max(6, Math.ceil(totalTiles / 2)), 10);
+          const newMaxItems = Math.min(Math.max(1, Math.ceil(totalTiles / 2)), 20);
           setMaxSelectableItems(newMaxItems);
 
           // Auto-generate selectable items: exactly 3 tiles per launcher
@@ -2174,8 +2174,8 @@ export function LevelDesignerV2({
 
     if (burialContrib >= gridContrib && mismatchDepth > 0) {
       setMismatchDepth((v) => Math.max(0, +(v - 0.15).toFixed(2)));
-    } else if (maxSelectableItems < 10) {
-      setMaxSelectableItems((v) => Math.min(10, v + 1));
+    } else if (maxSelectableItems < 20) {
+      setMaxSelectableItems((v) => Math.min(20, v + 1));
     } else if (mismatchDepth > 0) {
       setMismatchDepth((v) => Math.max(0, +(v - 0.15).toFixed(2)));
     }
@@ -2193,8 +2193,8 @@ export function LevelDesignerV2({
       const maxDepth = findMaxSolvableDepth(studioGameConfig);
       const target = +(mismatchDepth + 0.15).toFixed(2);
       setMismatchDepth(Math.min(target, maxDepth));
-    } else if (maxSelectableItems > 6) {
-      setMaxSelectableItems((v) => Math.max(6, v - 1));
+    } else if (maxSelectableItems > 1) {
+      setMaxSelectableItems((v) => Math.max(1, v - 1));
     } else if (mismatchDepth < 1) {
       const maxDepth = findMaxSolvableDepth(studioGameConfig);
       const target = +(mismatchDepth + 0.15).toFixed(2);

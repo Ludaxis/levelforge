@@ -27,7 +27,7 @@ import { SAWTOOTH_CYCLE } from '@/lib/constants';
 /** All parameters controlling a level's difficulty. */
 export interface DifficultyRecipe {
   mismatchDepth: number;       // 0-1
-  maxSelectableItems: number;  // 6-10
+  maxSelectableItems: number;  // 1-20
   waitingStandSlots: number;   // 3-7
   activeLauncherCount: number; // 1-3
   seed: number;
@@ -336,7 +336,7 @@ export function targetDifficulty(
         recipe = { ...recipe, mismatchDepth: Math.min(1, +(recipe.mismatchDepth + 0.05).toFixed(2)) };
       } else if (recipe.waitingStandSlots > 3) {
         recipe = { ...recipe, waitingStandSlots: recipe.waitingStandSlots - 1 };
-      } else if (recipe.maxSelectableItems > 6) {
+      } else if (recipe.maxSelectableItems > 1) {
         recipe = { ...recipe, maxSelectableItems: recipe.maxSelectableItems - 1 };
       } else if (recipe.activeLauncherCount > 1) {
         recipe = { ...recipe, activeLauncherCount: recipe.activeLauncherCount - 1 };
@@ -347,7 +347,7 @@ export function targetDifficulty(
         recipe = { ...recipe, mismatchDepth: Math.max(0, +(recipe.mismatchDepth - 0.05).toFixed(2)) };
       } else if (recipe.waitingStandSlots < 7) {
         recipe = { ...recipe, waitingStandSlots: recipe.waitingStandSlots + 1 };
-      } else if (recipe.maxSelectableItems < 10) {
+      } else if (recipe.maxSelectableItems < 20) {
         recipe = { ...recipe, maxSelectableItems: recipe.maxSelectableItems + 1 };
       } else if (recipe.activeLauncherCount < 3) {
         recipe = { ...recipe, activeLauncherCount: recipe.activeLauncherCount + 1 };
