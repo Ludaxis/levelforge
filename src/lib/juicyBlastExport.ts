@@ -312,21 +312,21 @@ export function importFromReferenceFormat(ref: ReferenceLevel): ImportedLevel {
     pixelArt,
     groupColorTypes,
     groupPixelCounts,
-    ref.UnlockStageData
+    ref.UnlockStageData || []
   );
 
   return {
     levelId: ref.LevelId,
-    levelIndex: ref.LevelIndex,
+    levelIndex: ref.LevelIndex || 0,
     difficulty: NUMBER_TO_DIFFICULTY[ref.Difficulty] || 'medium',
-    graphicId: ref.GraphicId,
+    graphicId: ref.GraphicId || '',
     pixelArtWidth: ref.Artwork.Width,
     pixelArtHeight: ref.Artwork.Height,
     pixelArt,
     colorData,
-    selectableItems: ref.SelectableItems,
-    requirements: ref.Requirements,
-    unlockStageData: ref.UnlockStageData,
+    selectableItems: ref.SelectableItems || [],
+    requirements: ref.Requirements || [],
+    unlockStageData: ref.UnlockStageData || [],
     launcherOrderConfig,
   };
 }
