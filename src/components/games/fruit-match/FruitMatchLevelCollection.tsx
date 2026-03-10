@@ -352,7 +352,7 @@ export function FruitMatchLevelCollection({
   // Convert DesignedFruitMatchLevel to ReferenceLevel format
   const levelToReferenceFormat = (level: DesignedFruitMatchLevel): ReferenceLevel => {
     return exportToReferenceFormat({
-      levelId: `level_${String(level.levelNumber).padStart(3, '0')}`,
+      levelId: level.name,
       levelIndex: level.levelNumber,
       difficulty: level.metrics.difficulty,
       graphicId: `graphic_${level.pixelArtWidth}x${level.pixelArtHeight}`,

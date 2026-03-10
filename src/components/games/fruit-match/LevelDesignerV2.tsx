@@ -6,6 +6,14 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
 import {
   FruitType,
@@ -90,6 +98,7 @@ interface LevelDesignerV2Props {
   onLevelNumberChange?: (num: number) => void;
   maxLevelNumber?: number;
   editingLevel?: DesignedFruitMatchLevel | null;
+  existingLevelIds?: string[];
 }
 
 interface StudioPixelCell {
@@ -1500,6 +1509,7 @@ export function LevelDesignerV2({
   onLevelNumberChange,
   maxLevelNumber = 100,
   editingLevel,
+  existingLevelIds = [],
 }: LevelDesignerV2Props) {
   // Core pixel data
   const [pixels, setPixels] = useState<Map<string, StudioPixelCell>>(new Map());
@@ -1536,6 +1546,16 @@ export function LevelDesignerV2({
 
   // Play mode
   const [playMode, setPlayMode] = useState(false);
+
+  // Level variant & file name
+  const [levelVariant, setLevelVariant] = useState(1);
+  const [fileName, setFileName] = useState('');
+  const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
+  const [pendingExport, setPendingExport] = useState(false);
+  const [pendingAddToCollection, setPendingAddToCollection] = useState(false);
+
+  // Computed Level ID
+  const levelId = `Level${levelNumber}_${levelVariant}`;
 
   // File input ref
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1718,6 +1738,10 @@ export function LevelDesignerV2({
         const content = await file.text();
         const data = JSON.parse(content);
 
+        // Pre-fill file name from imported file (without extension)
+        const importedFileName = file.name.replace(/\.json$/i, '');
+        setFileName(importedFileName);
+
         if (isFullPixelArtFormat(data)) {
           // Full pixel art format from converter
           const result = importFromFullPixelArtFormat(data);
@@ -1866,9 +1890,22 @@ export function LevelDesignerV2({
           result.colorData.forEach((cd) => paletteSet.add(cd.colorHex));
           setPalette(Array.from(paletteSet));
 
-          const match = file.name.match(/level[_-]?(\d+)/i);
-          if (match && onLevelNumberChange) {
-            onLevelNumberChange(parseInt(match[1], 10));
+          // Set maxSelectableItems from data if present
+          const rawData = data as unknown as Record<string, unknown>;
+          if (typeof rawData.MaxSelectableItems === 'number') {
+            setMaxSelectableItems(Math.min(rawData.MaxSelectableItems, 10));
+          }
+
+          // Parse LevelId (e.g. "Level1_1") for position + variant
+          const levelIdMatch = data.LevelId?.match(/^Level(\d+)_(\d+)$/);
+          if (levelIdMatch) {
+            if (onLevelNumberChange) onLevelNumberChange(parseInt(levelIdMatch[1], 10));
+            setLevelVariant(parseInt(levelIdMatch[2], 10));
+          } else {
+            const match = file.name.match(/level[_-]?(\d+)/i);
+            if (match && onLevelNumberChange) {
+              onLevelNumberChange(parseInt(match[1], 10));
+            }
           }
         } else if (data.Palette && data.Artwork && data.SelectableItems) {
           // Studio merged format (re-import)
@@ -1937,7 +1974,12 @@ export function LevelDesignerV2({
             })),
           );
 
-          if (onLevelNumberChange && data.LevelIndex) {
+          // Parse LevelId (e.g. "Level1_1") for position + variant
+          const studioLevelIdMatch = data.LevelId?.match(/^Level(\d+)_(\d+)$/);
+          if (studioLevelIdMatch) {
+            if (onLevelNumberChange) onLevelNumberChange(parseInt(studioLevelIdMatch[1], 10));
+            setLevelVariant(parseInt(studioLevelIdMatch[2], 10));
+          } else if (onLevelNumberChange && data.LevelIndex) {
             onLevelNumberChange(data.LevelIndex);
           }
         } else {
@@ -2248,10 +2290,10 @@ export function LevelDesignerV2({
   // Export JSON
   // ============================================================================
 
-  const handleExportJSON = useCallback(() => {
+  const doExportJSON = useCallback(() => {
     const exportData: StudioExportData = {
       palette,
-      levelId: `level_${String(levelNumber).padStart(3, '0')}`,
+      levelId,
       levelIndex: levelNumber,
       difficulty: difficultyResult?.tier || 'medium',
       graphicId: `graphic_${artWidth}x${artHeight}`,
@@ -2287,25 +2329,35 @@ export function LevelDesignerV2({
     };
 
     const result = exportStudioLevel(exportData);
-    const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(result, null, 4)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `level_${levelNumber}.json`;
+    a.download = `${fileName.trim() || levelId}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [palette, levelNumber, difficultyResult, artWidth, artHeight, pixelArray, itemsWithLayers, launchers, groups, maxSelectableItems, seed, mismatchDepth, waitingStandSlots, activeLauncherCount]);
+  }, [palette, levelId, levelNumber, fileName, difficultyResult, artWidth, artHeight, pixelArray, itemsWithLayers, launchers, groups, maxSelectableItems, seed, mismatchDepth, waitingStandSlots, activeLauncherCount]);
+
+  const handleExportJSON = useCallback(() => {
+    if (existingLevelIds.includes(levelId) && !editingLevel) {
+      setPendingExport(true);
+      setPendingAddToCollection(false);
+      setShowDuplicateDialog(true);
+      return;
+    }
+    doExportJSON();
+  }, [levelId, existingLevelIds, editingLevel, doExportJSON]);
 
   // ============================================================================
   // Add to Collection
   // ============================================================================
 
-  const handleAddToCollection = useCallback(() => {
+  const doAddToCollection = useCallback(() => {
     if (!onAddToCollection || !metrics || sinkStacks.length === 0) return;
 
     const designedLevel: DesignedFruitMatchLevel = {
       id: editingLevel?.id || `level-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      name: `Level ${levelNumber}`,
+      name: levelId,
       levelNumber,
       pixelArt: pixelCellArray,
       pixelArtWidth: artWidth,
@@ -2327,9 +2379,35 @@ export function LevelDesignerV2({
     sinkWidth,
     sinkStacks,
     waitingStandSlots,
+    levelId,
     levelNumber,
     editingLevel,
   ]);
+
+  const handleAddToCollection = useCallback(() => {
+    if (!onAddToCollection || !metrics || sinkStacks.length === 0) return;
+    if (existingLevelIds.includes(levelId) && !editingLevel) {
+      setPendingExport(false);
+      setPendingAddToCollection(true);
+      setShowDuplicateDialog(true);
+      return;
+    }
+    doAddToCollection();
+  }, [onAddToCollection, metrics, sinkStacks, levelId, existingLevelIds, editingLevel, doAddToCollection]);
+
+  const handleDuplicateConfirm = useCallback(() => {
+    setShowDuplicateDialog(false);
+    if (pendingExport) doExportJSON();
+    if (pendingAddToCollection) doAddToCollection();
+    setPendingExport(false);
+    setPendingAddToCollection(false);
+  }, [pendingExport, pendingAddToCollection, doExportJSON, doAddToCollection]);
+
+  const handleDuplicateCancel = useCallback(() => {
+    setShowDuplicateDialog(false);
+    setPendingExport(false);
+    setPendingAddToCollection(false);
+  }, []);
 
   // ============================================================================
   // Load editing level
@@ -2594,40 +2672,61 @@ export function LevelDesignerV2({
             <CardTitle className="text-sm">Save &amp; Add to Collection</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {/* Level Position */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
+            {/* Level Position & Variant */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">Level Position</label>
-                <Badge variant="outline">#{levelNumber}</Badge>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 w-7 p-0"
-                  onClick={() => onLevelNumberChange?.(Math.max(1, levelNumber - 1))}
-                  disabled={levelNumber <= 1}
-                >
-                  -
-                </Button>
-                <Slider
-                  value={[levelNumber]}
+                <Input
+                  type="number"
                   min={1}
                   max={maxLevelNumber}
-                  step={1}
-                  onValueChange={([v]) => onLevelNumberChange?.(v)}
-                  className="flex-1"
+                  value={levelNumber}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v >= 1 && v <= maxLevelNumber) onLevelNumberChange?.(v);
+                  }}
+                  className="h-8"
                 />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 w-7 p-0"
-                  onClick={() => onLevelNumberChange?.(Math.min(maxLevelNumber, levelNumber + 1))}
-                  disabled={levelNumber >= maxLevelNumber}
-                >
-                  +
-                </Button>
               </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Level Variant</label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={levelVariant}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v >= 1) setLevelVariant(v);
+                  }}
+                  className="h-8"
+                />
+              </div>
+            </div>
+
+            {/* Level ID (computed) */}
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Level ID</label>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-xs font-mono">{levelId}</Badge>
+                {existingLevelIds.includes(levelId) && !editingLevel && (
+                  <span className="text-xs text-yellow-500">ID already exists</span>
+                )}
+              </div>
+            </div>
+
+            {/* File Name */}
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">File Name</label>
+              <Input
+                type="text"
+                placeholder={levelId}
+                value={fileName}
+                onChange={(e) => setFileName(e.target.value)}
+                className="h-8 font-mono text-xs"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Exports as {fileName.trim() || levelId}.json
+              </p>
             </div>
 
             {/* Actions */}
@@ -2669,6 +2768,27 @@ export function LevelDesignerV2({
           </CardContent>
         </Card>
       )}
+
+      {/* Duplicate Level ID Dialog */}
+      <Dialog open={showDuplicateDialog} onOpenChange={setShowDuplicateDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Duplicate Level ID</DialogTitle>
+            <DialogDescription>
+              A level with ID <span className="font-mono font-bold">{levelId}</span> already exists.
+              Do you want to replace it or go back to change the Level Position / Variant?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={handleDuplicateCancel}>
+              Go Back
+            </Button>
+            <Button variant="destructive" onClick={handleDuplicateConfirm}>
+              Replace
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

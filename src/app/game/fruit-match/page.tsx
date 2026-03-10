@@ -136,6 +136,7 @@ function FruitMatchPageContent() {
             onLevelNumberChange={setLevelNumber}
             maxLevelNumber={100}
             editingLevel={editingLevel}
+            existingLevelIds={levels.map((l) => l.name)}
           />
         </TabsContent>
 
