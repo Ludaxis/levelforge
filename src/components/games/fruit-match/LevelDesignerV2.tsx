@@ -1062,6 +1062,7 @@ function ItemPoolSection({
   onAddItem,
   onDeleteItem,
   onReorder,
+  onChangeLayer,
   colorTypeToHex,
 }: {
   items: StudioSelectableItem[];
@@ -1070,6 +1071,7 @@ function ItemPoolSection({
   onAddItem: (colorType: number, variant: number) => void;
   onDeleteItem: (id: string) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
+  onChangeLayer: (id: string, layer: 'A' | 'B' | 'C') => void;
   colorTypeToHex?: Record<number, string>;
 }) {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
@@ -1083,6 +1085,8 @@ function ItemPoolSection({
   const layerA = sorted.filter((i) => i.layer === 'A');
   const layerB = sorted.filter((i) => i.layer === 'B');
   const layerC = sorted.filter((i) => i.layer === 'C');
+
+  const layerOptions: ('A' | 'B' | 'C')[] = ['A', 'B', 'C'];
 
   const renderItem = (item: StudioSelectableItem, globalIdx: number, layerNum: number) => {
     const fruit = COLOR_TYPE_TO_FRUIT[item.colorType];
@@ -1115,6 +1119,15 @@ function ItemPoolSection({
         <GripVertical className="h-3 w-3 text-muted-foreground cursor-grab shrink-0" />
         <ColorSwatch colorType={item.colorType} size={16} hex={colorTypeToHex?.[item.colorType]} />
         <span className="truncate flex-1">{variantName}</span>
+        <select
+          value={item.layer}
+          onChange={(e) => onChangeLayer(item.id, e.target.value as 'A' | 'B' | 'C')}
+          className="h-5 text-[10px] bg-background border rounded px-0.5 shrink-0"
+        >
+          {layerOptions.map((l) => (
+            <option key={l} value={l}>{l}</option>
+          ))}
+        </select>
         <Button
           variant="ghost"
           size="sm"
@@ -1885,15 +1898,17 @@ export function LevelDesignerV2({
             : maxSelectableItems;
           setMaxSelectableItems(importedMaxItems);
 
-          // Build selectable items using the Layer field from import data if present
+          // Build selectable items — use Layer field if present, otherwise compute from position
+          const hasLayerField = result.selectableItems.some((si) => si.Layer !== undefined && si.Layer !== null);
           const newItems: StudioSelectableItem[] = result.selectableItems.map((si, idx) => {
-            const layerFromData: 'A' | 'B' | 'C' =
-              si.Layer === 1 ? 'B' : si.Layer === 2 ? 'C' : 'A';
+            const layer: 'A' | 'B' | 'C' = hasLayerField
+              ? (si.Layer === 1 ? 'B' : si.Layer === 2 ? 'C' : 'A')
+              : (idx < importedMaxItems ? 'A' : idx < 2 * importedMaxItems ? 'B' : 'C');
             return {
               id: uid('item'),
               colorType: si.ColorType,
               variant: 0,
-              layer: layerFromData,
+              layer,
               order: idx,
             };
           });
@@ -2213,6 +2228,12 @@ export function LevelDesignerV2({
         .sort((a, b) => a.order - b.order)
         .map((item, idx) => ({ ...item, order: idx }));
     });
+  }, []);
+
+  const handleChangeLayer = useCallback((id: string, layer: 'A' | 'B' | 'C') => {
+    setSelectableItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, layer } : item)),
+    );
   }, []);
 
   const handleReorderItem = useCallback((fromIndex: number, toIndex: number) => {
@@ -2675,6 +2696,7 @@ export function LevelDesignerV2({
           onAddItem={handleAddItem}
           onDeleteItem={handleDeleteItem}
           onReorder={handleReorderItem}
+          onChangeLayer={handleChangeLayer}
           colorTypeToHex={colorTypeToHex}
         />
       )}
