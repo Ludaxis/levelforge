@@ -1907,7 +1907,7 @@ export function LevelDesignerV2({
             return {
               id: uid('item'),
               colorType: si.ColorType,
-              variant: 0,
+              variant: (si as unknown as Record<string, unknown>).Variant as number ?? 0,
               layer,
               order: idx,
             };
