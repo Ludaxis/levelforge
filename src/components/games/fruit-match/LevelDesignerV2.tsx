@@ -2143,21 +2143,55 @@ export function LevelDesignerV2({
     return groups.map((g) => groupMap.get(g.id) ?? g);
   }, [groups, pixels]);
 
-  // Sync launcher pixelCounts when pixel group assignments change
+  // Sync launcher pixelCounts when pixel group assignments change.
+  // When multiple launchers share the same (colorType, group), distribute
+  // the total proportionally so split launchers aren't overwritten to the total.
   useEffect(() => {
     if (recomputedGroups.length === 0) return;
     setLaunchers((prev) => {
-      let changed = false;
-      const updated = prev.map((l) => {
-        const g = recomputedGroups.find((gr) => gr.id === l.group);
-        if (!g) return l;
-        const newCount = g.pixelsByColor[l.colorType] ?? 0;
-        if (newCount !== l.pixelCount) {
-          changed = true;
-          return { ...l, pixelCount: newCount };
-        }
-        return l;
+      // Group launchers by (colorType, group) to detect splits
+      const keyMap = new Map<string, number[]>();
+      prev.forEach((l, idx) => {
+        const key = `${l.colorType}-${l.group}`;
+        if (!keyMap.has(key)) keyMap.set(key, []);
+        keyMap.get(key)!.push(idx);
       });
+
+      let changed = false;
+      const updated = [...prev];
+
+      for (const [, indices] of keyMap) {
+        const first = prev[indices[0]];
+        const g = recomputedGroups.find((gr) => gr.id === first.group);
+        if (!g) continue;
+        const totalPixels = g.pixelsByColor[first.colorType] ?? 0;
+        const currentSum = indices.reduce((sum, i) => sum + prev[i].pixelCount, 0);
+
+        if (totalPixels === currentSum) continue; // already in sync
+
+        if (indices.length === 1) {
+          // Single launcher — set directly
+          if (prev[indices[0]].pixelCount !== totalPixels) {
+            changed = true;
+            updated[indices[0]] = { ...prev[indices[0]], pixelCount: totalPixels };
+          }
+        } else {
+          // Multiple launchers (splits) — distribute proportionally
+          let remaining = totalPixels;
+          for (let i = 0; i < indices.length; i++) {
+            const idx = indices[i];
+            const ratio = currentSum > 0 ? prev[idx].pixelCount / currentSum : 1 / indices.length;
+            const share = i < indices.length - 1
+              ? Math.round(totalPixels * ratio)
+              : remaining; // last one gets the remainder
+            remaining -= share;
+            if (prev[idx].pixelCount !== share) {
+              changed = true;
+              updated[idx] = { ...prev[idx], pixelCount: share };
+            }
+          }
+        }
+      }
       return changed ? updated : prev;
     });
   }, [recomputedGroups]);
