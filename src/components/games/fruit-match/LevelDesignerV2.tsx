@@ -1084,7 +1084,7 @@ function ItemPoolSection({
   const layerB = sorted.filter((i) => i.layer === 'B');
   const layerC = sorted.filter((i) => i.layer === 'C');
 
-  const renderItem = (item: StudioSelectableItem, globalIdx: number) => {
+  const renderItem = (item: StudioSelectableItem, globalIdx: number, layerNum: number) => {
     const fruit = COLOR_TYPE_TO_FRUIT[item.colorType];
     const variantName = fruit ? VARIANT_NAMES[fruit]?.[item.variant] || `V${item.variant}` : `V${item.variant}`;
     return (
@@ -1111,6 +1111,7 @@ function ItemPoolSection({
           draggedIdx === globalIdx ? 'opacity-50' : ''
         } ${dragOverIdx === globalIdx ? 'border-primary border-2' : 'border-border'}`}
       >
+        <span className="w-4 text-[10px] text-muted-foreground text-center font-mono shrink-0">{layerNum}</span>
         <GripVertical className="h-3 w-3 text-muted-foreground cursor-grab shrink-0" />
         <ColorSwatch colorType={item.colorType} size={16} hex={colorTypeToHex?.[item.colorType]} />
         <span className="truncate flex-1">{variantName}</span>
@@ -1193,7 +1194,7 @@ function ItemPoolSection({
             <span className="text-[10px] text-muted-foreground ml-auto">{layerA.length}/{maxSelectableItems}</span>
           </div>
           <div className="space-y-0.5 max-h-[120px] overflow-y-auto">
-            {layerA.map((item) => renderItem(item, sorted.indexOf(item)))}
+            {layerA.map((item, i) => renderItem(item, sorted.indexOf(item), i + 1))}
           </div>
         </div>
 
@@ -1205,7 +1206,7 @@ function ItemPoolSection({
             <span className="text-[10px] text-muted-foreground ml-auto">{layerB.length}/{maxSelectableItems}</span>
           </div>
           <div className="space-y-0.5 max-h-[120px] overflow-y-auto">
-            {layerB.map((item) => renderItem(item, sorted.indexOf(item)))}
+            {layerB.map((item, i) => renderItem(item, sorted.indexOf(item), i + 1))}
           </div>
         </div>
 
@@ -1217,7 +1218,7 @@ function ItemPoolSection({
             <span className="text-[10px] text-muted-foreground ml-auto">{layerC.length}</span>
           </div>
           <div className="space-y-0.5 max-h-[120px] overflow-y-auto">
-            {layerC.map((item) => renderItem(item, sorted.indexOf(item)))}
+            {layerC.map((item, i) => renderItem(item, sorted.indexOf(item), i + 1))}
           </div>
         </div>
       </CardContent>
@@ -1653,21 +1654,10 @@ export function LevelDesignerV2({
     };
   }, [pixelCellArray, artWidth, artHeight, sinkWidth, sinkStacks, waitingStandSlots, metrics]);
 
-  // Recompute item layers when maxSelectableItems or item count changes
+  // Sort items by order, preserving designer-assigned layers
   const itemsWithLayers = useMemo((): StudioSelectableItem[] => {
-    const sorted = [...selectableItems].sort((a, b) => a.order - b.order);
-    return sorted.map((item, idx) => {
-      let layer: 'A' | 'B' | 'C';
-      if (idx < maxSelectableItems) {
-        layer = 'A';
-      } else if (idx < 2 * maxSelectableItems) {
-        layer = 'B';
-      } else {
-        layer = 'C';
-      }
-      return { ...item, layer };
-    });
-  }, [selectableItems, maxSelectableItems]);
+    return [...selectableItems].sort((a, b) => a.order - b.order);
+  }, [selectableItems]);
 
   // Build colorType → hex mapping from palette (preferred) or standard colors
   // The palette contains the canonical colors; individual pixel colorHex values
@@ -1705,6 +1695,7 @@ export function LevelDesignerV2({
         colorType: item.colorType,
         variant: item.variant,
         order: item.order,
+        layer: item.layer,
       })),
       launchers: [...launchers]
         .sort((a, b) => a.order - b.order)
@@ -1864,37 +1855,54 @@ export function LevelDesignerV2({
           });
           setGroups(Array.from(groupMap.values()).sort((a, b) => a.id - b.id));
 
-          // Build launchers from requirements
-          const newLaunchers: StudioLauncher[] = result.requirements.map((req, idx) => ({
-            id: uid('launcher'),
-            colorType: req.ColorType,
-            pixelCount: req.Value,
-            group: req.Group,
-            isLocked: idx >= 2,
-            order: idx,
-          }));
+          // Build launchers — prefer Launchers array (preserves splits), fall back to Requirements
+          const rawLaunchers = (data as unknown as Record<string, unknown>).Launchers as
+            | { ColorType: number; Value: number; Group: number; Order: number; IsLocked: boolean }[]
+            | undefined;
+          const newLaunchers: StudioLauncher[] = rawLaunchers
+            ? rawLaunchers.map((l, idx) => ({
+                id: uid('launcher'),
+                colorType: l.ColorType,
+                pixelCount: l.Value,
+                group: l.Group,
+                isLocked: l.IsLocked ?? idx >= 2,
+                order: l.Order ?? idx,
+              }))
+            : result.requirements.map((req, idx) => ({
+                id: uid('launcher'),
+                colorType: req.ColorType,
+                pixelCount: req.Value,
+                group: req.Group,
+                isLocked: idx >= 2,
+                order: idx,
+              }));
           setLaunchers(newLaunchers);
 
-          // Build selectable items
-          const newItems: StudioSelectableItem[] = result.selectableItems.map((si, idx) => ({
-            id: uid('item'),
-            colorType: si.ColorType,
-            variant: 0,
-            layer: idx < maxSelectableItems ? 'A' : idx < 2 * maxSelectableItems ? 'B' : 'C',
-            order: idx,
-          }));
+          // Set maxSelectableItems from data if present (before building items so layers are correct)
+          const rawData = data as unknown as Record<string, unknown>;
+          const importedMaxItems = typeof rawData.MaxSelectableItems === 'number'
+            ? Math.min(rawData.MaxSelectableItems, 20)
+            : maxSelectableItems;
+          setMaxSelectableItems(importedMaxItems);
+
+          // Build selectable items using the Layer field from import data if present
+          const newItems: StudioSelectableItem[] = result.selectableItems.map((si, idx) => {
+            const layerFromData: 'A' | 'B' | 'C' =
+              si.Layer === 1 ? 'B' : si.Layer === 2 ? 'C' : 'A';
+            return {
+              id: uid('item'),
+              colorType: si.ColorType,
+              variant: 0,
+              layer: layerFromData,
+              order: idx,
+            };
+          });
           setSelectableItems(newItems);
 
           // Build palette from color data
           const paletteSet = new Set<string>();
           result.colorData.forEach((cd) => paletteSet.add(cd.colorHex));
           setPalette(Array.from(paletteSet));
-
-          // Set maxSelectableItems from data if present
-          const rawData = data as unknown as Record<string, unknown>;
-          if (typeof rawData.MaxSelectableItems === 'number') {
-            setMaxSelectableItems(Math.min(rawData.MaxSelectableItems, 10));
-          }
 
           // Parse LevelId (e.g. "Level1_1") for position + variant
           const levelIdMatch = data.LevelId?.match(/^Level(\d+)_(\d+)$/);
@@ -1913,7 +1921,7 @@ export function LevelDesignerV2({
           setArtWidth(data.Artwork.Width);
           setArtHeight(height);
           setPalette(data.Palette || []);
-          setMaxSelectableItems(Math.min(data.MaxSelectableItems || 10, 10));
+          setMaxSelectableItems(Math.min(data.MaxSelectableItems || 10, 20));
 
           const map = new Map<string, StudioPixelCell>();
           const groupMap = new Map<number, StudioGroup>();
@@ -1948,18 +1956,31 @@ export function LevelDesignerV2({
           setPixels(map);
           setGroups(Array.from(groupMap.values()).sort((a, b) => a.id - b.id));
 
-          // Launchers from Requirements
-          const reqs = data.Requirements || [];
-          setLaunchers(
-            reqs.map((r: { ColorType: number; Value: number; Group: number }, idx: number) => ({
-              id: uid('launcher'),
-              colorType: r.ColorType,
-              pixelCount: r.Value,
-              group: r.Group,
-              isLocked: idx >= 2,
-              order: idx,
-            })),
-          );
+          // Launchers — prefer Launchers array (preserves splits), fall back to Requirements
+          if (data.Launchers && Array.isArray(data.Launchers)) {
+            setLaunchers(
+              data.Launchers.map((l: { ColorType: number; Value: number; Group: number; Order: number; IsLocked: boolean }, idx: number) => ({
+                id: uid('launcher'),
+                colorType: l.ColorType,
+                pixelCount: l.Value,
+                group: l.Group,
+                isLocked: l.IsLocked ?? idx >= 2,
+                order: l.Order ?? idx,
+              })),
+            );
+          } else {
+            const reqs = data.Requirements || [];
+            setLaunchers(
+              reqs.map((r: { ColorType: number; Value: number; Group: number }, idx: number) => ({
+                id: uid('launcher'),
+                colorType: r.ColorType,
+                pixelCount: r.Value,
+                group: r.Group,
+                isLocked: idx >= 2,
+                order: idx,
+              })),
+            );
+          }
 
           // Items from SelectableItems
           const layerNames: Record<number, 'A' | 'B' | 'C'> = { 0: 'A', 1: 'B', 2: 'C' };
@@ -2199,7 +2220,15 @@ export function LevelDesignerV2({
       const sorted = [...prev].sort((a, b) => a.order - b.order);
       const [moved] = sorted.splice(fromIndex, 1);
       sorted.splice(toIndex, 0, moved);
-      return sorted.map((item, idx) => ({ ...item, order: idx }));
+      // Determine the target layer from the item at the drop position
+      // (the item that was displaced)
+      const targetItem = sorted[toIndex === sorted.length ? toIndex - 1 : toIndex];
+      const targetLayer = targetItem ? targetItem.layer : moved.layer;
+      return sorted.map((item, idx) => ({
+        ...item,
+        order: idx,
+        layer: item === moved ? targetLayer : item.layer,
+      }));
     });
   }, []);
 
@@ -2319,6 +2348,15 @@ export function LevelDesignerV2({
           colorType: l.colorType,
           value: l.pixelCount,
           group: l.group,
+        })),
+      launchers: launchers
+        .sort((a, b) => a.order - b.order)
+        .map((l) => ({
+          colorType: l.colorType,
+          pixelCount: l.pixelCount,
+          group: l.group,
+          order: l.order,
+          isLocked: l.isLocked,
         })),
       unlockStageData: [{ requiredCompletedGroups: groups.map((g) => g.id) }],
       maxSelectableItems,

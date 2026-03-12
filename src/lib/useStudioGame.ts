@@ -123,7 +123,7 @@ export interface StudioGameConfig {
   pixelArtHeight: number;
   maxSelectableItems: number;
   waitingStandSlots: number;
-  selectableItems: { colorType: number; variant: number; order: number }[];
+  selectableItems: { colorType: number; variant: number; order: number; layer?: 'A' | 'B' | 'C' }[];
   launchers: { colorType: number; pixelCount: number; group: number; order: number }[];
   activeLauncherCount?: number; // default 2
   /** 0-1: how much to bury matching tiles. 0=solvable, 1=max burial */
@@ -496,12 +496,19 @@ export function findMaxSolvableDepth(config: StudioGameConfig): number {
     activeLauncherCount = 2,
   } = config;
 
-  const allTiles: StudioTile[] = selectableItems.map((item) => ({
+  const sortedItems = [...selectableItems].sort((a, b) => a.order - b.order);
+
+  const allTiles: StudioTile[] = sortedItems.map((item) => ({
     id: tileId(),
     colorType: item.colorType,
     variant: item.variant,
     fruitType: COLOR_TYPE_TO_FRUIT[item.colorType] || 'apple',
   }));
+
+  const hasLayerAssignments = sortedItems.some((item) => item.layer !== undefined);
+  const layerAssignments: ('A' | 'B' | 'C')[] | undefined = hasLayerAssignments
+    ? sortedItems.map((item) => item.layer || 'A')
+    : undefined;
 
   const sortedLauncherConfigs = [...launchers].sort((a, b) => a.order - b.order);
 
@@ -509,11 +516,26 @@ export function findMaxSolvableDepth(config: StudioGameConfig): number {
     const a: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
     const b: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
     const c: StudioTile[] = [];
-    sequence.forEach((tile, idx) => {
-      if (idx < maxSelectableItems) a[idx] = tile;
-      else if (idx < 2 * maxSelectableItems) b[idx - maxSelectableItems] = tile;
-      else c.push(tile);
-    });
+
+    if (layerAssignments && layerAssignments.length === sequence.length) {
+      let aIdx = 0, bIdx = 0;
+      sequence.forEach((tile, idx) => {
+        const layer = layerAssignments[idx];
+        if (layer === 'A' && aIdx < maxSelectableItems) {
+          a[aIdx++] = tile;
+        } else if (layer === 'B' && bIdx < maxSelectableItems) {
+          b[bIdx++] = tile;
+        } else {
+          c.push(tile);
+        }
+      });
+    } else {
+      sequence.forEach((tile, idx) => {
+        if (idx < maxSelectableItems) a[idx] = tile;
+        else if (idx < 2 * maxSelectableItems) b[idx - maxSelectableItems] = tile;
+        else c.push(tile);
+      });
+    }
     return { a, b, c };
   };
 
@@ -653,19 +675,38 @@ export function buildChallengingSequenceSeeded(
   return sequence;
 }
 
-/** Distribute a tile sequence into three layers. */
+/** Distribute a tile sequence into three layers.
+ *  If layerAssignments is provided, tiles are placed into their designer-specified
+ *  layers instead of being distributed purely by sequence index.
+ */
 function distributeToLayersSeeded(
   sequence: StudioTile[],
   maxSelectableItems: number,
+  layerAssignments?: ('A' | 'B' | 'C')[],
 ): { a: (StudioTile | null)[]; b: (StudioTile | null)[]; c: StudioTile[] } {
   const a: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
   const b: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
   const c: StudioTile[] = [];
-  sequence.forEach((tile, idx) => {
-    if (idx < maxSelectableItems) a[idx] = tile;
-    else if (idx < 2 * maxSelectableItems) b[idx - maxSelectableItems] = tile;
-    else c.push(tile);
-  });
+
+  if (layerAssignments && layerAssignments.length === sequence.length) {
+    let aIdx = 0, bIdx = 0;
+    sequence.forEach((tile, idx) => {
+      const layer = layerAssignments[idx];
+      if (layer === 'A' && aIdx < maxSelectableItems) {
+        a[aIdx++] = tile;
+      } else if (layer === 'B' && bIdx < maxSelectableItems) {
+        b[bIdx++] = tile;
+      } else {
+        c.push(tile);
+      }
+    });
+  } else {
+    sequence.forEach((tile, idx) => {
+      if (idx < maxSelectableItems) a[idx] = tile;
+      else if (idx < 2 * maxSelectableItems) b[idx - maxSelectableItems] = tile;
+      else c.push(tile);
+    });
+  }
   return { a, b, c };
 }
 
@@ -753,12 +794,21 @@ export function initializeStateSeeded(config: StudioGameConfig): StudioGameState
 
   const rng = mulberry32(seed);
 
-  const allTiles: StudioTile[] = selectableItems.map((item) => ({
+  // Sort items by order to maintain designer intent
+  const sortedItems = [...selectableItems].sort((a, b) => a.order - b.order);
+
+  const allTiles: StudioTile[] = sortedItems.map((item) => ({
     id: seededTileId(rng),
     colorType: item.colorType,
     variant: item.variant,
     fruitType: COLOR_TYPE_TO_FRUIT[item.colorType] || 'apple',
   }));
+
+  // Build layer assignments from designer-specified layers (if any item has a layer)
+  const hasLayerAssignments = sortedItems.some((item) => item.layer !== undefined);
+  const layerAssignments: ('A' | 'B' | 'C')[] | undefined = hasLayerAssignments
+    ? sortedItems.map((item) => item.layer || 'A')
+    : undefined;
 
   const sortedLauncherConfigs = [...launchers].sort((a, b) => a.order - b.order);
 
@@ -771,7 +821,7 @@ export function initializeStateSeeded(config: StudioGameConfig): StudioGameState
     let found = false;
     for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
       const sequence = buildChallengingSequenceSeeded(allTiles, sortedLauncherConfigs, activeLauncherCount, mismatchDepth, rng);
-      const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
+      const layers = distributeToLayersSeeded(sequence, maxSelectableItems, layerAssignments);
       if (verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
         layerA = layers.a; layerB = layers.b; layerC = layers.c; found = true;
       }
@@ -780,7 +830,7 @@ export function initializeStateSeeded(config: StudioGameConfig): StudioGameState
       for (let depth = mismatchDepth - 0.05; depth > 0 && !found; depth -= 0.05) {
         for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
           const sequence = buildChallengingSequenceSeeded(allTiles, sortedLauncherConfigs, activeLauncherCount, Math.max(0, +depth.toFixed(2)), rng);
-          const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
+          const layers = distributeToLayersSeeded(sequence, maxSelectableItems, layerAssignments);
           if (verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
             layerA = layers.a; layerB = layers.b; layerC = layers.c; found = true;
           }
@@ -794,7 +844,7 @@ export function initializeStateSeeded(config: StudioGameConfig): StudioGameState
     let solvable = false;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       const sequence = buildSolvableSequenceSeeded(allTiles, sortedLauncherConfigs, activeLauncherCount, rng);
-      const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
+      const layers = distributeToLayersSeeded(sequence, maxSelectableItems, layerAssignments);
       solvable = verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots);
       if (solvable) { layerA = layers.a; layerB = layers.b; layerC = layers.c; break; }
     }
@@ -807,7 +857,7 @@ export function initializeStateSeeded(config: StudioGameConfig): StudioGameState
         for (const cfg of batch) { const pool = tilesByColor.get(cfg.colorType) || []; strictSequence.push(...pool.splice(0, 3)); }
       }
       for (const arr of tilesByColor.values()) strictSequence.push(...arr);
-      const layers = distributeToLayersSeeded(strictSequence, maxSelectableItems);
+      const layers = distributeToLayersSeeded(strictSequence, maxSelectableItems, layerAssignments);
       layerA = layers.a; layerB = layers.b; layerC = layers.c;
     }
   }
@@ -859,13 +909,22 @@ export function initializeState(config: StudioGameConfig): StudioGameState {
     mismatchDepth = 0,
   } = config;
 
+  // Sort items by order to maintain designer intent
+  const sortedItems = [...selectableItems].sort((a, b) => a.order - b.order);
+
   // Create all tiles (stable set, rearranged by solvable algorithm)
-  const allTiles: StudioTile[] = selectableItems.map((item) => ({
+  const allTiles: StudioTile[] = sortedItems.map((item) => ({
     id: tileId(),
     colorType: item.colorType,
     variant: item.variant,
     fruitType: COLOR_TYPE_TO_FRUIT[item.colorType] || 'apple',
   }));
+
+  // Build layer assignments from designer-specified layers (if any item has a layer)
+  const hasLayerAssignments = sortedItems.some((item) => item.layer !== undefined);
+  const layerAssignments: ('A' | 'B' | 'C')[] | undefined = hasLayerAssignments
+    ? sortedItems.map((item) => item.layer || 'A')
+    : undefined;
 
   // Sort launcher configs by activation order
   const sortedLauncherConfigs = [...launchers].sort(
@@ -884,15 +943,30 @@ export function initializeState(config: StudioGameConfig): StudioGameState {
     const a: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
     const b: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
     const c: StudioTile[] = [];
-    sequence.forEach((tile, idx) => {
-      if (idx < maxSelectableItems) {
-        a[idx] = tile;
-      } else if (idx < 2 * maxSelectableItems) {
-        b[idx - maxSelectableItems] = tile;
-      } else {
-        c.push(tile);
-      }
-    });
+
+    if (layerAssignments && layerAssignments.length === sequence.length) {
+      let aIdx = 0, bIdx = 0;
+      sequence.forEach((tile, idx) => {
+        const layer = layerAssignments[idx];
+        if (layer === 'A' && aIdx < maxSelectableItems) {
+          a[aIdx++] = tile;
+        } else if (layer === 'B' && bIdx < maxSelectableItems) {
+          b[bIdx++] = tile;
+        } else {
+          c.push(tile);
+        }
+      });
+    } else {
+      sequence.forEach((tile, idx) => {
+        if (idx < maxSelectableItems) {
+          a[idx] = tile;
+        } else if (idx < 2 * maxSelectableItems) {
+          b[idx - maxSelectableItems] = tile;
+        } else {
+          c.push(tile);
+        }
+      });
+    }
     return { a, b, c };
   };
 

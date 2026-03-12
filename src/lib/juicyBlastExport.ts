@@ -675,7 +675,8 @@ export interface StudioExportLevel {
     }[];
   };
   Requirements: { ColorType: number; Value: number; Group: number }[];
-  SelectableItems: { ColorType: number; Variant: number }[];
+  SelectableItems: { ColorType: number; Variant: number; Layer: number }[];
+  Launchers: { ColorType: number; Value: number; Group: number; Order: number; IsLocked: boolean }[];
 }
 
 export interface StudioExportData {
@@ -696,6 +697,7 @@ export interface StudioExportData {
   }[];
   selectableItems: { colorType: number; variant: number; layer: 'A' | 'B' | 'C'; order: number }[];
   requirements: { colorType: number; value: number; group: number }[];
+  launchers: { colorType: number; pixelCount: number; group: number; order: number; isLocked: boolean }[];
   unlockStageData: { requiredCompletedGroups: number[] }[];
   maxSelectableItems: number;
   /** Recipe fields for deterministic reconstruction */
@@ -721,11 +723,13 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
     };
   });
 
+  const layerToNumber: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2 };
   const selectableItems = data.selectableItems
     .sort((a, b) => a.order - b.order)
     .map((item) => ({
       ColorType: item.colorType,
       Variant: item.variant,
+      Layer: layerToNumber[item.layer] ?? 0,
     }));
 
   const requirements = data.requirements.map((r) => ({
@@ -733,6 +737,16 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
     Value: r.value,
     Group: r.group,
   }));
+
+  const exportLaunchers = data.launchers
+    .sort((a, b) => a.order - b.order)
+    .map((l) => ({
+      ColorType: l.colorType,
+      Value: l.pixelCount,
+      Group: l.group,
+      Order: l.order,
+      IsLocked: l.isLocked,
+    }));
 
   return {
     LevelId: data.levelId,
@@ -744,5 +758,6 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
     },
     Requirements: requirements,
     SelectableItems: selectableItems,
+    Launchers: exportLaunchers,
   };
 }
