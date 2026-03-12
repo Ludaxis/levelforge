@@ -106,6 +106,8 @@ export interface StudioTile {
   colorType: number;
   variant: number;
   fruitType: FruitType;
+  /** Designer-specified layer assignment. When set, distributeToLayers respects it. */
+  designerLayer?: 'A' | 'B' | 'C';
 }
 
 export interface StudioLauncherState {
@@ -503,12 +505,8 @@ export function findMaxSolvableDepth(config: StudioGameConfig): number {
     colorType: item.colorType,
     variant: item.variant,
     fruitType: COLOR_TYPE_TO_FRUIT[item.colorType] || 'apple',
+    designerLayer: item.layer,
   }));
-
-  const hasLayerAssignments = sortedItems.some((item) => item.layer !== undefined);
-  const layerAssignments: ('A' | 'B' | 'C')[] | undefined = hasLayerAssignments
-    ? sortedItems.map((item) => item.layer || 'A')
-    : undefined;
 
   const sortedLauncherConfigs = [...launchers].sort((a, b) => a.order - b.order);
 
@@ -517,10 +515,12 @@ export function findMaxSolvableDepth(config: StudioGameConfig): number {
     const b: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
     const c: StudioTile[] = [];
 
-    if (layerAssignments && layerAssignments.length === sequence.length) {
+    const hasDesignerLayers = sequence.some((t) => t.designerLayer !== undefined);
+
+    if (hasDesignerLayers) {
       let aIdx = 0, bIdx = 0;
-      sequence.forEach((tile, idx) => {
-        const layer = layerAssignments[idx];
+      for (const tile of sequence) {
+        const layer = tile.designerLayer || 'A';
         if (layer === 'A' && aIdx < maxSelectableItems) {
           a[aIdx++] = tile;
         } else if (layer === 'B' && bIdx < maxSelectableItems) {
@@ -528,7 +528,7 @@ export function findMaxSolvableDepth(config: StudioGameConfig): number {
         } else {
           c.push(tile);
         }
-      });
+      }
     } else {
       sequence.forEach((tile, idx) => {
         if (idx < maxSelectableItems) a[idx] = tile;
@@ -676,22 +676,23 @@ export function buildChallengingSequenceSeeded(
 }
 
 /** Distribute a tile sequence into three layers.
- *  If layerAssignments is provided, tiles are placed into their designer-specified
- *  layers instead of being distributed purely by sequence index.
+ *  If tiles have designerLayer set, they are placed into their designer-specified
+ *  layers. Otherwise, tiles are distributed purely by sequence index.
  */
 function distributeToLayersSeeded(
   sequence: StudioTile[],
   maxSelectableItems: number,
-  layerAssignments?: ('A' | 'B' | 'C')[],
 ): { a: (StudioTile | null)[]; b: (StudioTile | null)[]; c: StudioTile[] } {
   const a: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
   const b: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
   const c: StudioTile[] = [];
 
-  if (layerAssignments && layerAssignments.length === sequence.length) {
+  const hasDesignerLayers = sequence.some((t) => t.designerLayer !== undefined);
+
+  if (hasDesignerLayers) {
     let aIdx = 0, bIdx = 0;
-    sequence.forEach((tile, idx) => {
-      const layer = layerAssignments[idx];
+    for (const tile of sequence) {
+      const layer = tile.designerLayer || 'A';
       if (layer === 'A' && aIdx < maxSelectableItems) {
         a[aIdx++] = tile;
       } else if (layer === 'B' && bIdx < maxSelectableItems) {
@@ -699,7 +700,7 @@ function distributeToLayersSeeded(
       } else {
         c.push(tile);
       }
-    });
+    }
   } else {
     sequence.forEach((tile, idx) => {
       if (idx < maxSelectableItems) a[idx] = tile;
@@ -797,18 +798,14 @@ export function initializeStateSeeded(config: StudioGameConfig): StudioGameState
   // Sort items by order to maintain designer intent
   const sortedItems = [...selectableItems].sort((a, b) => a.order - b.order);
 
+  // Attach designerLayer to each tile so it survives sequence rearrangement
   const allTiles: StudioTile[] = sortedItems.map((item) => ({
     id: seededTileId(rng),
     colorType: item.colorType,
     variant: item.variant,
     fruitType: COLOR_TYPE_TO_FRUIT[item.colorType] || 'apple',
+    designerLayer: item.layer,
   }));
-
-  // Build layer assignments from designer-specified layers (if any item has a layer)
-  const hasLayerAssignments = sortedItems.some((item) => item.layer !== undefined);
-  const layerAssignments: ('A' | 'B' | 'C')[] | undefined = hasLayerAssignments
-    ? sortedItems.map((item) => item.layer || 'A')
-    : undefined;
 
   const sortedLauncherConfigs = [...launchers].sort((a, b) => a.order - b.order);
 
@@ -821,7 +818,7 @@ export function initializeStateSeeded(config: StudioGameConfig): StudioGameState
     let found = false;
     for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
       const sequence = buildChallengingSequenceSeeded(allTiles, sortedLauncherConfigs, activeLauncherCount, mismatchDepth, rng);
-      const layers = distributeToLayersSeeded(sequence, maxSelectableItems, layerAssignments);
+      const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
       if (verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
         layerA = layers.a; layerB = layers.b; layerC = layers.c; found = true;
       }
@@ -830,7 +827,7 @@ export function initializeStateSeeded(config: StudioGameConfig): StudioGameState
       for (let depth = mismatchDepth - 0.05; depth > 0 && !found; depth -= 0.05) {
         for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
           const sequence = buildChallengingSequenceSeeded(allTiles, sortedLauncherConfigs, activeLauncherCount, Math.max(0, +depth.toFixed(2)), rng);
-          const layers = distributeToLayersSeeded(sequence, maxSelectableItems, layerAssignments);
+          const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
           if (verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
             layerA = layers.a; layerB = layers.b; layerC = layers.c; found = true;
           }
@@ -844,7 +841,7 @@ export function initializeStateSeeded(config: StudioGameConfig): StudioGameState
     let solvable = false;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       const sequence = buildSolvableSequenceSeeded(allTiles, sortedLauncherConfigs, activeLauncherCount, rng);
-      const layers = distributeToLayersSeeded(sequence, maxSelectableItems, layerAssignments);
+      const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
       solvable = verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots);
       if (solvable) { layerA = layers.a; layerB = layers.b; layerC = layers.c; break; }
     }
@@ -857,7 +854,7 @@ export function initializeStateSeeded(config: StudioGameConfig): StudioGameState
         for (const cfg of batch) { const pool = tilesByColor.get(cfg.colorType) || []; strictSequence.push(...pool.splice(0, 3)); }
       }
       for (const arr of tilesByColor.values()) strictSequence.push(...arr);
-      const layers = distributeToLayersSeeded(strictSequence, maxSelectableItems, layerAssignments);
+      const layers = distributeToLayersSeeded(strictSequence, maxSelectableItems);
       layerA = layers.a; layerB = layers.b; layerC = layers.c;
     }
   }
@@ -912,19 +909,14 @@ export function initializeState(config: StudioGameConfig): StudioGameState {
   // Sort items by order to maintain designer intent
   const sortedItems = [...selectableItems].sort((a, b) => a.order - b.order);
 
-  // Create all tiles (stable set, rearranged by solvable algorithm)
+  // Attach designerLayer to each tile so it survives sequence rearrangement
   const allTiles: StudioTile[] = sortedItems.map((item) => ({
     id: tileId(),
     colorType: item.colorType,
     variant: item.variant,
     fruitType: COLOR_TYPE_TO_FRUIT[item.colorType] || 'apple',
+    designerLayer: item.layer,
   }));
-
-  // Build layer assignments from designer-specified layers (if any item has a layer)
-  const hasLayerAssignments = sortedItems.some((item) => item.layer !== undefined);
-  const layerAssignments: ('A' | 'B' | 'C')[] | undefined = hasLayerAssignments
-    ? sortedItems.map((item) => item.layer || 'A')
-    : undefined;
 
   // Sort launcher configs by activation order
   const sortedLauncherConfigs = [...launchers].sort(
@@ -944,10 +936,12 @@ export function initializeState(config: StudioGameConfig): StudioGameState {
     const b: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
     const c: StudioTile[] = [];
 
-    if (layerAssignments && layerAssignments.length === sequence.length) {
+    const hasDesignerLayers = sequence.some((t) => t.designerLayer !== undefined);
+
+    if (hasDesignerLayers) {
       let aIdx = 0, bIdx = 0;
-      sequence.forEach((tile, idx) => {
-        const layer = layerAssignments[idx];
+      for (const tile of sequence) {
+        const layer = tile.designerLayer || 'A';
         if (layer === 'A' && aIdx < maxSelectableItems) {
           a[aIdx++] = tile;
         } else if (layer === 'B' && bIdx < maxSelectableItems) {
@@ -955,7 +949,7 @@ export function initializeState(config: StudioGameConfig): StudioGameState {
         } else {
           c.push(tile);
         }
-      });
+      }
     } else {
       sequence.forEach((tile, idx) => {
         if (idx < maxSelectableItems) {
