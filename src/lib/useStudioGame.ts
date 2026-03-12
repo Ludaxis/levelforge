@@ -510,12 +510,13 @@ export function findMaxSolvableDepth(config: StudioGameConfig): number {
 
   const sortedLauncherConfigs = [...launchers].sort((a, b) => a.order - b.order);
 
+  // When designer layers are set, distribution is fixed — find max depth using that fixed distribution
+  const hasDesignerLayers = allTiles.some((t) => t.designerLayer !== undefined);
+
   const distributeToLayers = (sequence: StudioTile[]) => {
     const a: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
     const b: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
     const c: StudioTile[] = [];
-
-    const hasDesignerLayers = sequence.some((t) => t.designerLayer !== undefined);
 
     if (hasDesignerLayers) {
       let aIdx = 0, bIdx = 0;
@@ -813,49 +814,66 @@ export function initializeStateSeeded(config: StudioGameConfig): StudioGameState
   let layerB: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
   let layerC: StudioTile[] = [];
 
-  if (mismatchDepth > 0) {
-    const RETRIES_PER_DEPTH = 5;
-    let found = false;
-    for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
-      const sequence = buildChallengingSequenceSeeded(allTiles, sortedLauncherConfigs, activeLauncherCount, mismatchDepth, rng);
-      const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
-      if (verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
-        layerA = layers.a; layerB = layers.b; layerC = layers.c; found = true;
+  // When designer has explicitly assigned layers, place tiles directly
+  const hasDesignerLayers = allTiles.some((t) => t.designerLayer !== undefined);
+
+  if (hasDesignerLayers) {
+    let aIdx = 0, bIdx = 0;
+    for (const tile of allTiles) {
+      const layer = tile.designerLayer || 'A';
+      if (layer === 'A' && aIdx < maxSelectableItems) {
+        layerA[aIdx++] = tile;
+      } else if (layer === 'B' && bIdx < maxSelectableItems) {
+        layerB[bIdx++] = tile;
+      } else {
+        layerC.push(tile);
       }
     }
-    if (!found) {
-      for (let depth = mismatchDepth - 0.05; depth > 0 && !found; depth -= 0.05) {
-        for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
-          const sequence = buildChallengingSequenceSeeded(allTiles, sortedLauncherConfigs, activeLauncherCount, Math.max(0, +depth.toFixed(2)), rng);
-          const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
-          if (verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
-            layerA = layers.a; layerB = layers.b; layerC = layers.c; found = true;
+  } else {
+    if (mismatchDepth > 0) {
+      const RETRIES_PER_DEPTH = 5;
+      let found = false;
+      for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
+        const sequence = buildChallengingSequenceSeeded(allTiles, sortedLauncherConfigs, activeLauncherCount, mismatchDepth, rng);
+        const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
+        if (verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
+          layerA = layers.a; layerB = layers.b; layerC = layers.c; found = true;
+        }
+      }
+      if (!found) {
+        for (let depth = mismatchDepth - 0.05; depth > 0 && !found; depth -= 0.05) {
+          for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
+            const sequence = buildChallengingSequenceSeeded(allTiles, sortedLauncherConfigs, activeLauncherCount, Math.max(0, +depth.toFixed(2)), rng);
+            const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
+            if (verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
+              layerA = layers.a; layerB = layers.b; layerC = layers.c; found = true;
+            }
           }
         }
       }
     }
-  }
 
-  if (layerA.every((t) => t === null)) {
-    const MAX_RETRIES = 20;
-    let solvable = false;
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      const sequence = buildSolvableSequenceSeeded(allTiles, sortedLauncherConfigs, activeLauncherCount, rng);
-      const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
-      solvable = verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots);
-      if (solvable) { layerA = layers.a; layerB = layers.b; layerC = layers.c; break; }
-    }
-    if (!solvable) {
-      const tilesByColor = new Map<number, StudioTile[]>();
-      for (const tile of allTiles) { if (!tilesByColor.has(tile.colorType)) tilesByColor.set(tile.colorType, []); tilesByColor.get(tile.colorType)!.push(tile); }
-      const strictSequence: StudioTile[] = [];
-      for (let i = 0; i < sortedLauncherConfigs.length; i += activeLauncherCount) {
-        const batch = sortedLauncherConfigs.slice(i, i + activeLauncherCount);
-        for (const cfg of batch) { const pool = tilesByColor.get(cfg.colorType) || []; strictSequence.push(...pool.splice(0, 3)); }
+    if (layerA.every((t) => t === null)) {
+      const MAX_RETRIES = 20;
+      let solvable = false;
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        const sequence = buildSolvableSequenceSeeded(allTiles, sortedLauncherConfigs, activeLauncherCount, rng);
+        const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
+        solvable = verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots);
+        if (solvable) { layerA = layers.a; layerB = layers.b; layerC = layers.c; break; }
       }
-      for (const arr of tilesByColor.values()) strictSequence.push(...arr);
-      const layers = distributeToLayersSeeded(strictSequence, maxSelectableItems);
-      layerA = layers.a; layerB = layers.b; layerC = layers.c;
+      if (!solvable) {
+        const tilesByColor = new Map<number, StudioTile[]>();
+        for (const tile of allTiles) { if (!tilesByColor.has(tile.colorType)) tilesByColor.set(tile.colorType, []); tilesByColor.get(tile.colorType)!.push(tile); }
+        const strictSequence: StudioTile[] = [];
+        for (let i = 0; i < sortedLauncherConfigs.length; i += activeLauncherCount) {
+          const batch = sortedLauncherConfigs.slice(i, i + activeLauncherCount);
+          for (const cfg of batch) { const pool = tilesByColor.get(cfg.colorType) || []; strictSequence.push(...pool.splice(0, 3)); }
+        }
+        for (const arr of tilesByColor.values()) strictSequence.push(...arr);
+        const layers = distributeToLayersSeeded(strictSequence, maxSelectableItems);
+        layerA = layers.a; layerB = layers.b; layerC = layers.c;
+      }
     }
   }
 
@@ -918,6 +936,7 @@ export function initializeState(config: StudioGameConfig): StudioGameState {
     designerLayer: item.layer,
   }));
 
+
   // Sort launcher configs by activation order
   const sortedLauncherConfigs = [...launchers].sort(
     (a, b) => a.order - b.order,
@@ -931,26 +950,28 @@ export function initializeState(config: StudioGameConfig): StudioGameState {
   let layerB: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
   let layerC: StudioTile[] = [];
 
-  const distributeToLayers = (sequence: StudioTile[]) => {
-    const a: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
-    const b: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
-    const c: StudioTile[] = [];
+  // When designer has explicitly assigned layers, place tiles directly —
+  // skip sequence builders entirely so playtest matches the Item Pool exactly.
+  const hasDesignerLayers = allTiles.some((t) => t.designerLayer !== undefined);
 
-    const hasDesignerLayers = sequence.some((t) => t.designerLayer !== undefined);
-
-    if (hasDesignerLayers) {
-      let aIdx = 0, bIdx = 0;
-      for (const tile of sequence) {
-        const layer = tile.designerLayer || 'A';
-        if (layer === 'A' && aIdx < maxSelectableItems) {
-          a[aIdx++] = tile;
-        } else if (layer === 'B' && bIdx < maxSelectableItems) {
-          b[bIdx++] = tile;
-        } else {
-          c.push(tile);
-        }
+  if (hasDesignerLayers) {
+    let aIdx = 0, bIdx = 0;
+    for (const tile of allTiles) {
+      const layer = tile.designerLayer || 'A';
+      if (layer === 'A' && aIdx < maxSelectableItems) {
+        layerA[aIdx++] = tile;
+      } else if (layer === 'B' && bIdx < maxSelectableItems) {
+        layerB[bIdx++] = tile;
+      } else {
+        layerC.push(tile);
       }
-    } else {
+    }
+  } else {
+    // No designer layers — use sequence builders for automatic arrangement
+    const distributeToLayers = (sequence: StudioTile[]) => {
+      const a: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
+      const b: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
+      const c: StudioTile[] = [];
       sequence.forEach((tile, idx) => {
         if (idx < maxSelectableItems) {
           a[idx] = tile;
@@ -960,121 +981,115 @@ export function initializeState(config: StudioGameConfig): StudioGameState {
           c.push(tile);
         }
       });
-    }
-    return { a, b, c };
-  };
+      return { a, b, c };
+    };
 
-  if (mismatchDepth > 0) {
-    // Challenging mode: bury matching tiles based on mismatchDepth.
-    // Try requested depth first, then reduce until solvable.
-    const RETRIES_PER_DEPTH = 5;
-    let found = false;
+    if (mismatchDepth > 0) {
+      // Challenging mode: bury matching tiles based on mismatchDepth.
+      const RETRIES_PER_DEPTH = 5;
+      let found = false;
 
-    // Try the requested depth with multiple shuffles
-    for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
-      const sequence = buildChallengingSequence(
-        allTiles,
-        sortedLauncherConfigs,
-        activeLauncherCount,
-        mismatchDepth,
-      );
-      const layers = distributeToLayers(sequence);
-      if (verifySolvability(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
-        layerA = layers.a;
-        layerB = layers.b;
-        layerC = layers.c;
-        found = true;
+      for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
+        const sequence = buildChallengingSequence(
+          allTiles,
+          sortedLauncherConfigs,
+          activeLauncherCount,
+          mismatchDepth,
+        );
+        const layers = distributeToLayers(sequence);
+        if (verifySolvability(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
+          layerA = layers.a;
+          layerB = layers.b;
+          layerC = layers.c;
+          found = true;
+        }
       }
-    }
 
-    // If not solvable at requested depth, step down in 0.05 increments
-    if (!found) {
-      for (let depth = mismatchDepth - 0.05; depth > 0 && !found; depth -= 0.05) {
-        for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
-          const sequence = buildChallengingSequence(
-            allTiles,
-            sortedLauncherConfigs,
-            activeLauncherCount,
-            Math.max(0, +depth.toFixed(2)),
-          );
-          const layers = distributeToLayers(sequence);
-          if (verifySolvability(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
-            layerA = layers.a;
-            layerB = layers.b;
-            layerC = layers.c;
-            found = true;
+      if (!found) {
+        for (let depth = mismatchDepth - 0.05; depth > 0 && !found; depth -= 0.05) {
+          for (let attempt = 0; attempt < RETRIES_PER_DEPTH && !found; attempt++) {
+            const sequence = buildChallengingSequence(
+              allTiles,
+              sortedLauncherConfigs,
+              activeLauncherCount,
+              Math.max(0, +depth.toFixed(2)),
+            );
+            const layers = distributeToLayers(sequence);
+            if (verifySolvability(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
+              layerA = layers.a;
+              layerB = layers.b;
+              layerC = layers.c;
+              found = true;
+            }
           }
         }
       }
+
+      if (found) {
+        // Skip the solvable block
+      }
     }
 
-    // If still not found, fall through to solvable mode below
-    if (found) {
-      // Skip the solvable block
-    }
-  }
+    // Solvable mode (depth=0 OR challenging fallback)
+    if (layerA.every((t) => t === null)) {
+      const MAX_RETRIES = 20;
+      let solvable = false;
 
-  // Solvable mode (depth=0 OR challenging fallback)
-  if (layerA.every((t) => t === null)) {
-    // Solvable mode: current behaviour with retry + fallback
-    const MAX_RETRIES = 20;
-    let solvable = false;
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        const sequence = buildSolvableSequence(
+          allTiles,
+          sortedLauncherConfigs,
+          activeLauncherCount,
+        );
+        const layers = distributeToLayers(sequence);
 
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      const sequence = buildSolvableSequence(
-        allTiles,
-        sortedLauncherConfigs,
-        activeLauncherCount,
-      );
-      const layers = distributeToLayers(sequence);
+        solvable = verifySolvability(
+          layers.a,
+          layers.b,
+          layers.c,
+          sortedLauncherConfigs,
+          activeLauncherCount,
+          waitingStandSlots,
+        );
 
-      solvable = verifySolvability(
-        layers.a,
-        layers.b,
-        layers.c,
-        sortedLauncherConfigs,
-        activeLauncherCount,
-        waitingStandSlots,
-      );
+        if (solvable) {
+          layerA = layers.a;
+          layerB = layers.b;
+          layerC = layers.c;
+          break;
+        }
+      }
 
-      if (solvable) {
+      if (!solvable) {
+        const tilesByColor = new Map<number, StudioTile[]>();
+        for (const tile of allTiles) {
+          if (!tilesByColor.has(tile.colorType)) {
+            tilesByColor.set(tile.colorType, []);
+          }
+          tilesByColor.get(tile.colorType)!.push(tile);
+        }
+
+        const strictSequence: StudioTile[] = [];
+        for (
+          let i = 0;
+          i < sortedLauncherConfigs.length;
+          i += activeLauncherCount
+        ) {
+          const batch = sortedLauncherConfigs.slice(i, i + activeLauncherCount);
+          for (const cfg of batch) {
+            const pool = tilesByColor.get(cfg.colorType) || [];
+            strictSequence.push(...pool.splice(0, 3));
+          }
+        }
+        for (const arr of tilesByColor.values()) {
+          strictSequence.push(...arr);
+        }
+
+        const layers = distributeToLayers(strictSequence);
         layerA = layers.a;
         layerB = layers.b;
         layerC = layers.c;
-        break;
       }
-    }
-
-    // Fallback: strict batch order (no within-round shuffle)
-    if (!solvable) {
-      const tilesByColor = new Map<number, StudioTile[]>();
-      for (const tile of allTiles) {
-        if (!tilesByColor.has(tile.colorType)) {
-          tilesByColor.set(tile.colorType, []);
-        }
-        tilesByColor.get(tile.colorType)!.push(tile);
-      }
-
-      const strictSequence: StudioTile[] = [];
-      for (
-        let i = 0;
-        i < sortedLauncherConfigs.length;
-        i += activeLauncherCount
-      ) {
-        const batch = sortedLauncherConfigs.slice(i, i + activeLauncherCount);
-        for (const cfg of batch) {
-          const pool = tilesByColor.get(cfg.colorType) || [];
-          strictSequence.push(...pool.splice(0, 3));
-        }
-      }
-      for (const arr of tilesByColor.values()) {
-        strictSequence.push(...arr);
-      }
-
-      const layers = distributeToLayers(strictSequence);
-      layerA = layers.a;
-      layerB = layers.b;
-      layerC = layers.c;
     }
   }
 
