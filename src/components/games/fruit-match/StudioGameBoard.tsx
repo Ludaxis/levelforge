@@ -292,6 +292,8 @@ function LauncherCarousel({
         timelineRef.current = null;
       }
     };
+    // GSAP animation refs (timelineRef, exitRef, slotRefs) are intentionally excluded --
+    // they are mutable refs that should not trigger re-animation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeLaunchers]);
 
@@ -525,6 +527,8 @@ function PixelFillOverlay({
         timelineRef.current = null;
       }
     };
+    // GSAP canvas animation refs (overlayRef, timelineRef) and onAnimationEnd callback are
+    // intentionally excluded -- they are mutable refs or stable callbacks that should not re-trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pixelArt]);
 

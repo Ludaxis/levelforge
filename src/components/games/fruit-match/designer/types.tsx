@@ -81,9 +81,8 @@ export const GROUP_COLORS = [
 // Helper: generate unique IDs
 // ============================================================================
 
-let _idCounter = 0;
 export function uid(prefix: string): string {
-  return `${prefix}-${Date.now()}-${++_idCounter}`;
+  return `${prefix}-${crypto.randomUUID()}`;
 }
 
 // ============================================================================

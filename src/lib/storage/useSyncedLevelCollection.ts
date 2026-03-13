@@ -204,6 +204,8 @@ export function useSyncedLevelCollection<T extends BaseLevel>(
     return () => {
       isMounted = false;
     };
+  // Intentional mount-only effect: loads from localStorage then reconciles with Supabase once.
+  // All referenced values are refs or stable setState dispatchers that do not change.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

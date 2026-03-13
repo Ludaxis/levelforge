@@ -131,7 +131,13 @@ export function CollectionCurveChart({
   const tickInterval = maxLevels <= 50 ? 5 : maxLevels <= 100 ? 10 : 20;
 
   // Custom tooltip
-  const CustomTooltip = ({ active, payload }: any) => {
+  interface CustomTooltipProps {
+    active?: boolean;
+    payload?: Array<{ value: number; name: string; color: string; dataKey: string; payload: ChartDataPoint }>;
+    label?: string;
+  }
+
+  const CustomTooltip = ({ active, payload }: CustomTooltipProps) => {
     if (active && payload && payload.length > 0) {
       const data = payload[0].payload as ChartDataPoint;
       return (

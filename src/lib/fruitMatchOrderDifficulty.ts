@@ -202,11 +202,10 @@ export function calculateTripletAccessibility(sinkStacks: SinkTile[][]): {
   details: Record<FruitType, { depths: number[]; avgDepth: number }>;
 } {
   // Group tiles by fruit type with their depths
-  const fruitDepths: Record<FruitType, number[]> = {} as Record<FruitType, number[]>;
-
-  for (const fruit of ALL_FRUITS) {
-    fruitDepths[fruit] = [];
-  }
+  const fruitDepths = ALL_FRUITS.reduce((acc, fruit) => {
+    acc[fruit] = [];
+    return acc;
+  }, {} as Record<FruitType, number[]>);
 
   for (const stack of sinkStacks) {
     for (const tile of stack) {
@@ -215,7 +214,7 @@ export function calculateTripletAccessibility(sinkStacks: SinkTile[][]): {
   }
 
   // Calculate average depth to get first 3 tiles of each type
-  const details: Record<FruitType, { depths: number[]; avgDepth: number }> = {} as any;
+  const details = {} as Record<FruitType, { depths: number[]; avgDepth: number }>;
   let totalWeightedDepth = 0;
   let fruitCount = 0;
 
@@ -261,7 +260,7 @@ export function calculateBlockingScore(
   totalPairs: number;
 } {
   // Create a map of when each fruit is first needed (launcher queue position)
-  const fruitNeededAt: Record<FruitType, number> = {} as Record<FruitType, number>;
+  const fruitNeededAt = {} as Record<FruitType, number>;
 
   launcherQueue.forEach((launcher, index) => {
     if (fruitNeededAt[launcher.fruitType] === undefined) {
@@ -317,11 +316,10 @@ export function calculateInterleavingScore(sinkStacks: SinkTile[][]): {
   score: number;
   spreadByFruit: Record<FruitType, number>;
 } {
-  const columnsPerFruit: Record<FruitType, Set<number>> = {} as any;
-
-  for (const fruit of ALL_FRUITS) {
-    columnsPerFruit[fruit] = new Set();
-  }
+  const columnsPerFruit = ALL_FRUITS.reduce((acc, fruit) => {
+    acc[fruit] = new Set<number>();
+    return acc;
+  }, {} as Record<FruitType, Set<number>>);
 
   sinkStacks.forEach((stack, colIndex) => {
     for (const tile of stack) {
@@ -329,7 +327,7 @@ export function calculateInterleavingScore(sinkStacks: SinkTile[][]): {
     }
   });
 
-  const spreadByFruit: Record<FruitType, number> = {} as any;
+  const spreadByFruit = {} as Record<FruitType, number>;
   let totalSpread = 0;
   let fruitCount = 0;
 
