@@ -725,7 +725,12 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
 
   const layerToNumber: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2 };
   const selectableItems = data.selectableItems
-    .sort((a, b) => a.order - b.order)
+    .sort((a, b) => {
+      const layerA = layerToNumber[a.layer] ?? 0;
+      const layerB = layerToNumber[b.layer] ?? 0;
+      if (layerA !== layerB) return layerA - layerB;
+      return a.order - b.order;
+    })
     .map((item) => ({
       ColorType: item.colorType,
       Variant: item.variant,
