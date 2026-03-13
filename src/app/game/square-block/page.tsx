@@ -19,6 +19,7 @@ import { useSquareBlockGame } from '@/lib/useSquareBlockGame';
 import { ArrowLeft, Undo2, RotateCcw, Trophy, XCircle, Palette, Layers, Play, BookOpen, Grid3X3 } from 'lucide-react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
+import { ErrorBoundary } from '@/components/layout/ErrorBoundary';
 
 // Dynamically import chart components to avoid SSR issues
 const SawtoothCurve = dynamic(
@@ -319,6 +320,7 @@ function SquareBlockPageContent() {
 
         {/* Design Tab */}
         <TabsContent value="design" className="h-[calc(100vh-200px)]">
+          <ErrorBoundary>
           <SquareBlockLevelDesigner
             onPlayLevel={handlePlayCustomLevel}
             onAddToCollection={handleAddToCollection}
@@ -330,10 +332,12 @@ function SquareBlockPageContent() {
             collections={collections}
             activeCollectionId={activeCollectionId}
           />
+          </ErrorBoundary>
         </TabsContent>
 
         {/* Collection Tab */}
         <TabsContent value="collection" className="space-y-4">
+          <ErrorBoundary>
           <div className="grid gap-4 lg:grid-cols-[1fr_400px]">
             <CollectionCurveChart
               levels={levels}
@@ -357,10 +361,12 @@ function SquareBlockPageContent() {
               onDeleteCollection={deleteCollection}
             />
           </div>
+          </ErrorBoundary>
         </TabsContent>
 
         {/* Play Tab */}
         <TabsContent value="play" className="space-y-4">
+          <ErrorBoundary>
           {playingLevel ? (
             <GameContainer
               key={`game-${gameKey}`}
@@ -408,10 +414,12 @@ function SquareBlockPageContent() {
               </CardContent>
             </Card>
           )}
+          </ErrorBoundary>
         </TabsContent>
 
         {/* Theory Tab */}
         <TabsContent value="theory" className="space-y-6">
+          <ErrorBoundary>
           <Card>
             <CardHeader>
               <CardTitle>Level Design Theory</CardTitle>
@@ -437,6 +445,7 @@ function SquareBlockPageContent() {
               <FlowSawtoothBridge />
             </section>
           </div>
+          </ErrorBoundary>
         </TabsContent>
       </Tabs>
     </div>

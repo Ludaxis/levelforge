@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Hexagon, ArrowLeft, Palette, Layers, Play, BookOpen } from 'lucide-react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
+import { ErrorBoundary } from '@/components/layout/ErrorBoundary';
 
 // Dynamically import chart components to avoid SSR issues
 const SawtoothCurve = dynamic(
@@ -226,6 +227,7 @@ function HexaBlockPageContent() {
 
         {/* Design Tab */}
         <TabsContent value="design" className="h-[calc(100vh-200px)]">
+          <ErrorBoundary>
           <HexBlockLevelDesigner
             onPlayLevel={handlePlayCustomLevel}
             onAddToCollection={handleAddToCollection}
@@ -235,10 +237,12 @@ function HexaBlockPageContent() {
             editingLevel={editingLevel}
             showMetricsPanel={false}
           />
+          </ErrorBoundary>
         </TabsContent>
 
         {/* Collection Tab */}
         <TabsContent value="collection" className="space-y-4">
+          <ErrorBoundary>
           <div className="grid gap-4 lg:grid-cols-[1fr_400px]">
             <CollectionCurveChart
               levels={levels}
@@ -254,10 +258,12 @@ function HexaBlockPageContent() {
               onForceSync={forceSync}
             />
           </div>
+          </ErrorBoundary>
         </TabsContent>
 
         {/* Play Tab */}
         <TabsContent value="play" className="space-y-4">
+          <ErrorBoundary>
           {playingLevel ? (
             <GameContainer
               key={`game-${gameKey}`}
@@ -305,10 +311,12 @@ function HexaBlockPageContent() {
               </CardContent>
             </Card>
           )}
+          </ErrorBoundary>
         </TabsContent>
 
         {/* Theory Tab */}
         <TabsContent value="theory" className="space-y-6">
+          <ErrorBoundary>
           <Card>
             <CardHeader>
               <CardTitle>Level Design Theory</CardTitle>
@@ -334,6 +342,7 @@ function HexaBlockPageContent() {
               <FlowSawtoothBridge />
             </section>
           </div>
+          </ErrorBoundary>
         </TabsContent>
       </Tabs>
     </div>

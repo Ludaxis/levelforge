@@ -15,6 +15,7 @@ import { FruitMatchLevel, DesignedFruitMatchLevel } from '@/types/fruitMatch';
 import { generateSinkStacks, getRequiredFruitCounts } from '@/lib/fruitMatchUtils';
 import { ArrowLeft, Palette, Layers, Play, BookOpen } from 'lucide-react';
 import Link from 'next/link';
+import { ErrorBoundary } from '@/components/layout/ErrorBoundary';
 
 // ============================================================================
 // Main Page Component
@@ -129,6 +130,7 @@ function FruitMatchPageContent() {
 
         {/* Design Tab (Studio) */}
         <TabsContent value="design" className="h-[calc(100vh-200px)]">
+          <ErrorBoundary>
           <LevelDesignerV2
             onPlayLevel={() => {}}
             onAddToCollection={handleAddToCollection}
@@ -138,10 +140,12 @@ function FruitMatchPageContent() {
             editingLevel={editingLevel}
             existingLevelIds={levels.map((l) => l.name)}
           />
+          </ErrorBoundary>
         </TabsContent>
 
         {/* Collection Tab */}
         <TabsContent value="collection" className="space-y-4">
+          <ErrorBoundary>
           <FruitMatchLevelCollection
             levels={levels}
             onLevelsChange={setLevels}
@@ -161,10 +165,12 @@ function FruitMatchPageContent() {
               }}
             />
           )}
+          </ErrorBoundary>
         </TabsContent>
 
         {/* Theory Tab */}
         <TabsContent value="theory" className="space-y-6">
+          <ErrorBoundary>
           <Card>
             <CardHeader>
               <CardTitle>Game Mechanics</CardTitle>
@@ -247,6 +253,7 @@ function FruitMatchPageContent() {
               </section>
             </CardContent>
           </Card>
+          </ErrorBoundary>
         </TabsContent>
       </Tabs>
     </div>

@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Gamepad2, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
+import { ErrorBoundary } from '@/components/layout/ErrorBoundary';
 
 const defaultConfig: LevelConfig = {
   boardSize: 7,
@@ -98,6 +99,7 @@ export default function Match3Page() {
         </p>
       </div>
 
+      <ErrorBoundary>
       <div className="grid gap-4 lg:gap-6 lg:grid-cols-[350px_1fr]">
         <LevelConfigurator
           config={config}
@@ -120,6 +122,7 @@ export default function Match3Page() {
           </Card>
         )}
       </div>
+      </ErrorBoundary>
     </div>
   );
 }

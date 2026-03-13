@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { BookOpen, Search } from 'lucide-react';
+import { PageHeader } from '@/components/layout/PageHeader';
 
 interface GlossaryTerm {
   term: string;
@@ -330,12 +331,10 @@ export default function GlossaryPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl lg:text-3xl font-bold tracking-tight">Glossary</h1>
-        <p className="text-muted-foreground mt-2">
-          Complete reference of game design terminology used throughout the workbench.
-        </p>
-      </div>
+      <PageHeader
+        title="Glossary"
+        description="Complete reference of game design terminology used throughout the workbench."
+      />
 
       <Card>
         <CardHeader>
