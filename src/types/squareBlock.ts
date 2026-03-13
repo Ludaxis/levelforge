@@ -1,17 +1,5 @@
 import { GridCoord, SquareDirection, SquareAxis } from '@/lib/squareGrid';
 
-// Re-export puzzle analysis types
-export type {
-  PuzzleAnalysis,
-  DifficultyBreakdown,
-} from '@/lib/puzzleAnalyzer';
-
-export {
-  analyzePuzzle,
-  calculateDifficultyScore,
-  quickSolve,
-} from '@/lib/puzzleAnalyzer';
-
 // ============================================================================
 // Core Types
 // ============================================================================
@@ -97,7 +85,7 @@ export type BlockColor = keyof typeof BLOCK_COLORS;
 // ============================================================================
 
 export function generateBlockId(): string {
-  return `block-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `block-${crypto.randomUUID()}`;
 }
 
 export function createBlock(
@@ -117,8 +105,8 @@ export function createBlock(
 // Level Collection Types (for educational features)
 // ============================================================================
 
-export type FlowZone = 'flow' | 'boredom' | 'frustration';
-export type DifficultyTier = 'easy' | 'medium' | 'hard' | 'superHard';
+export type { FlowZone, DifficultyTier } from './shared';
+import type { FlowZone, DifficultyTier } from './shared';
 
 export interface LevelMetrics {
   cellCount: number;
@@ -160,28 +148,8 @@ export interface DesignedLevel {
   createdAt: number;
 }
 
-// Sawtooth cycle expected difficulty for each position (1-10)
-export const SAWTOOTH_EXPECTED: Record<number, DifficultyTier> = {
-  1: 'easy',
-  2: 'easy',
-  3: 'medium',
-  4: 'medium',
-  5: 'hard',
-  6: 'medium',
-  7: 'medium',
-  8: 'hard',
-  9: 'hard',
-  10: 'superHard',
-};
-
-export function getExpectedDifficulty(levelNumber: number): DifficultyTier {
-  const position = ((levelNumber - 1) % 10) + 1;
-  return SAWTOOTH_EXPECTED[position];
-}
-
-export function getSawtoothPosition(levelNumber: number): number {
-  return ((levelNumber - 1) % 10) + 1;
-}
+export { SAWTOOTH_EXPECTED, getExpectedDifficulty, getSawtoothPosition } from './shared';
+import { getExpectedDifficulty } from './shared';
 
 export function calculateFlowZone(
   actualDifficulty: DifficultyTier,
@@ -208,12 +176,7 @@ export function calculateFlowZone(
   return 'boredom';
 }
 
-export function getDifficultyFromClearability(clearability: number): DifficultyTier {
-  if (clearability >= 0.5) return 'easy';
-  if (clearability >= 0.2) return 'medium';
-  if (clearability >= 0.05) return 'hard';
-  return 'superHard';
-}
+export { getDifficultyFromClearability } from './shared';
 
 // ============================================================================
 // Time & Attempt Estimation

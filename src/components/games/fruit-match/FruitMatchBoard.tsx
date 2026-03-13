@@ -162,14 +162,6 @@ export function FruitMatchBoard({ game }: FruitMatchBoardProps) {
       bulletFlightTime: 150, // ms per bullet flight
     };
 
-    console.log('[FruitMatchBoard] Created shooting config:', {
-      id: config.id,
-      launcherId: config.launcherId,
-      source: config.sourcePosition,
-      targetCount: config.targets.length,
-      fruitType: config.fruitType,
-    });
-
     return config;
   }, [launchers, getLauncherMuzzlePosition, getPixelViewportPosition]);
 
@@ -223,13 +215,6 @@ export function FruitMatchBoard({ game }: FruitMatchBoardProps) {
       setShootingConfigs(prev => prev.filter(c => activeLauncherIds.has(c.launcherId)));
     }
   }, [animationState.activeShootings, shootingConfigs, createShootingConfigForLauncher, isComplete, isLost]);
-
-  // Debug log
-  console.log('[FruitMatchBoard] Animation state:', {
-    isShootingActive: animationState.isShootingActive,
-    activeShootingsCount: animationState.activeShootings.length,
-    shootingConfigsCount: shootingConfigs.length,
-  });
 
   return (
     <div ref={boardRef} className="flex flex-col items-center gap-3 p-2 relative">

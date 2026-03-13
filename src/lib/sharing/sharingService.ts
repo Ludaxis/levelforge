@@ -7,9 +7,11 @@ import { DbLevel, DbLevelCollection, DbSharedCollection, GameType } from '../sup
  */
 export function generateShareCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
   let code = '';
   for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+    code += chars.charAt(bytes[i] % chars.length);
   }
   return code;
 }
@@ -106,7 +108,6 @@ export async function createShareLink(
       return { error: insertError.message };
     }
 
-    console.log(`[Sharing] Created share link: ${shareCode}`);
     return {
       shareCode,
       shareUrl: getShareUrl(shareCode),
@@ -169,7 +170,6 @@ export async function getSharedCollection(
       .single();
 
     if (shareError || !share) {
-      console.log('[Sharing] Share not found or not public');
       return null;
     }
 
@@ -277,7 +277,6 @@ export async function revokeShareLink(collectionId: string): Promise<{ success: 
       return { success: false, error: error.message };
     }
 
-    console.log(`[Sharing] Revoked share for collection: ${collectionId}`);
     return { success: true };
   } catch (error) {
     console.error('[Sharing] Error revoking share:', error);

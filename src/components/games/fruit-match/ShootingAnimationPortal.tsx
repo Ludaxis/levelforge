@@ -30,7 +30,6 @@ export function ShootingAnimationPortal({
           total: config.targets.length,
           hasCalledComplete: false,
         });
-        console.log('[ShootingAnimation] New config:', config.id, 'targets:', config.targets.length);
       }
     }
 
@@ -44,8 +43,6 @@ export function ShootingAnimationPortal({
 
   // Handle bullet completion for a specific config
   const handleBulletComplete = useCallback((configId: string, launcherId: string, cell: PixelCell, index: number) => {
-    console.log('[ShootingAnimation] Bullet hit:', configId, index, 'cell:', cell.row, cell.col);
-
     // Fill the pixel
     onPixelHit(cell);
 
@@ -58,7 +55,6 @@ export function ShootingAnimationPortal({
     // Check if all bullets for this config are done
     if (tracking.completed >= tracking.total && !tracking.hasCalledComplete) {
       tracking.hasCalledComplete = true;
-      console.log('[ShootingAnimation] All bullets complete for:', launcherId);
       // Small delay after last impact effect
       setTimeout(() => {
         onComplete(launcherId);

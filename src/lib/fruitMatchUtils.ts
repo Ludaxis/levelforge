@@ -5,12 +5,9 @@ import {
   Launcher,
   LauncherCapacity,
   LAUNCHER_CAPACITIES,
-  FruitMatchLevel,
   FruitMatchLevelMetrics,
   LauncherOrderConfig,
   ALL_FRUITS,
-  FRUIT_EMOJI,
-  FRUIT_COLORS,
   generateTileId,
   generateLauncherId,
   pixelKey,
@@ -311,7 +308,7 @@ export function generateSinkStacks(
 /**
  * Count total tiles in sink
  */
-export function countSinkTiles(sinkStacks: SinkTile[][]): number {
+function countSinkTiles(sinkStacks: SinkTile[][]): number {
   return sinkStacks.reduce((total, stack) => total + stack.length, 0);
 }
 
@@ -599,55 +596,6 @@ export function calculateLevelMetrics(
 }
 
 // ============================================================================
-// Level Generation
-// ============================================================================
-
-/**
- * Create a simple test level with a small pixel art
- */
-export function createSimpleTestLevel(): FruitMatchLevel {
-  // 4x4 pixel art with simple pattern
-  const pixelArt: PixelCell[] = [
-    { row: 0, col: 0, fruitType: 'apple', filled: false },
-    { row: 0, col: 1, fruitType: 'orange', filled: false },
-    { row: 0, col: 2, fruitType: 'orange', filled: false },
-    { row: 0, col: 3, fruitType: 'apple', filled: false },
-    { row: 1, col: 0, fruitType: 'orange', filled: false },
-    { row: 1, col: 1, fruitType: 'banana', filled: false },
-    { row: 1, col: 2, fruitType: 'banana', filled: false },
-    { row: 1, col: 3, fruitType: 'orange', filled: false },
-    { row: 2, col: 0, fruitType: 'orange', filled: false },
-    { row: 2, col: 1, fruitType: 'banana', filled: false },
-    { row: 2, col: 2, fruitType: 'banana', filled: false },
-    { row: 2, col: 3, fruitType: 'orange', filled: false },
-    { row: 3, col: 0, fruitType: 'apple', filled: false },
-    { row: 3, col: 1, fruitType: 'orange', filled: false },
-    { row: 3, col: 2, fruitType: 'orange', filled: false },
-    { row: 3, col: 3, fruitType: 'apple', filled: false },
-  ];
-
-  // Count fruits needed
-  const fruitCounts = getRequiredFruitCounts(
-    pixelArt.map(c => ({ ...c, filled: false }))
-  );
-
-  // Generate sink stacks
-  const sinkStacks = generateSinkStacks(6, fruitCounts, 2, 4);
-
-  return {
-    id: 'test-level-1',
-    name: 'Test Level',
-    pixelArt,
-    pixelArtWidth: 4,
-    pixelArtHeight: 4,
-    sinkWidth: 6,
-    sinkStacks,
-    waitingStandSlots: 7,
-    difficulty: 'easy',
-  };
-}
-
-// ============================================================================
 // Emoji to Pixel Art Conversion
 // ============================================================================
 
@@ -703,8 +651,5 @@ export function emojiPatternToPixelArt(pattern: string[][]): PixelCell[] {
 // ============================================================================
 
 export {
-  FRUIT_EMOJI,
-  FRUIT_COLORS,
-  ALL_FRUITS,
   pixelKey,
 };

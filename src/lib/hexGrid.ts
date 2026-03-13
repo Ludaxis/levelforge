@@ -45,6 +45,16 @@ export const HEX_DIRECTIONS: Record<HexDirection, AxialCoord> = {
 // Direction order for iteration (clockwise from NE)
 export const DIRECTION_ORDER: HexDirection[] = ['NE', 'E', 'SE', 'SW', 'W', 'NW'];
 
+// Rotation angles for each hex direction (pointy-top, degrees)
+export const DIRECTION_ANGLES: Record<HexDirection, number> = {
+  NE: -60,
+  E: 0,
+  SE: 60,
+  SW: 120,
+  W: 180,
+  NW: -120,
+};
+
 // ============================================================================
 // Coordinate Key Utilities
 // ============================================================================

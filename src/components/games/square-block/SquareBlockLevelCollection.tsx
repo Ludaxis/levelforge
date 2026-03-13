@@ -10,13 +10,15 @@ import {
   DifficultyTier,
   FlowZone,
   LevelMetrics,
-  analyzePuzzle,
-  calculateDifficultyScore,
   calculateFlowZone,
   getSawtoothPosition,
   SAWTOOTH_EXPECTED,
   getExpectedDifficulty,
 } from '@/types/squareBlock';
+import {
+  analyzePuzzle,
+  calculateDifficultyScore,
+} from '@/lib/puzzleAnalyzer';
 import { isReferenceFormat, importFromReferenceFormat, exportToReferenceFormat } from '@/lib/squareBlockExport';
 import {
   GridCoord,

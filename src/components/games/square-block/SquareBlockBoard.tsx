@@ -4,6 +4,7 @@ import { useMemo, useEffect, useState, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ZoomIn, ZoomOut, Maximize, Move } from 'lucide-react';
 import { SquareBlockState, SquareBlock, BlockDirection, MAX_MISTAKES } from '@/types/squareBlock';
+import { toGrayscale } from '@/lib/utils';
 import {
   GridCoord,
   SquareDirection,
@@ -42,19 +43,6 @@ const FIXED_CELL_SIZE = 36;
 // ============================================================================
 // Component
 // ============================================================================
-
-// Helper function to convert hex color to grayscale
-function toGrayscale(hexColor: string): string {
-  // Handle non-hex colors
-  if (!hexColor.startsWith('#')) return hexColor;
-
-  const r = parseInt(hexColor.slice(1, 3), 16);
-  const g = parseInt(hexColor.slice(3, 5), 16);
-  const b = parseInt(hexColor.slice(5, 7), 16);
-  // Use luminance formula for perceptually accurate grayscale
-  const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-  return `#${gray.toString(16).padStart(2, '0').repeat(3)}`;
-}
 
 export function SquareBlockBoard({
   state,

@@ -12,6 +12,7 @@ import {
   GameMode,
   StackDirection,
   HexAxis,
+  AXIS_ANGLES,
   Carousel,
   isBidirectional,
   getAxisDirections,
@@ -33,6 +34,7 @@ import {
   HexDirection,
   HEX_DIRECTIONS,
   DIRECTION_ORDER,
+  DIRECTION_ANGLES,
   hexKey,
   createHexagonalGrid,
   axialToPixel,
@@ -49,6 +51,7 @@ import { Settings, Play, Trash2, Shuffle, CheckCircle, AlertTriangle, Dices, Cir
 import { Progress } from '@/components/ui/progress';
 import { LEVEL_TEMPLATES, LevelTemplate } from '@/lib/hexLevelTemplates';
 import { encodeLevel, decodeLevel, downloadLevelJSON, copyToClipboard, importLevelFromJSON } from '@/lib/levelCodec';
+import { FLOW_ZONE_COLORS, DIFFICULTY_BADGE_COLORS, SAWTOOTH_EXPECTED_DISPLAY } from '@/lib/designerConstants';
 
 // Bidirectional axis options
 const AXIS_ORDER: HexAxis[] = ['E_W', 'NE_SW', 'SE_NW'];
@@ -74,23 +77,6 @@ interface HexBlockLevelDesignerProps {
 // Constants for Metrics
 // ============================================================================
 
-const FLOW_ZONE_COLORS = {
-  flow: { bg: 'bg-green-500/20', text: 'text-green-400', border: 'border-green-500/50' },
-  boredom: { bg: 'bg-cyan-500/20', text: 'text-cyan-400', border: 'border-cyan-500/50' },
-  frustration: { bg: 'bg-orange-500/20', text: 'text-orange-400', border: 'border-orange-500/50' },
-};
-
-const DIFFICULTY_BADGE_COLORS = {
-  easy: { bg: 'bg-green-500', text: 'text-white' },
-  medium: { bg: 'bg-yellow-500', text: 'text-black' },
-  hard: { bg: 'bg-orange-500', text: 'text-white' },
-  superHard: { bg: 'bg-red-500', text: 'text-white' },
-};
-
-const SAWTOOTH_EXPECTED_DISPLAY = {
-  1: 'easy', 2: 'easy', 3: 'medium', 4: 'medium', 5: 'hard',
-  6: 'medium', 7: 'medium', 8: 'hard', 9: 'hard', 10: 'superHard',
-} as const;
 
 interface StackConfig {
   direction: HexDirection;
@@ -115,22 +101,6 @@ const DIRECTION_LABELS: Record<StackDirection, string> = {
   E_W: '↔',
   NE_SW: '⤢',
   SE_NW: '⤡',
-};
-
-const DIRECTION_ANGLES: Record<HexDirection, number> = {
-  NE: -60,
-  E: 0,
-  SE: 60,
-  SW: 120,
-  W: 180,
-  NW: -120,
-};
-
-// Angles for bidirectional axes (for rendering)
-const AXIS_ANGLES: Record<HexAxis, number> = {
-  E_W: 0,
-  NE_SW: -60,
-  SE_NW: 60,
 };
 
 // ============================================================================

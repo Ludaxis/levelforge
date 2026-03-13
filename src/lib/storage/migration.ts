@@ -42,7 +42,6 @@ export async function migrateDeviceCollectionToUser(
 
     if (userRows && userRows.length > 0) {
       // User already has a collection, no migration needed
-      console.log(`[Migration] User already has ${gameType} collection, skipping migration`);
       return { success: true, migrated: false };
     }
 
@@ -60,7 +59,6 @@ export async function migrateDeviceCollectionToUser(
     }
 
     if (!deviceRows || deviceRows.length === 0) {
-      console.log(`[Migration] No device collection for ${gameType}, nothing to migrate`);
       return { success: true, migrated: false };
     }
 
@@ -81,7 +79,6 @@ export async function migrateDeviceCollectionToUser(
       return { success: false, migrated: false, error: updateError.message };
     }
 
-    console.log(`[Migration] Successfully migrated ${gameType} collection to user ${userId}`);
     return { success: true, migrated: true };
   } catch (error) {
     console.error('[Migration] Unexpected error:', error);
@@ -89,51 +86,3 @@ export async function migrateDeviceCollectionToUser(
   }
 }
 
-/**
- * Migrate all game types for a user after login
- */
-export async function migrateAllCollectionsToUser(
-  userId: string
-): Promise<{ results: Record<GameType, { success: boolean; migrated: boolean; error?: string }> }> {
-  const gameTypes: GameType[] = ['fruit-match', 'hexa-block', 'square-block'];
-  const results: Record<GameType, { success: boolean; migrated: boolean; error?: string }> = {
-    'fruit-match': { success: false, migrated: false },
-    'hexa-block': { success: false, migrated: false },
-    'square-block': { success: false, migrated: false },
-  };
-
-  for (const gameType of gameTypes) {
-    results[gameType] = await migrateDeviceCollectionToUser(userId, gameType);
-  }
-
-  return { results };
-}
-
-/**
- * Check if device has any collections that can be migrated
- */
-export async function hasDeviceCollections(): Promise<boolean> {
-  const client = getSupabaseClient();
-  if (!client) return false;
-
-  const deviceId = getDeviceId();
-  if (deviceId === 'ssr-placeholder') return false;
-
-  try {
-    const { data, error } = await client
-      .from('level_collections')
-      .select('id')
-      .eq('device_id', deviceId)
-      .limit(1);
-
-    if (error) {
-      console.error('[Migration] Error checking device collections:', error);
-      return false;
-    }
-
-    return (data?.length ?? 0) > 0;
-  } catch (error) {
-    console.error('[Migration] Unexpected error checking device collections:', error);
-    return false;
-  }
-}

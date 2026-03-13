@@ -1,4 +1,4 @@
-import { FlowZone } from './squareBlock';
+import { FlowZone } from './shared';
 
 // ============================================================================
 // Difficulty Tiers (extended for Fruit Match)
@@ -256,11 +256,11 @@ export interface DesignedFruitMatchLevel {
 // ============================================================================
 
 export function generateTileId(): string {
-  return `tile-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `tile-${crypto.randomUUID()}`;
 }
 
 export function generateLauncherId(): string {
-  return `launcher-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `launcher-${crypto.randomUUID()}`;
 }
 
 export function pixelKey(row: number, col: number): string {

@@ -62,7 +62,6 @@ export function createSupabaseStorageProvider<T extends BaseLevel>(
           return null;
         }
 
-        console.log('[Supabase] Created new user collection:', created?.id);
         return created?.id ?? null;
       }
 
@@ -104,7 +103,6 @@ export function createSupabaseStorageProvider<T extends BaseLevel>(
         return null;
       }
 
-      console.log('[Supabase] Created new device collection:', created?.id);
       return created?.id ?? null;
     } catch (error) {
       console.error('[Supabase] Error in getOrCreateCollectionId:', error);
@@ -186,7 +184,6 @@ export function createSupabaseStorageProvider<T extends BaseLevel>(
           .update({ updated_at: new Date().toISOString() })
           .eq('id', collectionId);
 
-        console.log(`[Supabase] Saved ${levels.length} levels for ${gameType}`);
       } catch (error) {
         console.error('[Supabase] Error saving levels:', error);
         throw error;

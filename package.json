@@ -1,5 +1,5 @@
 {
-  "name": "echo-level-workbench",
+  "name": "levelforge",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -23,14 +23,12 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.93.2",
-    "@twemoji/api": "^17.0.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "gsap": "^3.14.2",
     "lucide-react": "^0.562.0",
     "next": "16.1.1",
     "next-themes": "^0.4.6",
-    "pixelit": "^0.1.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "recharts": "^2.15.4",

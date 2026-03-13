@@ -19,7 +19,6 @@ export function getSupabaseClient(): SupabaseClient | null {
 
   // Check if Supabase is configured
   if (!supabaseUrl || !supabaseAnonKey) {
-    console.log('[Supabase] Not configured - using localStorage only');
     return null;
   }
 
@@ -32,7 +31,6 @@ export function getSupabaseClient(): SupabaseClient | null {
   try {
     // Use createBrowserClient for proper cookie-based session handling
     supabaseClient = createBrowserClient(supabaseUrl, supabaseAnonKey);
-    console.log('[Supabase] Client initialized successfully');
     return supabaseClient;
   } catch (error) {
     console.error('[Supabase] Failed to initialize client:', error);
@@ -63,10 +61,8 @@ export function getDeviceId(): string {
   let deviceId = localStorage.getItem(DEVICE_ID_KEY);
 
   if (!deviceId) {
-    // Generate a new UUID-like device ID
-    deviceId = `device-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+    deviceId = `device-${crypto.randomUUID()}`;
     localStorage.setItem(DEVICE_ID_KEY, deviceId);
-    console.log('[Supabase] Generated new device ID:', deviceId);
   }
 
   return deviceId;

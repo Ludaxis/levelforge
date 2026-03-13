@@ -387,6 +387,3 @@ export const LEVEL_TEMPLATES: LevelTemplate[] = [
   centerHoleTemplate,
 ];
 
-export function getTemplateById(id: string): LevelTemplate | undefined {
-  return LEVEL_TEMPLATES.find((t) => t.id === id);
-}

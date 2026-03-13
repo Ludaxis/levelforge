@@ -52,7 +52,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Subscribe to auth state changes
     const { unsubscribe } = onAuthStateChange((event, session) => {
-      console.log('[Auth] State change:', event, session?.user?.email);
       setUser(session?.user ?? null);
     });
 

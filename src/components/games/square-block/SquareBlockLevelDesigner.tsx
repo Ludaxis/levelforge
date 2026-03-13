@@ -19,10 +19,12 @@ import {
   getSawtoothPosition,
   getExpectedDifficulty,
   estimateLevel,
+} from '@/types/squareBlock';
+import {
   analyzePuzzle,
   calculateDifficultyScore,
   quickSolve as analyzerQuickSolve,
-} from '@/types/squareBlock';
+} from '@/lib/puzzleAnalyzer';
 import {
   GridCoord,
   SquareDirection,
@@ -49,8 +51,10 @@ import {
   ZoomIn, ZoomOut, Maximize, Move
 } from 'lucide-react';
 import { downloadLevelAsJSON, parseAndImportLevel } from '@/lib/squareBlockExport';
+import { toGrayscale } from '@/lib/utils';
 import { CollectionMetadata } from '@/lib/storage/types';
 import { DeadlockInfo, StuckReason, RootCauseType } from '@/lib/useSquareBlockGame';
+import { FLOW_ZONE_COLORS, DIFFICULTY_BADGE_COLORS, SAWTOOTH_EXPECTED_DISPLAY } from '@/lib/designerConstants';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -77,33 +81,6 @@ const DIRECTION_LABELS: Record<BlockDirection, string> = {
   E_W: '↔',
 };
 
-const FLOW_ZONE_COLORS = {
-  flow: { bg: 'bg-green-500/20', text: 'text-green-400', border: 'border-green-500/50' },
-  boredom: { bg: 'bg-cyan-500/20', text: 'text-cyan-400', border: 'border-cyan-500/50' },
-  frustration: { bg: 'bg-orange-500/20', text: 'text-orange-400', border: 'border-orange-500/50' },
-};
-
-const DIFFICULTY_BADGE_COLORS = {
-  easy: { bg: 'bg-green-500', text: 'text-white' },
-  medium: { bg: 'bg-yellow-500', text: 'text-black' },
-  hard: { bg: 'bg-orange-500', text: 'text-white' },
-  superHard: { bg: 'bg-red-500', text: 'text-white' },
-};
-
-const SAWTOOTH_EXPECTED_DISPLAY = {
-  1: 'easy', 2: 'easy', 3: 'medium', 4: 'medium', 5: 'hard',
-  6: 'medium', 7: 'medium', 8: 'hard', 9: 'hard', 10: 'superHard',
-} as const;
-
-// Helper function to convert hex color to grayscale
-function toGrayscale(hexColor: string): string {
-  if (!hexColor.startsWith('#')) return hexColor;
-  const r = parseInt(hexColor.slice(1, 3), 16);
-  const g = parseInt(hexColor.slice(3, 5), 16);
-  const b = parseInt(hexColor.slice(5, 7), 16);
-  const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-  return `#${gray.toString(16).padStart(2, '0').repeat(3)}`;
-}
 
 // ============================================================================
 // Types

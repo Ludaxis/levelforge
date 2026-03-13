@@ -154,17 +154,14 @@ export function useSyncedLevelCollection<T extends BaseLevel>(
               levelsRef.current = migrated;
               // Also save to localStorage
               await localProvider.current.saveLevels(migrated);
-              console.log(`[Sync] Loaded ${migrated.length} levels from Supabase`);
             } else if (localLevels.length > 0) {
               // Local data exists - push to remote if different
               const localJson = JSON.stringify(localLevels);
               const remoteJson = JSON.stringify(remoteLevels);
               if (localJson !== remoteJson) {
-                console.log('[Sync] Local data differs from remote, pushing local→remote');
                 isSyncingRef.current = true;
                 try {
                   await supabaseProvider.current.saveLevels(localLevels);
-                  console.log('[Sync] Pushed local data to Supabase');
                 } catch (pushError) {
                   console.error('[Sync] Failed to push local→remote:', pushError);
                 } finally {

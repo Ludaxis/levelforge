@@ -99,30 +99,11 @@ export function encodeLevel(
   return header + base64;
 }
 
-/**
- * Encode a DesignedLevel to a shareable code
- */
-export function encodeDesignedLevel(level: DesignedLevel): string {
-  const stackMap = new Map<string, HexStack>();
-  for (const stack of level.stacks) {
-    stackMap.set(`${stack.coord.q},${stack.coord.r}`, stack);
-  }
-
-  const holesSet = new Set<string>();
-  if (level.holes) {
-    for (const hole of level.holes) {
-      holesSet.add(`${hole.q},${hole.r}`);
-    }
-  }
-
-  return encodeLevel(level.gridRadius, level.gameMode, stackMap, holesSet);
-}
-
 // ============================================================================
 // Decoding
 // ============================================================================
 
-export interface DecodedLevel {
+interface DecodedLevel {
   gridRadius: number;
   gameMode: GameMode;
   stacks: HexStack[];
@@ -213,7 +194,7 @@ export function decodeLevel(code: string): DecodedLevel | null {
 // JSON Export/Import
 // ============================================================================
 
-export interface ExportedLevel {
+interface ExportedLevel {
   version: string;
   level: {
     name: string;
@@ -234,7 +215,7 @@ export interface ExportedLevel {
 /**
  * Export a DesignedLevel to JSON format
  */
-export function exportLevelToJSON(level: DesignedLevel, designer?: string): ExportedLevel {
+function exportLevelToJSON(level: DesignedLevel, designer?: string): ExportedLevel {
   return {
     version: '1.0',
     level: {

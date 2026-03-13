@@ -7,6 +7,13 @@ import { AxialCoord, HexDirection } from '@/lib/hexGrid';
 // Bidirectional axis (two opposite directions)
 export type HexAxis = 'NE_SW' | 'E_W' | 'SE_NW';
 
+// Rotation angles for bidirectional axes (for rendering, degrees)
+export const AXIS_ANGLES: Record<HexAxis, number> = {
+  E_W: 0,
+  NE_SW: -60,
+  SE_NW: 60,
+};
+
 // Direction can be single or bidirectional
 export type StackDirection = HexDirection | HexAxis;
 
@@ -46,7 +53,7 @@ export function sortArmsClockwise(arms: HexDirection[]): HexDirection[] {
 
 // Generate unique carousel ID
 export function generateCarouselId(): string {
-  return `carousel-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `carousel-${crypto.randomUUID()}`;
 }
 
 export interface HexStack {
@@ -133,7 +140,7 @@ export type StackColor = keyof typeof STACK_COLORS;
 // ============================================================================
 
 export function generateStackId(): string {
-  return `stack-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `stack-${crypto.randomUUID()}`;
 }
 
 export function createStack(
@@ -155,8 +162,8 @@ export function createStack(
 // Level Collection Types (for educational features)
 // ============================================================================
 
-export type FlowZone = 'flow' | 'boredom' | 'frustration';
-export type DifficultyTier = 'easy' | 'medium' | 'hard' | 'superHard';
+export type { FlowZone, DifficultyTier } from './shared';
+import type { FlowZone, DifficultyTier } from './shared';
 
 export interface LevelMetrics {
   cellCount: number;           // Number of hex cells
@@ -187,30 +194,8 @@ export interface DesignedLevel {
   createdAt: number;           // Timestamp
 }
 
-// Sawtooth cycle expected difficulty for each position (1-10)
-export const SAWTOOTH_EXPECTED: Record<number, DifficultyTier> = {
-  1: 'easy',
-  2: 'easy',
-  3: 'medium',
-  4: 'medium',
-  5: 'hard',
-  6: 'medium',
-  7: 'medium',
-  8: 'hard',
-  9: 'hard',
-  10: 'superHard',
-};
-
-// Get expected difficulty for a level number
-export function getExpectedDifficulty(levelNumber: number): DifficultyTier {
-  const position = ((levelNumber - 1) % 10) + 1;
-  return SAWTOOTH_EXPECTED[position];
-}
-
-// Get sawtooth position (1-10) from level number
-export function getSawtoothPosition(levelNumber: number): number {
-  return ((levelNumber - 1) % 10) + 1;
-}
+export { SAWTOOTH_EXPECTED, getExpectedDifficulty, getSawtoothPosition } from './shared';
+import { getExpectedDifficulty } from './shared';
 
 // Calculate flow zone based on actual vs expected difficulty
 export function calculateFlowZone(
@@ -234,13 +219,7 @@ export function calculateFlowZone(
   return 'flow';                        // Matches expectation (+/- 1)
 }
 
-// Get difficulty tier from clearability ratio only (legacy)
-export function getDifficultyFromClearability(clearability: number): DifficultyTier {
-  if (clearability >= 0.5) return 'easy';
-  if (clearability >= 0.2) return 'medium';
-  if (clearability >= 0.05) return 'hard';
-  return 'superHard';
-}
+export { getDifficultyFromClearability } from './shared';
 
 // ============================================================================
 // Time & Attempt Estimation (based on industry benchmarks)

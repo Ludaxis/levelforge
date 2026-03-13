@@ -6,6 +6,7 @@ import {
   AnimationData,
   StackDirection,
   HexAxis,
+  AXIS_ANGLES,
   Carousel,
   isBidirectional,
 } from '@/types/hexaBlock';
@@ -13,6 +14,7 @@ import {
   AxialCoord,
   HexDirection,
   HEX_DIRECTIONS,
+  DIRECTION_ANGLES,
   hexKey,
   createHexagonalGrid,
   axialToPixel,
@@ -45,20 +47,6 @@ interface HexBlockBoardProps {
 // ============================================================================
 
 const HEX_SIZE = 40;
-const DIRECTION_ANGLES: Record<HexDirection, number> = {
-  NE: -60,
-  E: 0,
-  SE: 60,
-  SW: 120,
-  W: 180,
-  NW: -120,
-};
-
-const AXIS_ANGLES: Record<HexAxis, number> = {
-  E_W: 0,
-  NE_SW: -60,
-  SE_NW: 60,
-};
 
 // ============================================================================
 // Component
@@ -308,7 +296,7 @@ export function HexBlockBoard({
                 ...animationStyle,
               }}
               className={cn(
-                isAnimating && animationPhase === 'bouncing' && 'animate-hex-bounce'
+                isAnimating && animationPhase === 'bouncing' && 'animate-block-bounce'
               )}
             >
               {/* Single hex cell */}
