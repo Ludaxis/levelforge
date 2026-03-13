@@ -3,7 +3,6 @@ import {
   analyzePuzzle,
   calculateDifficultyScore,
   quickSolve,
-  DEFAULT_WEIGHTS,
   PuzzleAnalysis,
   DifficultyBreakdown,
 } from '../puzzleAnalyzer';
@@ -41,484 +40,291 @@ function createHoleSet(holes: GridCoord[]): Set<string> {
   return new Set(holes.map(gridKey));
 }
 
+/**
+ * Creates a full PuzzleAnalysis object with all required fields.
+ * Any fields not provided will get sensible defaults.
+ */
+function createFullAnalysis(overrides: Partial<PuzzleAnalysis> & { solvable: boolean; blockCount: number }): PuzzleAnalysis {
+  const blockCount = overrides.blockCount;
+  return {
+    solvable: overrides.solvable,
+    blockCount,
+    holeCount: overrides.holeCount ?? 0,
+    lockedCount: overrides.lockedCount ?? 0,
+    icedCount: overrides.icedCount ?? 0,
+    totalIceCount: overrides.totalIceCount ?? 0,
+    mirrorCount: overrides.mirrorCount ?? 0,
+    gridSize: overrides.gridSize ?? 100,
+    density: overrides.density ?? blockCount / 100,
+    solutionCount: overrides.solutionCount ?? 1,
+    minMoves: overrides.minMoves ?? blockCount,
+    avgBranchingFactor: overrides.avgBranchingFactor ?? 1,
+    minBranchingFactor: overrides.minBranchingFactor ?? 1,
+    forcedMoveCount: overrides.forcedMoveCount ?? blockCount,
+    forcedMoveRatio: overrides.forcedMoveRatio ?? 1,
+    solutionDepth: overrides.solutionDepth ?? blockCount,
+    maxChainLength: overrides.maxChainLength ?? blockCount,
+    initialClearable: overrides.initialClearable ?? blockCount,
+    initialClearability: overrides.initialClearability ?? 1,
+    hasCriticalPath: overrides.hasCriticalPath ?? false,
+    bottleneckCount: overrides.bottleneckCount ?? 0,
+    totalBlockers: overrides.totalBlockers ?? 0,
+    avgBlockers: overrides.avgBlockers ?? 0,
+    uniqueDirections: overrides.uniqueDirections ?? 1,
+    directionVariety: overrides.directionVariety ?? 1 / 6,
+    bidirectionalRatio: overrides.bidirectionalRatio ?? 0,
+  };
+}
+
 // ============================================================================
 // Difficulty Score Formula Tests
+//
+// The current formula (from puzzleAnalyzer.ts):
+//   avgBlockersScore = avgBlockers * 4.5           (uncapped, primary factor)
+//   clearabilityScore = (1 - clearability) * 20    (0-20 range)
+//   blockCountScore = min(blockCount / 40, 10)     (0-10 range)
+//   lockedBonus = min(lockedCount, 5)              (0-5 range)
+//   icedBonus = min(icedCount, 5)                  (0-5 range)
+//   avgIceBonus = min(avgIceCount * 0.5, 5)        (0-5 range)
+//   mirrorBonus = min(mirrorCount, 5)              (0-5 range)
+//   sizeBonus = blockCount > 400 ? min((blockCount-400)/20, 20) : 0
+//   score = min(sum, 100)
+//
+// Components stored: avgBlockers, clearability, blockCount, lockedCount,
+//   icedCount, avgIceCount, mirrorCount, sizeBonus
+//
+// Tiers: 0-24 easy, 25-49 medium, 50-74 hard, 75+ superHard
 // ============================================================================
 
 describe('Difficulty Score Formula', () => {
-  describe('Blockers Component (0-50 pts)', () => {
-    it('should give 0 pts for 0 avg blockers', () => {
-      const analysis: PuzzleAnalysis = {
+  describe('avgBlockers Component (avgBlockers * 4.5)', () => {
+    it('should give 0 score for 0 avg blockers', () => {
+      const analysis = createFullAnalysis({
         solvable: true,
         blockCount: 10,
-        holeCount: 0,
-        lockedCount: 0,
-        gridSize: 25,
-        density: 0.4,
-        solutionCount: 1,
-        minMoves: 10,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: 10,
-        forcedMoveRatio: 1,
-        solutionDepth: 10,
-        maxChainLength: 10,
-        initialClearable: 10,
-        initialClearability: 1,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 0,
         avgBlockers: 0,
-      };
+        totalBlockers: 0,
+        initialClearability: 1,
+        initialClearable: 10,
+        gridSize: 25,
+      });
       const result = calculateDifficultyScore(analysis);
-      expect(result.components.blockers).toBe(0);
+      expect(result.components.avgBlockers).toBe(0);
     });
 
-    it('should give 10 pts for 1 avg blocker', () => {
-      const analysis: PuzzleAnalysis = {
+    it('should store avgBlockers value directly in components', () => {
+      const analysis = createFullAnalysis({
         solvable: true,
         blockCount: 10,
-        holeCount: 0,
-        lockedCount: 0,
-        gridSize: 25,
-        density: 0.4,
-        solutionCount: 1,
-        minMoves: 10,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: 10,
-        forcedMoveRatio: 1,
-        solutionDepth: 10,
-        maxChainLength: 10,
-        initialClearable: 10,
-        initialClearability: 1,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 10,
         avgBlockers: 1,
-      };
+        totalBlockers: 10,
+        initialClearability: 1,
+        initialClearable: 10,
+        gridSize: 25,
+      });
       const result = calculateDifficultyScore(analysis);
-      expect(result.components.blockers).toBe(10);
+      // components.avgBlockers stores the raw value, score contribution = avgBlockers * 4.5
+      expect(result.components.avgBlockers).toBe(1);
     });
 
-    it('should give 20 pts for 2 avg blockers', () => {
-      const analysis: PuzzleAnalysis = {
+    it('should store avgBlockers = 2 in components for 2 avg blockers', () => {
+      const analysis = createFullAnalysis({
         solvable: true,
         blockCount: 10,
-        holeCount: 0,
-        lockedCount: 0,
-        gridSize: 25,
-        density: 0.4,
-        solutionCount: 1,
-        minMoves: 10,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: 10,
-        forcedMoveRatio: 1,
-        solutionDepth: 10,
-        maxChainLength: 10,
-        initialClearable: 10,
-        initialClearability: 1,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 20,
         avgBlockers: 2,
-      };
+        totalBlockers: 20,
+        initialClearability: 1,
+        initialClearable: 10,
+        gridSize: 25,
+      });
       const result = calculateDifficultyScore(analysis);
-      expect(result.components.blockers).toBe(20);
+      expect(result.components.avgBlockers).toBe(2);
     });
 
-    it('should give 30 pts for 3 avg blockers', () => {
-      const analysis: PuzzleAnalysis = {
+    it('should store avgBlockers = 5 in components for 5 avg blockers', () => {
+      const analysis = createFullAnalysis({
         solvable: true,
         blockCount: 10,
-        holeCount: 0,
-        lockedCount: 0,
-        gridSize: 25,
-        density: 0.4,
-        solutionCount: 1,
-        minMoves: 10,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: 10,
-        forcedMoveRatio: 1,
-        solutionDepth: 10,
-        maxChainLength: 10,
-        initialClearable: 10,
-        initialClearability: 1,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 30,
-        avgBlockers: 3,
-      };
-      const result = calculateDifficultyScore(analysis);
-      expect(result.components.blockers).toBe(30);
-    });
-
-    it('should give 40 pts for 4 avg blockers', () => {
-      const analysis: PuzzleAnalysis = {
-        solvable: true,
-        blockCount: 10,
-        holeCount: 0,
-        lockedCount: 0,
-        gridSize: 25,
-        density: 0.4,
-        solutionCount: 1,
-        minMoves: 10,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: 10,
-        forcedMoveRatio: 1,
-        solutionDepth: 10,
-        maxChainLength: 10,
-        initialClearable: 10,
-        initialClearability: 1,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 40,
-        avgBlockers: 4,
-      };
-      const result = calculateDifficultyScore(analysis);
-      expect(result.components.blockers).toBe(40);
-    });
-
-    it('should give 50 pts for 5+ avg blockers (capped)', () => {
-      const analysis: PuzzleAnalysis = {
-        solvable: true,
-        blockCount: 10,
-        holeCount: 0,
-        lockedCount: 0,
-        gridSize: 25,
-        density: 0.4,
-        solutionCount: 1,
-        minMoves: 10,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: 10,
-        forcedMoveRatio: 1,
-        solutionDepth: 10,
-        maxChainLength: 10,
-        initialClearable: 10,
-        initialClearability: 1,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 50,
         avgBlockers: 5,
-      };
+        totalBlockers: 50,
+        initialClearability: 1,
+        initialClearable: 10,
+        gridSize: 25,
+      });
       const result = calculateDifficultyScore(analysis);
-      expect(result.components.blockers).toBe(50);
+      expect(result.components.avgBlockers).toBe(5);
     });
 
-    it('should cap at 50 pts for 10 avg blockers', () => {
-      const analysis: PuzzleAnalysis = {
+    it('should not cap avgBlockers in components (uncapped in formula)', () => {
+      const analysis = createFullAnalysis({
         solvable: true,
         blockCount: 10,
-        holeCount: 0,
-        lockedCount: 0,
-        gridSize: 25,
-        density: 0.4,
-        solutionCount: 1,
-        minMoves: 10,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: 10,
-        forcedMoveRatio: 1,
-        solutionDepth: 10,
-        maxChainLength: 10,
-        initialClearable: 10,
-        initialClearability: 1,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 100,
         avgBlockers: 10,
-      };
+        totalBlockers: 100,
+        initialClearability: 1,
+        initialClearable: 10,
+        gridSize: 25,
+      });
       const result = calculateDifficultyScore(analysis);
-      expect(result.components.blockers).toBe(50);
+      expect(result.components.avgBlockers).toBe(10);
     });
   });
 
-  describe('Locked Component (0-25 pts)', () => {
-    it('should give 0 pts for 0% locked', () => {
-      const analysis: PuzzleAnalysis = {
+  describe('Locked Component (min(lockedCount, 5))', () => {
+    it('should give 0 for 0 locked blocks', () => {
+      const analysis = createFullAnalysis({
         solvable: true,
         blockCount: 100,
-        holeCount: 0,
         lockedCount: 0,
-        gridSize: 100,
-        density: 1,
-        solutionCount: 1,
-        minMoves: 100,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: 100,
-        forcedMoveRatio: 1,
-        solutionDepth: 100,
-        maxChainLength: 100,
-        initialClearable: 100,
         initialClearability: 1,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 0,
-        avgBlockers: 0,
-      };
+        initialClearable: 100,
+      });
       const result = calculateDifficultyScore(analysis);
-      expect(result.components.lockedPercent).toBe(0);
+      expect(result.components.lockedCount).toBe(0);
     });
 
-    it('should give ~8.3 pts for 10% locked (threshold 30%)', () => {
-      const analysis: PuzzleAnalysis = {
+    it('should store lockedCount = 3 for 3 locked blocks', () => {
+      const analysis = createFullAnalysis({
         solvable: true,
         blockCount: 100,
-        holeCount: 0,
-        lockedCount: 10,
-        gridSize: 100,
-        density: 1,
-        solutionCount: 1,
-        minMoves: 100,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: 100,
-        forcedMoveRatio: 1,
-        solutionDepth: 100,
-        maxChainLength: 100,
-        initialClearable: 100,
+        lockedCount: 3,
         initialClearability: 1,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 0,
-        avgBlockers: 0,
-      };
+        initialClearable: 100,
+      });
       const result = calculateDifficultyScore(analysis);
-      // 10%/30% * 25 = 8.33
-      expect(result.components.lockedPercent).toBeCloseTo(8.33, 1);
+      expect(result.components.lockedCount).toBe(3);
     });
 
-    it('should give 25 pts for 30%+ locked (capped)', () => {
-      const analysis: PuzzleAnalysis = {
+    it('should store lockedCount = 5 for 5 locked blocks', () => {
+      const analysis = createFullAnalysis({
         solvable: true,
         blockCount: 100,
-        holeCount: 0,
-        lockedCount: 30,
-        gridSize: 100,
-        density: 1,
-        solutionCount: 1,
-        minMoves: 100,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: 100,
-        forcedMoveRatio: 1,
-        solutionDepth: 100,
-        maxChainLength: 100,
-        initialClearable: 100,
+        lockedCount: 5,
         initialClearability: 1,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 0,
-        avgBlockers: 0,
-      };
+        initialClearable: 100,
+      });
       const result = calculateDifficultyScore(analysis);
-      expect(result.components.lockedPercent).toBe(25);
+      expect(result.components.lockedCount).toBe(5);
     });
 
-    it('should cap at 25 pts for 50% locked', () => {
-      const analysis: PuzzleAnalysis = {
+    it('should store lockedCount = 50 for 50 locked blocks (raw value, capped in scoring)', () => {
+      const analysis = createFullAnalysis({
         solvable: true,
         blockCount: 100,
-        holeCount: 0,
         lockedCount: 50,
-        gridSize: 100,
-        density: 1,
-        solutionCount: 1,
-        minMoves: 100,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: 100,
-        forcedMoveRatio: 1,
-        solutionDepth: 100,
-        maxChainLength: 100,
-        initialClearable: 100,
         initialClearability: 1,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 0,
-        avgBlockers: 0,
-      };
+        initialClearable: 100,
+      });
       const result = calculateDifficultyScore(analysis);
-      expect(result.components.lockedPercent).toBe(25);
+      // components.lockedCount stores the raw analysis value
+      expect(result.components.lockedCount).toBe(50);
     });
   });
 
-  describe('Clearability Component (0-25 pts)', () => {
-    it('should give 0 pts for 100% clearable', () => {
-      const analysis: PuzzleAnalysis = {
+  describe('Clearability Component ((1 - clearability) * 20)', () => {
+    it('should store clearability = 1 for 100% clearable', () => {
+      const analysis = createFullAnalysis({
         solvable: true,
         blockCount: 10,
-        holeCount: 0,
-        lockedCount: 0,
-        gridSize: 25,
-        density: 0.4,
-        solutionCount: 1,
-        minMoves: 10,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: 10,
-        forcedMoveRatio: 1,
-        solutionDepth: 10,
-        maxChainLength: 10,
         initialClearable: 10,
         initialClearability: 1,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 0,
-        avgBlockers: 0,
-      };
+        gridSize: 25,
+      });
+      const result = calculateDifficultyScore(analysis);
+      // components.clearability stores the raw initialClearability value
+      expect(result.components.clearability).toBe(1);
+    });
+
+    it('should store clearability = 0.5 for 50% clearable', () => {
+      const analysis = createFullAnalysis({
+        solvable: true,
+        blockCount: 10,
+        initialClearable: 5,
+        initialClearability: 0.5,
+        gridSize: 25,
+      });
+      const result = calculateDifficultyScore(analysis);
+      expect(result.components.clearability).toBe(0.5);
+    });
+
+    it('should store clearability = 0 for 0% clearable', () => {
+      const analysis = createFullAnalysis({
+        solvable: true,
+        blockCount: 10,
+        initialClearable: 0,
+        initialClearability: 0,
+        gridSize: 25,
+      });
       const result = calculateDifficultyScore(analysis);
       expect(result.components.clearability).toBe(0);
     });
-
-    it('should give 12.5 pts for 50% clearable', () => {
-      const analysis: PuzzleAnalysis = {
-        solvable: true,
-        blockCount: 10,
-        holeCount: 0,
-        lockedCount: 0,
-        gridSize: 25,
-        density: 0.4,
-        solutionCount: 1,
-        minMoves: 10,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: 10,
-        forcedMoveRatio: 1,
-        solutionDepth: 10,
-        maxChainLength: 10,
-        initialClearable: 5,
-        initialClearability: 0.5,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 0,
-        avgBlockers: 0,
-      };
-      const result = calculateDifficultyScore(analysis);
-      expect(result.components.clearability).toBe(12.5);
-    });
-
-    it('should give 25 pts for 0% clearable', () => {
-      const analysis: PuzzleAnalysis = {
-        solvable: true,
-        blockCount: 10,
-        holeCount: 0,
-        lockedCount: 0,
-        gridSize: 25,
-        density: 0.4,
-        solutionCount: 1,
-        minMoves: 10,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: 10,
-        forcedMoveRatio: 1,
-        solutionDepth: 10,
-        maxChainLength: 10,
-        initialClearable: 0,
-        initialClearability: 0,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 0,
-        avgBlockers: 0,
-      };
-      const result = calculateDifficultyScore(analysis);
-      expect(result.components.clearability).toBe(25);
-    });
   });
 
-  describe('Size Bonus Component (reduces difficulty for small puzzles)', () => {
-    function createAnalysisWithBlockCount(blockCount: number): PuzzleAnalysis {
-      return {
+  describe('Size Bonus Component (large puzzle bonus, 400+ blocks)', () => {
+    it('should give 0 sizeBonus for small puzzles (< 400 blocks)', () => {
+      const analysis = createFullAnalysis({
         solvable: true,
-        blockCount,
-        holeCount: 0,
-        lockedCount: 0,
-        gridSize: 100,
-        density: blockCount / 100,
-        solutionCount: 1,
-        minMoves: blockCount,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: blockCount,
-        forcedMoveRatio: 1,
-        solutionDepth: blockCount,
-        maxChainLength: blockCount,
-        initialClearable: blockCount,
+        blockCount: 5,
         initialClearability: 1,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 0,
-        avgBlockers: 0,
-      };
-    }
-
-    it('should give -25 pts bonus for < 10 blocks', () => {
-      const analysis = createAnalysisWithBlockCount(5);
-      const result = calculateDifficultyScore(analysis);
-      expect(result.components.sizeBonus).toBe(-25);
-    });
-
-    it('should give -20 pts bonus for 10-19 blocks', () => {
-      const analysis = createAnalysisWithBlockCount(15);
-      const result = calculateDifficultyScore(analysis);
-      expect(result.components.sizeBonus).toBe(-20);
-    });
-
-    it('should give -15 pts bonus for 20-29 blocks', () => {
-      const analysis = createAnalysisWithBlockCount(25);
-      const result = calculateDifficultyScore(analysis);
-      expect(result.components.sizeBonus).toBe(-15);
-    });
-
-    it('should give -10 pts bonus for 30-49 blocks', () => {
-      const analysis = createAnalysisWithBlockCount(35);
-      const result = calculateDifficultyScore(analysis);
-      expect(result.components.sizeBonus).toBe(-10);
-    });
-
-    it('should give 0 pts bonus for 50+ blocks', () => {
-      const analysis = createAnalysisWithBlockCount(55);
+        initialClearable: 5,
+      });
       const result = calculateDifficultyScore(analysis);
       expect(result.components.sizeBonus).toBe(0);
     });
 
-    it('should reduce final score by size bonus', () => {
-      // Create puzzle with some difficulty but small size
-      const analysis: PuzzleAnalysis = {
+    it('should give 0 sizeBonus for 50 blocks', () => {
+      const analysis = createFullAnalysis({
         solvable: true,
-        blockCount: 5, // Small = -25 bonus
-        holeCount: 0,
-        lockedCount: 2, // 40% locked = 25 pts (capped at 30%)
-        gridSize: 25,
-        density: 0.2,
-        solutionCount: 1,
-        minMoves: 5,
-        avgBranchingFactor: 1,
-        minBranchingFactor: 1,
-        forcedMoveCount: 5,
-        forcedMoveRatio: 1,
-        solutionDepth: 5,
-        maxChainLength: 5,
-        initialClearable: 0, // 0% clearable = 25 pts
-        initialClearability: 0,
-        hasCriticalPath: false,
-        bottleneckCount: 0,
-        totalBlockers: 15, // 3 avg = 30 pts
-        avgBlockers: 3,
-      };
+        blockCount: 50,
+        initialClearability: 1,
+        initialClearable: 50,
+      });
       const result = calculateDifficultyScore(analysis);
-      // Raw: 30 + 25 + 25 = 80
-      // With size bonus: 80 - 25 = 55
-      expect(result.score).toBe(55);
+      expect(result.components.sizeBonus).toBe(0);
+    });
+
+    it('should give 0 sizeBonus for 400 blocks (boundary)', () => {
+      const analysis = createFullAnalysis({
+        solvable: true,
+        blockCount: 400,
+        initialClearability: 1,
+        initialClearable: 400,
+      });
+      const result = calculateDifficultyScore(analysis);
+      expect(result.components.sizeBonus).toBe(0);
+    });
+
+    it('should give 10 sizeBonus for 600 blocks', () => {
+      const analysis = createFullAnalysis({
+        solvable: true,
+        blockCount: 600,
+        initialClearability: 1,
+        initialClearable: 600,
+      });
+      const result = calculateDifficultyScore(analysis);
+      // (600 - 400) / 20 = 10
+      expect(result.components.sizeBonus).toBe(10);
+    });
+
+    it('should cap sizeBonus at 20 for very large puzzles (800+ blocks)', () => {
+      const analysis = createFullAnalysis({
+        solvable: true,
+        blockCount: 1000,
+        initialClearability: 1,
+        initialClearable: 1000,
+      });
+      const result = calculateDifficultyScore(analysis);
+      // min((1000-400)/20, 20) = min(30, 20) = 20
+      expect(result.components.sizeBonus).toBe(20);
     });
 
     it('should not go below 0', () => {
-      const analysis = createAnalysisWithBlockCount(5); // -20 bonus, 0 raw score
+      const analysis = createFullAnalysis({
+        solvable: true,
+        blockCount: 5,
+        initialClearability: 1,
+        initialClearable: 5,
+      });
       const result = calculateDifficultyScore(analysis);
       expect(result.score).toBeGreaterThanOrEqual(0);
     });
@@ -527,72 +333,95 @@ describe('Difficulty Score Formula', () => {
 
 // ============================================================================
 // Difficulty Tier Tests
+// Tiers: 0-24 easy, 25-49 medium, 50-74 hard, 75+ superHard
 // ============================================================================
 
 describe('Difficulty Tiers', () => {
-  function createAnalysisWithScore(avgBlockers: number, lockedPct: number, clearability: number): PuzzleAnalysis {
-    const blockCount = 100;
-    return {
+  it('should return "easy" tier for score < 25', () => {
+    // 0 blockers (0pts) + 0 locked (0pts) + 100% clearable (0pts) + blockCount 10/40=0.25pts
+    const analysis = createFullAnalysis({
       solvable: true,
-      blockCount,
-      holeCount: 0,
-      lockedCount: Math.round(blockCount * lockedPct),
-      gridSize: 100,
-      density: 1,
-      solutionCount: 1,
-      minMoves: blockCount,
-      avgBranchingFactor: 1,
-      minBranchingFactor: 1,
-      forcedMoveCount: blockCount,
-      forcedMoveRatio: 1,
-      solutionDepth: blockCount,
-      maxChainLength: blockCount,
-      initialClearable: Math.round(blockCount * clearability),
-      initialClearability: clearability,
-      hasCriticalPath: false,
-      bottleneckCount: 0,
-      totalBlockers: Math.round(avgBlockers * blockCount),
-      avgBlockers,
-    };
-  }
-
-  it('should return "easy" tier for score 0-19', () => {
-    // 0 blockers (0pts) + 0% locked (0pts) + 100% clearable (0pts) = 0
-    const analysis = createAnalysisWithScore(0, 0, 1);
+      blockCount: 10,
+      avgBlockers: 0,
+      totalBlockers: 0,
+      lockedCount: 0,
+      initialClearability: 1,
+      initialClearable: 10,
+      gridSize: 25,
+    });
     const result = calculateDifficultyScore(analysis);
     expect(result.tier).toBe('easy');
-    expect(result.score).toBeLessThan(20);
+    expect(result.score).toBeLessThan(25);
   });
 
-  it('should return "medium" tier for score 20-39', () => {
-    // 1 blocker (10pts) + 15% locked (12.5pts) + 100% clearable (0pts) = 22.5
-    const analysis = createAnalysisWithScore(1, 0.15, 1);
+  it('should return "medium" tier for score 25-49', () => {
+    // avgBlockers=4 -> 4*4.5=18, clearability 0.5 -> (1-0.5)*20=10, blockCount 100/40=2.5(cap 10)
+    // Total ~28.5 if no locked => but let's just target the range
+    // avgBlockers=3 -> 13.5, clearability 0.5 -> 10, blockCount 100 -> 2.5 => 26
+    const analysis = createFullAnalysis({
+      solvable: true,
+      blockCount: 100,
+      avgBlockers: 3,
+      totalBlockers: 300,
+      lockedCount: 0,
+      initialClearability: 0.5,
+      initialClearable: 50,
+    });
     const result = calculateDifficultyScore(analysis);
     expect(result.tier).toBe('medium');
-    expect(result.score).toBeGreaterThanOrEqual(20);
-    expect(result.score).toBeLessThan(40);
+    expect(result.score).toBeGreaterThanOrEqual(25);
+    expect(result.score).toBeLessThan(50);
   });
 
-  it('should return "hard" tier for score 40-59', () => {
-    // 3 blockers (30pts) + 15% locked (12.5pts) + 70% clearable (7.5pts) = 50
-    const analysis = createAnalysisWithScore(3, 0.15, 0.7);
+  it('should return "hard" tier for score 50-74', () => {
+    // avgBlockers=8 -> 36, clearability 0.2 -> 16, blockCount 100 -> 2.5 => 54.5
+    const analysis = createFullAnalysis({
+      solvable: true,
+      blockCount: 100,
+      avgBlockers: 8,
+      totalBlockers: 800,
+      lockedCount: 0,
+      initialClearability: 0.2,
+      initialClearable: 20,
+    });
     const result = calculateDifficultyScore(analysis);
     expect(result.tier).toBe('hard');
-    expect(result.score).toBeGreaterThanOrEqual(40);
-    expect(result.score).toBeLessThan(60);
+    expect(result.score).toBeGreaterThanOrEqual(50);
+    expect(result.score).toBeLessThan(75);
   });
 
-  it('should return "superHard" tier for score 60+', () => {
-    // 4 blockers (40pts) + 30% locked (25pts) + 100% clearable (0pts) = 65
-    const analysis = createAnalysisWithScore(4, 0.3, 1);
+  it('should return "superHard" tier for score 75+', () => {
+    // avgBlockers=12 -> 54, clearability 0 -> 20, blockCount 100 -> 2.5, locked 5 -> 5 => 81.5
+    const analysis = createFullAnalysis({
+      solvable: true,
+      blockCount: 100,
+      avgBlockers: 12,
+      totalBlockers: 1200,
+      lockedCount: 5,
+      initialClearability: 0,
+      initialClearable: 0,
+    });
     const result = calculateDifficultyScore(analysis);
     expect(result.tier).toBe('superHard');
-    expect(result.score).toBeGreaterThanOrEqual(60);
+    expect(result.score).toBeGreaterThanOrEqual(75);
   });
 
   it('should achieve max score of 100', () => {
-    // 5+ blockers (50pts) + 30%+ locked (25pts) + 0% clearable (25pts) = 100
-    const analysis = createAnalysisWithScore(5, 0.3, 0);
+    // Need raw score >= 100.
+    // avgBlockers=15 -> 67.5, clearability 0 -> 20, blockCount 100 -> 2.5, locked 5 -> 5,
+    // iced 5 -> 5, avgIce high -> 5, mirror 5 -> 5 => 110 raw, capped to 100
+    const analysis = createFullAnalysis({
+      solvable: true,
+      blockCount: 100,
+      avgBlockers: 15,
+      totalBlockers: 1500,
+      lockedCount: 10,
+      icedCount: 10,
+      totalIceCount: 100,
+      mirrorCount: 10,
+      initialClearability: 0,
+      initialClearable: 0,
+    });
     const result = calculateDifficultyScore(analysis);
     expect(result.score).toBe(100);
     expect(result.tier).toBe('superHard');
@@ -605,13 +434,10 @@ describe('Difficulty Tiers', () => {
 
 describe('Edge Cases', () => {
   it('should return score 0 and tier "easy" for unsolvable puzzles', () => {
-    const analysis: PuzzleAnalysis = {
+    const analysis = createFullAnalysis({
       solvable: false,
       blockCount: 10,
-      holeCount: 0,
       lockedCount: 5,
-      gridSize: 25,
-      density: 0.4,
       solutionCount: 0,
       minMoves: 0,
       avgBranchingFactor: 0,
@@ -622,24 +448,18 @@ describe('Edge Cases', () => {
       maxChainLength: 0,
       initialClearable: 0,
       initialClearability: 0,
-      hasCriticalPath: false,
-      bottleneckCount: 0,
       totalBlockers: 20,
       avgBlockers: 2,
-    };
+    });
     const result = calculateDifficultyScore(analysis);
     expect(result.score).toBe(0);
     expect(result.tier).toBe('easy');
   });
 
   it('should return score 0 and tier "easy" for empty puzzles', () => {
-    const analysis: PuzzleAnalysis = {
+    const analysis = createFullAnalysis({
       solvable: false,
       blockCount: 0,
-      holeCount: 0,
-      lockedCount: 0,
-      gridSize: 25,
-      density: 0,
       solutionCount: 0,
       minMoves: 0,
       avgBranchingFactor: 0,
@@ -650,11 +470,7 @@ describe('Edge Cases', () => {
       maxChainLength: 0,
       initialClearable: 0,
       initialClearability: 0,
-      hasCriticalPath: false,
-      bottleneckCount: 0,
-      totalBlockers: 0,
-      avgBlockers: 0,
-    };
+    });
     const result = calculateDifficultyScore(analysis);
     expect(result.score).toBe(0);
     expect(result.tier).toBe('easy');
@@ -836,7 +652,7 @@ describe('Real Puzzle Scenarios', () => {
   });
 
   it('should rate a puzzle with locked blocks as harder', () => {
-    // Locked blocks add difficulty via the lockedPercent component
+    // Locked blocks add difficulty via the lockedCount component (capped at 5)
     // Use corner blocks (no neighbors) so they're still clearable when locked
     const blocksWithoutLocks = createBlockMap([
       createBlock(0, 0, 'N'), // Corner - can clear
@@ -859,14 +675,15 @@ describe('Real Puzzle Scenarios', () => {
     expect(analysisWithout.solvable).toBe(true);
     expect(analysisWith.solvable).toBe(true);
 
-    // With 4/4 = 100% locked, should get max locked points
+    // With 4 locked blocks
     expect(analysisWith.lockedCount).toBe(4);
 
     const difficultyWithout = calculateDifficultyScore(analysisWithout);
     const difficultyWith = calculateDifficultyScore(analysisWith);
 
-    expect(difficultyWith.components.lockedPercent).toBeGreaterThan(difficultyWithout.components.lockedPercent);
-    expect(difficultyWith.components.lockedPercent).toBe(25); // 100% locked = max 25 pts
+    // lockedCount component: 4 locked vs 0 locked -> higher score
+    expect(difficultyWith.components.lockedCount).toBeGreaterThan(difficultyWithout.components.lockedCount);
+    expect(difficultyWith.components.lockedCount).toBe(4); // Raw locked count stored in components
   });
 
   it('should scale properly for different grid sizes', () => {
@@ -898,43 +715,40 @@ describe('Real Puzzle Scenarios', () => {
 
 describe('Score Calculation Verification', () => {
   it('should correctly sum all components', () => {
-    const analysis: PuzzleAnalysis = {
+    const analysis = createFullAnalysis({
       solvable: true,
       blockCount: 100,
-      holeCount: 0,
-      lockedCount: 15, // 15% locked
-      gridSize: 100,
-      density: 1,
-      solutionCount: 1,
-      minMoves: 100,
-      avgBranchingFactor: 1,
-      minBranchingFactor: 1,
-      forcedMoveCount: 100,
-      forcedMoveRatio: 1,
-      solutionDepth: 100,
-      maxChainLength: 100,
+      lockedCount: 0,
+      icedCount: 0,
+      totalIceCount: 0,
+      mirrorCount: 0,
       initialClearable: 50, // 50% clearable
       initialClearability: 0.5,
-      hasCriticalPath: false,
-      bottleneckCount: 0,
       totalBlockers: 250, // 2.5 avg
       avgBlockers: 2.5,
-    };
+    });
 
     const result = calculateDifficultyScore(analysis);
 
-    // Expected (100 blocks = no size bonus):
-    // blockers = min(2.5/5, 1) * 50 = 0.5 * 50 = 25
-    // locked = min(0.15/0.30, 1) * 25 = 0.5 * 25 = 12.5
-    // clearability = (1 - 0.5) * 25 = 0.5 * 25 = 12.5
-    // sizeBonus = 0 (100 blocks >= 50)
-    // total = 25 + 12.5 + 12.5 = 50
+    // Expected with current formula:
+    // avgBlockersScore = 2.5 * 4.5 = 11.25
+    // clearabilityScore = (1 - 0.5) * 20 = 10
+    // blockCountScore = min(100/40, 10) = min(2.5, 10) = 2.5
+    // lockedBonus = min(0, 5) = 0
+    // icedBonus = min(0, 5) = 0
+    // avgIceBonus = min(0, 5) = 0
+    // mirrorBonus = min(0, 5) = 0
+    // sizeBonus = 0 (100 < 400)
+    // rawScore = 11.25 + 10 + 2.5 = 23.75
+    // score = round(23.75) = 24
 
-    expect(result.components.blockers).toBe(25);
-    expect(result.components.lockedPercent).toBe(12.5);
-    expect(result.components.clearability).toBe(12.5);
+    expect(result.components.avgBlockers).toBe(2.5);
+    expect(result.components.clearability).toBe(0.5);
+    expect(result.components.blockCount).toBe(100);
+    expect(result.components.lockedCount).toBe(0);
     expect(result.components.sizeBonus).toBe(0);
-    expect(result.score).toBe(50);
-    expect(result.tier).toBe('hard'); // 50 is in hard range (40-59)
+    expect(result.rawScore).toBeCloseTo(23.75);
+    expect(result.score).toBe(24);
+    expect(result.tier).toBe('easy'); // 24 < 25 = easy
   });
 });

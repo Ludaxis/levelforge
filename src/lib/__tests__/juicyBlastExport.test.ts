@@ -418,7 +418,7 @@ describe('Export to Reference Format', () => {
   });
 
   describe('SelectableItems generation', () => {
-    it('should create one SelectableItem per pixel', () => {
+    it('should create 3 SelectableItems per unique color requirement', () => {
       const pixelArt = createTestPixelArt([['apple', 'orange', 'banana']]);
 
       const exported = exportToReferenceFormat({
@@ -429,7 +429,8 @@ describe('Export to Reference Format', () => {
         pixelArt,
       });
 
-      expect(exported.SelectableItems).toHaveLength(3);
+      // 3 unique colors × 3 tiles per requirement = 9
+      expect(exported.SelectableItems).toHaveLength(9);
     });
 
     it('should set Layer to 0', () => {
