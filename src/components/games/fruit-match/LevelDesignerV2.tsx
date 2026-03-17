@@ -193,12 +193,11 @@ export function LevelDesignerV2({
       uniqueColors,
       groupCount,
       launcherCount: launchers.length,
-      waitingStandSlots,
       maxSelectableItems,
       totalTiles,
       mismatchDepth,
     };
-  }, [pixelArray, launchers, groups.length, selectableItems, waitingStandSlots, maxSelectableItems, mismatchDepth]);
+  }, [pixelArray, launchers, groups.length, selectableItems, maxSelectableItems, mismatchDepth]);
 
   // Studio difficulty result
   const difficultyResult = useMemo((): StudioDifficultyResult | null => {
@@ -854,12 +853,12 @@ export function LevelDesignerV2({
 
   const handleEasier = useCallback(() => {
     if (!difficultyResult) return;
-    const { tileBurial, gridConstraint } = difficultyResult.components;
-    // Priority: reduce the highest adjustable contributor (tile burial or grid constraint)
-    const burialContrib = tileBurial * 0.25;
-    const gridContrib = gridConstraint * 0.15;
+    const mixing = difficultyResult.breakdown.find(c => c.id === 'layerMixing');
+    const surface = difficultyResult.breakdown.find(c => c.id === 'surfaceSize');
+    const mixContrib = (mixing?.score ?? 0) * 0.40;
+    const surfContrib = (surface?.score ?? 0) * 0.25;
 
-    if (burialContrib >= gridContrib && mismatchDepth > 0) {
+    if (mixContrib >= surfContrib && mismatchDepth > 0) {
       setMismatchDepth((v) => Math.max(0, +(v - 0.15).toFixed(2)));
     } else if (maxSelectableItems < 20) {
       setMaxSelectableItems((v) => Math.min(20, v + 1));
@@ -870,13 +869,12 @@ export function LevelDesignerV2({
 
   const handleHarder = useCallback(() => {
     if (!difficultyResult || !studioGameConfig) return;
-    const { tileBurial, gridConstraint } = difficultyResult.components;
-    // Priority: increase the adjustable component with the most room to grow
-    const burialRoom = (1 - tileBurial) * 0.25;
-    const gridRoom = (1 - gridConstraint) * 0.15;
+    const mixing = difficultyResult.breakdown.find(c => c.id === 'layerMixing');
+    const surface = difficultyResult.breakdown.find(c => c.id === 'surfaceSize');
+    const mixRoom = (1 - (mixing?.score ?? 0)) * 0.40;
+    const surfRoom = (1 - (surface?.score ?? 0)) * 0.25;
 
-    if (burialRoom >= gridRoom && mismatchDepth < 1) {
-      // Find the max solvable depth and clamp to it
+    if (mixRoom >= surfRoom && mismatchDepth < 1) {
       const maxDepth = findMaxSolvableDepth(studioGameConfig);
       const target = +(mismatchDepth + 0.15).toFixed(2);
       setMismatchDepth(Math.min(target, maxDepth));
@@ -900,7 +898,6 @@ export function LevelDesignerV2({
         });
         setMismatchDepth(result.recipe.mismatchDepth);
         setMaxSelectableItems(result.recipe.maxSelectableItems);
-        setWaitingStandSlots(result.recipe.waitingStandSlots);
         setActiveLauncherCount(result.recipe.activeLauncherCount);
         if (result.recipe.seed && seed === undefined) {
           setSeed(result.recipe.seed);
@@ -919,7 +916,6 @@ export function LevelDesignerV2({
         const recipe: DifficultyRecipe = {
           mismatchDepth,
           maxSelectableItems,
-          waitingStandSlots,
           activeLauncherCount,
           seed: seed ?? Math.floor(Math.random() * 2147483647),
         };
@@ -929,7 +925,7 @@ export function LevelDesignerV2({
         setIsSimulating(false);
       }
     }, 10);
-  }, [studioGameConfig, mismatchDepth, maxSelectableItems, waitingStandSlots, activeLauncherCount, seed]);
+  }, [studioGameConfig, mismatchDepth, maxSelectableItems, activeLauncherCount, seed]);
 
   // ============================================================================
   // Export JSON
@@ -1300,6 +1296,7 @@ export function LevelDesignerV2({
       {hasData && (
         <DifficultyAnalysis
           difficultyResult={difficultyResult}
+          difficultyParams={studioDifficultyParams}
           maxSelectableItems={maxSelectableItems}
           mismatchDepth={mismatchDepth}
           waitingStandSlots={waitingStandSlots}

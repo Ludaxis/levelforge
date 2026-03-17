@@ -18,9 +18,13 @@ import {
   ChevronDown,
   ChevronRight,
 } from 'lucide-react';
-import { StudioDifficultyResult, DifficultyComponent } from '@/lib/useStudioGame';
+import { StudioDifficultyResult, StudioDifficultyParams, DifficultyComponent } from '@/lib/useStudioGame';
 import { StudioSimulationResult } from '@/lib/studioDifficultyEngine';
 import { DIFFICULTY_COLORS } from './types';
+
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
 
 const IMPACT_COLORS: Record<string, string> = {
   easy: 'text-green-600 bg-green-500/10',
@@ -85,8 +89,111 @@ function DifficultyComponentRow({ component, isExpanded, onToggle }: {
   );
 }
 
+function FormulaBreakdown({ params, score }: { params: StudioDifficultyParams; score: number }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const { uniqueColors, launcherCount, maxSelectableItems, totalTiles, mismatchDepth } = params;
+
+  const layerMixing = clamp01(mismatchDepth);
+  const colorVariety = clamp01((uniqueColors - 2) / 5);
+  const surfaceSize = clamp01(1 - (maxSelectableItems - 1) / 19);
+  const hiddenRatio = totalTiles > 0 ? clamp01((totalTiles - maxSelectableItems) / totalTiles) : 0;
+  const launcherSequence = clamp01((launcherCount - 4) / 12);
+
+  const rows: { label: string; formula: string; raw: string; weight: string; contribution: string }[] = [
+    {
+      label: 'Layer Mixing',
+      formula: `clamp01(${mismatchDepth.toFixed(2)})`,
+      raw: layerMixing.toFixed(2),
+      weight: '0.40',
+      contribution: (layerMixing * 0.40).toFixed(3),
+    },
+    {
+      label: 'Surface Size',
+      formula: `clamp01(1 - (${maxSelectableItems} - 1) / 19)`,
+      raw: surfaceSize.toFixed(2),
+      weight: '0.25',
+      contribution: (surfaceSize * 0.25).toFixed(3),
+    },
+    {
+      label: 'Hidden Ratio',
+      formula: `(${totalTiles} - ${maxSelectableItems}) / ${totalTiles}`,
+      raw: hiddenRatio.toFixed(2),
+      weight: '0.15',
+      contribution: (hiddenRatio * 0.15).toFixed(3),
+    },
+    {
+      label: 'Color Variety',
+      formula: `clamp01((${uniqueColors} - 2) / 5)`,
+      raw: colorVariety.toFixed(2),
+      weight: '0.10',
+      contribution: (colorVariety * 0.10).toFixed(3),
+    },
+    {
+      label: 'Blender Count',
+      formula: `clamp01((${launcherCount} - 4) / 12)`,
+      raw: launcherSequence.toFixed(2),
+      weight: '0.10',
+      contribution: (launcherSequence * 0.10).toFixed(3),
+    },
+  ];
+
+  const rawTotal = layerMixing * 0.40 + colorVariety * 0.10 + surfaceSize * 0.25 + hiddenRatio * 0.15 + launcherSequence * 0.10;
+
+  return (
+    <div className="pt-1 border-t border-border">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full text-left flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        {isOpen ? (
+          <ChevronDown className="h-3 w-3 flex-shrink-0" />
+        ) : (
+          <ChevronRight className="h-3 w-3 flex-shrink-0" />
+        )}
+        <span>Formula</span>
+        <span className="font-mono ml-auto text-[10px]">
+          round({rawTotal.toFixed(3)} x 100) = {score}
+        </span>
+      </button>
+      {isOpen && (
+        <div className="mt-1.5 space-y-1">
+          <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-2 text-[10px] font-mono">
+            <div className="text-muted-foreground font-sans text-[9px] uppercase tracking-wider">Factor</div>
+            <div className="text-muted-foreground text-right font-sans text-[9px] uppercase tracking-wider">Raw</div>
+            <div className="text-muted-foreground text-right font-sans text-[9px] uppercase tracking-wider">Wt</div>
+            <div className="text-muted-foreground text-right font-sans text-[9px] uppercase tracking-wider">Contrib</div>
+            {rows.map((row) => (
+              <div key={row.label} className="contents">
+                <div className="text-foreground/80 font-sans text-[10px] truncate" title={row.formula}>{row.label}</div>
+                <div className="text-right">{row.raw}</div>
+                <div className="text-right text-muted-foreground">{row.weight}</div>
+                <div className="text-right">{row.contribution}</div>
+              </div>
+            ))}
+            <div className="contents border-t border-border">
+              <div className="text-foreground font-sans text-[10px] font-medium pt-0.5 border-t border-border">Total</div>
+              <div className="text-right pt-0.5 border-t border-border">{rawTotal.toFixed(3)}</div>
+              <div className="text-right pt-0.5 border-t border-border text-muted-foreground">x100</div>
+              <div className="text-right pt-0.5 border-t border-border font-medium">{score}</div>
+            </div>
+          </div>
+          <div className="text-[9px] text-muted-foreground space-y-0.5 mt-1">
+            {rows.map((row) => (
+              <div key={row.label} className="font-mono truncate" title={row.formula}>
+                {row.label}: {row.formula}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DifficultyAnalysis({
   difficultyResult,
+  difficultyParams,
   maxSelectableItems,
   mismatchDepth,
   waitingStandSlots,
@@ -106,6 +213,7 @@ export function DifficultyAnalysis({
   onSimulate,
 }: {
   difficultyResult: StudioDifficultyResult | null;
+  difficultyParams: StudioDifficultyParams | null;
   maxSelectableItems: number;
   mismatchDepth: number;
   waitingStandSlots: number;
@@ -249,6 +357,9 @@ export function DifficultyAnalysis({
             />
           ))}
         </div>
+
+        {/* Live Formula */}
+        {difficultyParams && <FormulaBreakdown params={difficultyParams} score={score} />}
 
         {/* Sliders */}
         <div className="space-y-2 pt-1 border-t border-border">
