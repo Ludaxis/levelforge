@@ -14,9 +14,9 @@ import {
   calculateFruitMatchDifficulty,
 } from '@/types/fruitMatch';
 import {
-  StudioDifficultyParams,
   calculateStudioDifficulty,
 } from '@/lib/useStudioGame';
+import type { StudioDifficultyParams } from '@/lib/useStudioGame';
 
 // ============================================================================
 // Fruit Type Migration (for backward compatibility with old type names)
@@ -576,7 +576,6 @@ export function calculateLevelMetrics(
   } else {
     const result = calculateFruitMatchDifficulty(
       totalPixels,
-      waitingStandSlots,
       uniqueFruitTypes
     );
     score = result.score;

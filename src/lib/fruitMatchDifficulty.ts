@@ -50,7 +50,6 @@ export interface DifficultyMetrics {
 
   // Buffer metrics
   waitingStandSlots: number;
-  bufferRatio: number; // slots / unique fruits
 
   // Complexity metrics
   decisionComplexity: number; // How many choices per move
@@ -72,22 +71,19 @@ export interface DifficultyMetrics {
 
 const DIFFICULTY_WEIGHTS = {
   // Grid complexity (larger = harder)
-  pixelCount: 0.15,
+  pixelCount: 0.20,
 
   // Color complexity (more types = harder)
-  fruitTypes: 0.20,
-
-  // Buffer pressure (fewer slots = harder)
-  bufferPressure: 0.25,
+  fruitTypes: 0.25,
 
   // Visibility (less visible = harder)
-  visibility: 0.15,
+  visibility: 0.20,
 
   // Distribution (uneven = harder)
-  distribution: 0.10,
+  distribution: 0.15,
 
   // Decision load (more columns = harder)
-  decisionLoad: 0.15,
+  decisionLoad: 0.20,
 };
 
 // ============================================================================
@@ -221,9 +217,6 @@ export function calculateDifficultyMetrics(level: FruitMatchLevel): DifficultyMe
     ? stackDepths.reduce((a, b) => a + b, 0) / stackDepths.length
     : 0;
 
-  // Buffer metrics
-  const bufferRatio = waitingStandSlots / Math.max(uniqueFruitTypes, 1);
-
   // Complexity metrics
   const visibilityScore = calculateVisibilityScore(sinkStacks);
   const distributionEvenness = calculateDistributionEvenness(fruitDistribution);
@@ -236,12 +229,9 @@ export function calculateDifficultyMetrics(level: FruitMatchLevel): DifficultyMe
   const difficultyScore = calculateDifficultyScore({
     totalPixels,
     uniqueFruitTypes,
-    waitingStandSlots,
-    bufferRatio,
     visibilityScore,
     distributionEvenness,
     decisionComplexity,
-    averageStackDepth,
   });
 
   const difficultyTier = scoreToDifficultyTier(difficultyScore);
@@ -258,7 +248,6 @@ export function calculateDifficultyMetrics(level: FruitMatchLevel): DifficultyMe
     averageStackDepth,
     maxStackDepth,
     waitingStandSlots,
-    bufferRatio,
     decisionComplexity,
     visibilityScore,
     distributionEvenness,
@@ -275,22 +264,16 @@ export function calculateDifficultyMetrics(level: FruitMatchLevel): DifficultyMe
 function calculateDifficultyScore(params: {
   totalPixels: number;
   uniqueFruitTypes: number;
-  waitingStandSlots: number;
-  bufferRatio: number;
   visibilityScore: number;
   distributionEvenness: number;
   decisionComplexity: number;
-  averageStackDepth: number;
 }): number {
   const {
     totalPixels,
     uniqueFruitTypes,
-    waitingStandSlots,
-    bufferRatio,
     visibilityScore,
     distributionEvenness,
     decisionComplexity,
-    averageStackDepth,
   } = params;
 
   // Pixel count factor (0-1): More pixels = harder
@@ -300,10 +283,6 @@ function calculateDifficultyScore(params: {
   // Fruit types factor (0-1): More types = harder
   // 2 types = 0, 6 types = 1
   const fruitFactor = Math.min(1, Math.max(0, (uniqueFruitTypes - 2) / 4));
-
-  // Buffer pressure factor (0-1): Less buffer = harder
-  // Ratio 2+ = easy (0), ratio 1 = hard (1)
-  const bufferFactor = Math.min(1, Math.max(0, 1 - (bufferRatio - 1)));
 
   // Visibility factor (0-1): Less visible = harder
   const visibilityFactor = 1 - visibilityScore;
@@ -318,7 +297,6 @@ function calculateDifficultyScore(params: {
   const weightedScore =
     pixelFactor * DIFFICULTY_WEIGHTS.pixelCount +
     fruitFactor * DIFFICULTY_WEIGHTS.fruitTypes +
-    bufferFactor * DIFFICULTY_WEIGHTS.bufferPressure +
     visibilityFactor * DIFFICULTY_WEIGHTS.visibility +
     distributionFactor * DIFFICULTY_WEIGHTS.distribution +
     decisionFactor * DIFFICULTY_WEIGHTS.decisionLoad;
@@ -517,44 +495,37 @@ export function generateSolvableSinkStacks(
 export function getRecommendedSettings(targetDifficulty: DifficultyTier): {
   gridSize: { min: number; max: number; recommended: number };
   fruitTypes: { min: number; max: number; recommended: number };
-  waitingStandSlots: { min: number; max: number; recommended: number };
   sinkWidth: { min: number; max: number; recommended: number };
 } {
   const settings = {
     trivial: {
       gridSize: { min: 20, max: 25, recommended: 20 },
       fruitTypes: { min: 2, max: 3, recommended: 2 },
-      waitingStandSlots: { min: 9, max: 12, recommended: 10 },
       sinkWidth: { min: 4, max: 6, recommended: 5 },
     },
     easy: {
       gridSize: { min: 25, max: 35, recommended: 30 },
       fruitTypes: { min: 3, max: 4, recommended: 3 },
-      waitingStandSlots: { min: 8, max: 10, recommended: 9 },
       sinkWidth: { min: 5, max: 7, recommended: 6 },
     },
     medium: {
       gridSize: { min: 35, max: 50, recommended: 40 },
       fruitTypes: { min: 4, max: 5, recommended: 4 },
-      waitingStandSlots: { min: 7, max: 9, recommended: 8 },
       sinkWidth: { min: 6, max: 8, recommended: 7 },
     },
     hard: {
       gridSize: { min: 50, max: 70, recommended: 60 },
       fruitTypes: { min: 4, max: 5, recommended: 5 },
-      waitingStandSlots: { min: 6, max: 8, recommended: 7 },
       sinkWidth: { min: 7, max: 10, recommended: 8 },
     },
     expert: {
       gridSize: { min: 70, max: 90, recommended: 80 },
       fruitTypes: { min: 5, max: 6, recommended: 5 },
-      waitingStandSlots: { min: 5, max: 7, recommended: 6 },
       sinkWidth: { min: 8, max: 12, recommended: 10 },
     },
     nightmare: {
       gridSize: { min: 90, max: 100, recommended: 100 },
       fruitTypes: { min: 5, max: 6, recommended: 6 },
-      waitingStandSlots: { min: 5, max: 6, recommended: 5 },
       sinkWidth: { min: 10, max: 15, recommended: 12 },
     },
   };

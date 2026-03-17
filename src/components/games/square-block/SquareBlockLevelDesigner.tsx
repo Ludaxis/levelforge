@@ -3,22 +3,16 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import {
   SquareBlock,
   SquareBlockLevel,
   BLOCK_COLORS,
-  GameMode,
   BlockDirection,
   DesignedLevel,
   LevelMetrics,
   DifficultyTier,
   calculateFlowZone,
   getSawtoothPosition,
-  getExpectedDifficulty,
-  estimateLevel,
 } from '@/types/squareBlock';
 import {
   analyzePuzzle,
@@ -28,88 +22,32 @@ import {
 import {
   GridCoord,
   SquareDirection,
-  SquareAxis,
   SQUARE_DIRECTIONS,
   DIRECTION_ORDER,
-  AXIS_ORDER,
-  DIRECTION_ANGLES,
-  AXIS_ANGLES,
   gridKey,
   createRectangularGrid,
-  gridToPixel,
   isInBounds,
   gridAdd,
   isBidirectional,
   getAxisDirections,
   getMinBlocksAhead,
-  getBlocksAheadColor,
 } from '@/lib/squareGrid';
-import {
-  Settings, Play, Trash2, CheckCircle, AlertTriangle,
-  Plus, BarChart3, Target, Activity,
-  TrendingUp, TrendingDown, Clock, Percent, Lock, Unlock, Eye, EyeOff, Sparkles, Download, Upload, Snowflake, FlipHorizontal,
-  ZoomIn, ZoomOut, Maximize, Move
-} from 'lucide-react';
+import { Settings } from 'lucide-react';
 import { downloadLevelAsJSON, parseAndImportLevel } from '@/lib/squareBlockExport';
-import { toGrayscale } from '@/lib/utils';
-import { CollectionMetadata } from '@/lib/storage/types';
 import { DeadlockInfo, StuckReason, RootCauseType } from '@/lib/useSquareBlockGame';
-import { FLOW_ZONE_COLORS, DIFFICULTY_BADGE_COLORS, SAWTOOTH_EXPECTED_DISPLAY } from '@/lib/designerConstants';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { ChevronDown, FolderOpen } from 'lucide-react';
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-// Fixed cell size for readability - grid scrolls instead of shrinking
-const FIXED_CELL_SIZE = 32;
-
-const DEFAULT_BLOCK_COLOR = BLOCK_COLORS.cyan;
-
-const DIRECTION_LABELS: Record<BlockDirection, string> = {
-  N: '↑',
-  E: '→',
-  S: '↓',
-  W: '←',
-  N_S: '↕',
-  E_W: '↔',
-};
-
-
-// ============================================================================
-// Types
-// ============================================================================
-
-interface StagedLevel {
-  id: string;
-  filename: string;
-  levelData: { rows: number; cols: number; blocks: SquareBlock[] };
-  blockCount: number;
-  solvable: boolean;
-  difficultyScore: number | null;
-  difficultyTier: DifficultyTier | null;
-  selected: boolean;
-  error?: string;
-}
-
-interface SquareBlockLevelDesignerProps {
-  onPlayLevel: (level: SquareBlockLevel) => void;
-  onAddToCollection?: (level: DesignedLevel, collectionId?: string) => void;
-  levelNumber?: number;
-  onLevelNumberChange?: (num: number) => void;
-  maxLevelNumber?: number;
-  editingLevel?: DesignedLevel | null;
-  showMetricsPanel?: boolean;
-  // Multiple collections support
-  collections?: CollectionMetadata[];
-  activeCollectionId?: string | null;
-}
+  FIXED_CELL_SIZE,
+  DEFAULT_BLOCK_COLOR,
+  StagedLevel,
+  SquareBlockLevelDesignerProps,
+  StagingArea,
+  SolvabilityBanner,
+  ToolBar,
+  GridCanvas,
+  DifficultyPanel,
+  ConfigurationPanel,
+  EmbeddedMetricsPanel,
+} from './designer';
 
 // ============================================================================
 // Component
@@ -1358,163 +1296,26 @@ export function SquareBlockLevelDesigner({
   return (
     <div className="space-y-4">
       {/* Import Staging Area - TOP of Design section */}
-      {stagedLevels.length > 0 && (
-        <Card className="border-blue-500/30">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Upload className="h-4 w-4" />
-                Imported Files ({stagedLevels.length})
-              </CardTitle>
-              <Button variant="ghost" size="sm" onClick={() => setStagedLevels([])}>
-                Clear All
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="max-h-[250px] overflow-y-auto space-y-2">
-              {stagedLevels.map(staged => (
-                <div key={staged.id} className={`flex items-center gap-3 p-2 rounded-lg border ${
-                  staged.error ? 'bg-red-500/10 border-red-500/30' :
-                  staged.solvable ? 'bg-green-500/10 border-green-500/30' :
-                  'bg-amber-500/10 border-amber-500/30'
-                }`}>
-                  <input
-                    type="checkbox"
-                    checked={staged.selected}
-                    disabled={!!staged.error || !staged.solvable}
-                    onChange={(e) => setStagedLevels(prev =>
-                      prev.map(s => s.id === staged.id ? { ...s, selected: e.target.checked } : s)
-                    )}
-                    className="h-4 w-4"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{staged.filename}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {staged.levelData.rows}×{staged.levelData.cols} · {staged.blockCount} blocks
-                    </p>
-                  </div>
-                  {staged.error ? (
-                    <Badge variant="destructive">{staged.error}</Badge>
-                  ) : !staged.solvable ? (
-                    <Badge variant="outline" className="text-amber-500">Deadlock</Badge>
-                  ) : (
-                    <Badge className={
-                      staged.difficultyTier === 'easy' ? 'bg-green-500' :
-                      staged.difficultyTier === 'medium' ? 'bg-yellow-500 text-black' :
-                      staged.difficultyTier === 'hard' ? 'bg-orange-500' : 'bg-red-500'
-                    }>
-                      {staged.difficultyScore}
-                    </Badge>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={() => {
-                      // Load into designer for preview/editing
-                      setRows(staged.levelData.rows);
-                      setCols(staged.levelData.cols);
-                      const blockMap = new Map<string, SquareBlock>();
-                      for (const block of staged.levelData.blocks) {
-                        blockMap.set(gridKey(block.coord), block);
-                      }
-                      setBlocks(blockMap);
-                      setHoles(new Set());
-                    }}
-                    title="Load into designer"
-                  >
-                    <Eye className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0 text-destructive"
-                    onClick={() => setStagedLevels(prev => prev.filter(s => s.id !== staged.id))}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-            <div className="flex items-center gap-2 pt-2 border-t">
-              <Button variant="outline" size="sm" onClick={handleImportMultipleFiles}>
-                <Plus className="h-4 w-4 mr-1" /> Add More Files
-              </Button>
-              <div className="flex-1" />
-              <span className="text-xs text-muted-foreground">
-                {stagedLevels.filter(s => s.selected).length} selected
-              </span>
-              <Button
-                size="sm"
-                disabled={stagedLevels.filter(s => s.selected).length === 0 || !onAddToCollection}
-                onClick={handleAddStagedToCollection}
-              >
-                Add to Collection
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <StagingArea
+        stagedLevels={stagedLevels}
+        setStagedLevels={setStagedLevels}
+        handleImportMultipleFiles={handleImportMultipleFiles}
+        handleAddStagedToCollection={handleAddStagedToCollection}
+        onAddToCollection={onAddToCollection}
+        setRows={setRows}
+        setCols={setCols}
+        setBlocks={setBlocks}
+        setHoles={setHoles}
+      />
 
-      {/* Solvability Check */}
-      <div
-        className={`flex items-center gap-2 p-3 rounded-lg ${
-          solvability.solvable ? 'bg-green-500/10 border border-green-500/30' : 'bg-amber-500/10 border border-amber-500/30'
-        }`}
-      >
-        {solvability.solvable ? (
-          <CheckCircle className="h-5 w-5 text-green-500" />
-        ) : (
-          <AlertTriangle className="h-5 w-5 text-amber-500" />
-        )}
-        <div className="flex-1">
-          <p className={`text-sm font-medium ${solvability.solvable ? 'text-green-500' : 'text-amber-500'}`}>
-            {solvability.solvable ? 'Level is solvable!' : 'Not solvable'}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {!solvability.solvable && deadlockInfo.hasDeadlock
-              ? (() => {
-                  const mutualCount = Array.from(deadlockInfo.stuckBlocks.values()).filter(r => r.type === 'mutual_block').length / 2;
-                  const blockedCount = deadlockInfo.stuckBlocks.size - (mutualCount * 2);
-                  const blockerOnlyCount = Array.from(deadlockInfo.blockerBlocks).filter(k => !deadlockInfo.stuckBlocks.has(k)).length;
-                  const parts: string[] = [];
-                  if (mutualCount > 0) parts.push(`${Math.floor(mutualCount)} mutual`);
-                  if (blockedCount > 0) parts.push(`${blockedCount} blocked`);
-                  if (blockerOnlyCount > 0) parts.push(`${blockerOnlyCount} blocker${blockerOnlyCount > 1 ? 's' : ''}`);
-                  return `Deadlock: ${parts.join(', ')}`;
-                })()
-              : solvability.message}
-          </p>
-        </div>
-        <div className="flex gap-2 items-center">
-          <Badge variant="outline">{blocks.size} blocks</Badge>
-          {holes.size > 0 && <Badge variant="outline">{holes.size} holes</Badge>}
-        </div>
-      </div>
-
-      {/* Block Type Counts */}
-      {blocks.size > 0 && (
-        <div className="flex items-center gap-4 p-3 bg-muted/30 rounded-lg text-sm">
-          <span className="text-muted-foreground font-medium">Block Types:</span>
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded bg-cyan-500" />
-            <span>{blockTypeCounts.normal}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded bg-amber-500" />
-            <span className="text-amber-400">{blockTypeCounts.gate} gate</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded bg-blue-400" />
-            <span className="text-blue-400">{blockTypeCounts.ice} ice</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 rounded bg-purple-500" />
-            <span className="text-purple-400">{blockTypeCounts.mirror} mirror</span>
-          </div>
-        </div>
-      )}
+      {/* Solvability Check + Block Type Counts */}
+      <SolvabilityBanner
+        solvability={solvability}
+        deadlockInfo={deadlockInfo}
+        blocks={blocks}
+        holes={holes}
+        blockTypeCounts={blockTypeCounts}
+      />
 
       {/* Design Canvas */}
       <Card>
@@ -1528,919 +1329,90 @@ export function SquareBlockLevelDesigner({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Direction & Color Selectors */}
-          <div className="space-y-3">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Direction</label>
-                <div className="flex flex-wrap gap-1">
-                  {DIRECTION_ORDER.map((dir) => (
-                    <Button
-                      key={dir}
-                      variant={selectedDirection === dir ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => setSelectedDirection(dir)}
-                      className="w-10 h-10 text-lg"
-                    >
-                      {DIRECTION_LABELS[dir]}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              {/* Gate Toggle */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Gate Block</label>
-                <Button
-                  variant={selectedLocked ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => {
-                    setSelectedLocked(!selectedLocked);
-                    // Mutual exclusion: clear ice count when enabling gate
-                    if (!selectedLocked) setSelectedIceCount(0);
-                  }}
-                  disabled={selectedIceCount > 0}
-                  className="w-full"
-                >
-                  {selectedLocked ? (
-                    <>
-                      <Lock className="h-4 w-4 mr-2" />
-                      Gate (needs neighbors cleared)
-                    </>
-                  ) : (
-                    <>
-                      <Unlock className="h-4 w-4 mr-2" />
-                      Normal Block
-                    </>
-                  )}
-                </Button>
-              </div>
+          <ToolBar
+            selectedDirection={selectedDirection}
+            setSelectedDirection={setSelectedDirection}
+            selectedLocked={selectedLocked}
+            setSelectedLocked={setSelectedLocked}
+            selectedIceCount={selectedIceCount}
+            setSelectedIceCount={setSelectedIceCount}
+            selectedMirror={selectedMirror}
+            setSelectedMirror={setSelectedMirror}
+            zoom={zoom}
+            handleZoomIn={handleZoomIn}
+            handleZoomOut={handleZoomOut}
+            handleZoomReset={handleZoomReset}
+          />
 
-              {/* Ice Count */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium flex items-center gap-2">
-                  <Snowflake className="h-4 w-4 text-cyan-400" />
-                  Ice Count
-                </label>
-                <div className="flex items-center gap-2">
-                  <Slider
-                    value={[selectedIceCount]}
-                    onValueChange={([v]) => {
-                      setSelectedIceCount(v);
-                      // Mutual exclusion: clear locked when setting ice count
-                      if (v > 0) setSelectedLocked(false);
-                    }}
-                    min={0}
-                    max={100}
-                    step={1}
-                    disabled={selectedLocked}
-                  />
-                  <Badge variant="outline" className="min-w-[50px] justify-center">
-                    {selectedIceCount || 'None'}
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Block unfreezes after this many clears
-                </p>
-              </div>
+          <GridCanvas
+            rows={rows}
+            cols={cols}
+            cellSize={cellSize}
+            gridCoords={gridCoords}
+            blocks={blocks}
+            holes={holes}
+            hoveredCell={hoveredCell}
+            setHoveredCell={setHoveredCell}
+            handleCellClick={handleCellClick}
+            canClearBlock={canClearBlock}
+            deadlockInfo={deadlockInfo}
+            selectedDirection={selectedDirection}
+            selectedLocked={selectedLocked}
+            selectedIceCount={selectedIceCount}
+            selectedMirror={selectedMirror}
+            showBlocksAhead={showBlocksAhead}
+            blocksAheadMap={blocksAheadMap}
+            viewBox={viewBox}
+            origin={origin}
+            width={width}
+            height={height}
+            zoom={zoom}
+            isPanning={isPanning}
+            svgContainerRef={svgContainerRef}
+            handleWheel={handleWheel}
+            handlePanStart={handlePanStart}
+            handlePanMove={handlePanMove}
+            handlePanEnd={handlePanEnd}
+          />
 
-              {/* Mirror Toggle */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium flex items-center gap-2">
-                  <FlipHorizontal className="h-4 w-4 text-purple-400" />
-                  Mirror Block
-                </label>
-                <Button
-                  variant={selectedMirror ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setSelectedMirror(!selectedMirror)}
-                  className="w-full"
-                >
-                  {selectedMirror ? (
-                    <>
-                      <FlipHorizontal className="h-4 w-4 mr-2" />
-                      Mirror (moves opposite)
-                    </>
-                  ) : (
-                    <>
-                      <FlipHorizontal className="h-4 w-4 mr-2 opacity-50" />
-                      Normal Direction
-                    </>
-                  )}
-                </Button>
-                <p className="text-xs text-muted-foreground">
-                  Block moves opposite to arrow direction
-                </p>
-              </div>
-            </div>
+          <DifficultyPanel
+            blocks={blocks}
+            puzzleAnalysis={puzzleAnalysis}
+            difficultyBreakdown={difficultyBreakdown}
+            solvability={solvability}
+            isAdjusting={isAdjusting}
+            lastAdjustmentResult={lastAdjustmentResult}
+            canIncreaseDifficulty={canIncreaseDifficulty}
+            canDecreaseDifficulty={canDecreaseDifficulty}
+            increaseDifficulty={increaseDifficulty}
+            decreaseDifficulty={decreaseDifficulty}
+          />
 
-          {/* Zoom Controls */}
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <Button variant="outline" size="sm" onClick={handleZoomOut} title="Zoom Out">
-              <ZoomOut className="h-4 w-4" />
-            </Button>
-            <span className="text-xs text-muted-foreground w-16 text-center">{Math.round(zoom * 100)}%</span>
-            <Button variant="outline" size="sm" onClick={handleZoomIn} title="Zoom In">
-              <ZoomIn className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleZoomReset} title="Reset View">
-              <Maximize className="h-4 w-4" />
-            </Button>
-            <span className="text-xs text-muted-foreground ml-2">
-              Ctrl+scroll to zoom
-            </span>
-          </div>
-
-          {/* Grid SVG - Scrollable container */}
-          <div
-            ref={svgContainerRef}
-            className="overflow-auto border border-muted rounded-lg bg-muted/20"
-            style={{ maxHeight: '500px', cursor: isPanning ? 'grabbing' : 'default' }}
-            onWheel={handleWheel}
-            onMouseDown={handlePanStart}
-            onMouseMove={handlePanMove}
-            onMouseUp={handlePanEnd}
-            onMouseLeave={handlePanEnd}
-          >
-            <svg
-              viewBox={viewBox}
-              style={{
-                width: width * zoom,
-                height: height * zoom,
-                minWidth: width * zoom,
-                minHeight: height * zoom,
-              }}
-            >
-              {/* Background */}
-              <rect
-                x={origin.x}
-                y={origin.y}
-                width={cols * cellSize}
-                height={rows * cellSize}
-                fill="rgba(0, 0, 0, 0.3)"
-                rx={4}
-              />
-
-              {/* Grid cells */}
-              {gridCoords.map((coord) => {
-                const key = gridKey(coord);
-                const pixel = gridToPixel(coord, cellSize, origin);
-                const hasBlock = blocks.has(key);
-                const hasHole = holes.has(key);
-                const isHovered = hoveredCell === key;
-
-                let fillColor = 'rgba(255, 255, 255, 0.03)';
-                if (hasHole) {
-                  fillColor = 'rgba(0, 0, 0, 0.8)';
-                } else if (hasBlock) {
-                  fillColor = 'transparent';
-                } else if (isHovered) {
-                  fillColor = 'rgba(255, 255, 255, 0.1)';
-                }
-
-                return (
-                  <g key={key}>
-                    <rect
-                      x={pixel.x - cellSize / 2 + 2}
-                      y={pixel.y - cellSize / 2 + 2}
-                      width={cellSize - 4}
-                      height={cellSize - 4}
-                      fill={fillColor}
-                      stroke={hasHole ? 'rgba(139, 69, 19, 0.6)' : 'rgba(255, 255, 255, 0.15)'}
-                      strokeWidth={hasHole ? 2 : 1}
-                      rx={4}
-                      onClick={() => handleCellClick(coord)}
-                      onMouseEnter={() => setHoveredCell(key)}
-                      onMouseLeave={() => setHoveredCell(null)}
-                      style={{ cursor: 'pointer' }}
-                    />
-
-                    {/* Hole visual */}
-                    {hasHole && (
-                      <g pointerEvents="none">
-                        <circle cx={pixel.x} cy={pixel.y} r={cellSize * 0.3} fill="rgba(0, 0, 0, 0.9)" />
-                        <circle cx={pixel.x} cy={pixel.y} r={cellSize * 0.35} fill="none" stroke="rgba(60, 40, 20, 0.8)" strokeWidth={3} />
-                      </g>
-                    )}
-
-                    {/* Preview block */}
-                    {isHovered && !hasBlock && !hasHole && (
-                      <g opacity={0.5} pointerEvents="none">
-                        <rect
-                          x={pixel.x - cellSize / 2 + 4}
-                          y={pixel.y - cellSize / 2 + 4}
-                          width={cellSize - 8}
-                          height={cellSize - 8}
-                          fill={DEFAULT_BLOCK_COLOR}
-                          rx={4}
-                        />
-                        <DirectionArrow cx={pixel.x} cy={pixel.y} direction={selectedDirection} size={cellSize * 0.5} />
-                        {/* Lock icon preview */}
-                        {selectedLocked && (
-                          <g transform={`translate(${pixel.x}, ${pixel.y})`}>
-                            <rect x={-6} y={-1} width={12} height={9} fill="rgba(0,0,0,0.7)" stroke="#fbbf24" strokeWidth={1} rx={1} />
-                            <path d="M -4 -1 L -4 -4 A 4 4 0 0 1 4 -4 L 4 -1" fill="none" stroke="#fbbf24" strokeWidth={1.5} />
-                          </g>
-                        )}
-                        {/* Ice preview */}
-                        {selectedIceCount > 0 && (
-                          <g>
-                            <rect
-                              x={pixel.x - cellSize / 2 + 4}
-                              y={pixel.y - cellSize / 2 + 4}
-                              width={cellSize - 8}
-                              height={cellSize - 8}
-                              fill="rgba(135, 206, 250, 0.4)"
-                              stroke="rgba(173, 216, 230, 0.8)"
-                              strokeWidth={2}
-                              rx={4}
-                            />
-                            <text
-                              x={pixel.x}
-                              y={pixel.y + 4}
-                              textAnchor="middle"
-                              dominantBaseline="middle"
-                              fill="#ffffff"
-                              fontSize={cellSize * 0.35}
-                              fontWeight="bold"
-                            >
-                              {selectedIceCount}
-                            </text>
-                          </g>
-                        )}
-                        {/* Mirror preview */}
-                        {selectedMirror && (
-                          <g>
-                            <rect
-                              x={pixel.x - cellSize / 2 + 2}
-                              y={pixel.y - cellSize / 2 + 2}
-                              width={cellSize - 4}
-                              height={cellSize - 4}
-                              fill="none"
-                              stroke="rgba(168, 85, 247, 0.8)"
-                              strokeWidth={2}
-                              strokeDasharray="4 2"
-                              rx={4}
-                            />
-                          </g>
-                        )}
-                      </g>
-                    )}
-
-                  </g>
-                );
-              })}
-
-              {/* Placed blocks */}
-              {Array.from(blocks.values()).map((block) => {
-                const key = gridKey(block.coord);
-                const pixel = gridToPixel(block.coord, cellSize, origin);
-                const canClear = canClearBlock(block, blocks, holes);
-                const isBlockHovered = hoveredCell === key;
-
-                // Deadlock state
-                const hasDeadlock = deadlockInfo.hasDeadlock;
-                const stuckReason = deadlockInfo.stuckBlocks.get(key);
-                const isBlocker = deadlockInfo.blockerBlocks.has(key);
-                const isStuck = !!stuckReason;
-                const isMutualBlock = stuckReason?.type === 'mutual_block';
-                const isCircularChain = stuckReason?.type === 'circular_chain';
-                const isEdgeBlocked = stuckReason?.type === 'edge_blocked';
-                const chainLength = stuckReason?.blockingChain?.length ?? 0;
-                const rootCause = stuckReason?.rootCause;
-                const isRootCause = stuckReason?.rootBlockKey === key;
-
-                // Apply grayscale when in deadlock state
-                const blockColor = hasDeadlock ? toGrayscale(block.color) : block.color;
-
-                return (
-                  <g
-                    key={key}
-                    onClick={() => handleCellClick(block.coord)}
-                    onMouseEnter={() => setHoveredCell(key)}
-                    onMouseLeave={() => setHoveredCell(null)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <rect
-                      x={pixel.x - cellSize / 2 + 4}
-                      y={pixel.y - cellSize / 2 + 4}
-                      width={cellSize - 8}
-                      height={cellSize - 8}
-                      fill={blockColor}
-                      stroke={isBlockHovered ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.3)'}
-                      strokeWidth={isBlockHovered ? 2 : 1.5}
-                      rx={4}
-                    />
-                    <DirectionArrow
-                      cx={pixel.x}
-                      cy={pixel.y}
-                      direction={block.direction}
-                      size={cellSize * 0.5}
-                      color={block.locked || block.iceCount ? 'rgba(255, 255, 255, 0.3)' : canClear ? '#ffffff' : 'rgba(255, 255, 255, 0.5)'}
-                    />
-                    {/* Lock icon for gate blocks */}
-                    {block.locked && (
-                      <g transform={`translate(${pixel.x}, ${pixel.y})`}>
-                        <rect x={-6} y={-1} width={12} height={9} fill="rgba(0,0,0,0.7)" stroke="#fbbf24" strokeWidth={1} rx={1} />
-                        <path d="M -4 -1 L -4 -4 A 4 4 0 0 1 4 -4 L 4 -1" fill="none" stroke="#fbbf24" strokeWidth={1.5} />
-                        <circle cx={0} cy={3} r={1.5} fill="#fbbf24" />
-                      </g>
-                    )}
-                    {/* Ice overlay for iced blocks */}
-                    {block.iceCount && block.iceCount > 0 && (
-                      <g pointerEvents="none">
-                        <rect
-                          x={pixel.x - cellSize / 2 + 4}
-                          y={pixel.y - cellSize / 2 + 4}
-                          width={cellSize - 8}
-                          height={cellSize - 8}
-                          fill="rgba(135, 206, 250, 0.4)"
-                          stroke="rgba(173, 216, 230, 0.8)"
-                          strokeWidth={2}
-                          rx={4}
-                        />
-                        <text
-                          x={pixel.x}
-                          y={pixel.y + 4}
-                          textAnchor="middle"
-                          dominantBaseline="middle"
-                          fill="#ffffff"
-                          fontSize={cellSize * 0.35}
-                          fontWeight="bold"
-                          style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)' }}
-                        >
-                          {block.iceCount}
-                        </text>
-                      </g>
-                    )}
-                    {/* Mirror overlay for mirror blocks */}
-                    {block.mirror && (
-                      <g pointerEvents="none">
-                        {/* Purple dashed border */}
-                        <rect
-                          x={pixel.x - cellSize / 2 + 2}
-                          y={pixel.y - cellSize / 2 + 2}
-                          width={cellSize - 4}
-                          height={cellSize - 4}
-                          fill="none"
-                          stroke="rgba(168, 85, 247, 0.8)"
-                          strokeWidth={2}
-                          strokeDasharray="4 2"
-                          rx={4}
-                        />
-                        {/* Mirror icon in BOTTOM-LEFT corner */}
-                        <g transform={`translate(${pixel.x - cellSize / 2 + 10}, ${pixel.y + cellSize / 2 - 10})`}>
-                          <circle cx={0} cy={0} r={7} fill="rgba(168, 85, 247, 0.95)" stroke="white" strokeWidth={1.5} />
-                          {/* Flip horizontal arrows icon */}
-                          <g transform="scale(0.8)">
-                            <path d="M -3 0 L -1 -2 L -1 -0.8 L 1 -0.8 L 1 -2 L 3 0 L 1 2 L 1 0.8 L -1 0.8 L -1 2 Z" fill="white" />
-                          </g>
-                        </g>
-                      </g>
-                    )}
-                    {/* Blocks ahead counter */}
-                    {showBlocksAhead && (() => {
-                      const blocksAhead = blocksAheadMap.get(key) ?? 0;
-                      const counterColor = getBlocksAheadColor(blocksAhead);
-                      const counterRadius = Math.max(6, cellSize * 0.2);
-                      const fontSize = Math.max(8, cellSize * 0.25);
-                      return (
-                        <g transform={`translate(${pixel.x + cellSize / 2 - counterRadius - 2}, ${pixel.y - cellSize / 2 + counterRadius + 2})`} pointerEvents="none">
-                          <circle
-                            cx={0}
-                            cy={0}
-                            r={counterRadius}
-                            fill={counterColor}
-                            stroke="rgba(0, 0, 0, 0.5)"
-                            strokeWidth={1}
-                          />
-                          <text
-                            x={0}
-                            y={0}
-                            textAnchor="middle"
-                            dominantBaseline="central"
-                            fill="white"
-                            fontSize={fontSize}
-                            fontWeight="bold"
-                            style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
-                          >
-                            {blocksAhead}
-                          </text>
-                        </g>
-                      );
-                    })()}
-                    {canClear && (
-                      <rect
-                        x={pixel.x - cellSize / 2 + 2}
-                        y={pixel.y - cellSize / 2 + 2}
-                        width={cellSize - 4}
-                        height={cellSize - 4}
-                        fill="none"
-                        stroke="rgba(34, 197, 94, 0.5)"
-                        strokeWidth={2}
-                        strokeDasharray="4 2"
-                        rx={4}
-                        pointerEvents="none"
-                      />
-                    )}
-                    {/* ENHANCED DEADLOCK indicators with root cause */}
-
-                    {/* ROOT CAUSE: Edge Blocked - Yellow/amber, this block points at edge */}
-                    {isEdgeBlocked && isRootCause && (
-                      <g pointerEvents="none">
-                        <rect
-                          x={pixel.x - cellSize / 2 + 1}
-                          y={pixel.y - cellSize / 2 + 1}
-                          width={cellSize - 2}
-                          height={cellSize - 2}
-                          fill="rgba(251, 191, 36, 0.2)"
-                          stroke="rgba(251, 191, 36, 0.9)"
-                          strokeWidth={3}
-                          rx={5}
-                        />
-                        {/* Edge/wall icon */}
-                        <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
-                          <circle cx={0} cy={0} r={6} fill="rgba(251, 191, 36, 0.95)" />
-                          <text x={0} y={1} textAnchor="middle" fontSize={8} fill="white" fontWeight="bold">▭</text>
-                        </g>
-                      </g>
-                    )}
-
-                    {/* Mutual Block: Purple solid border */}
-                    {isMutualBlock && (
-                      <g pointerEvents="none">
-                        <rect
-                          x={pixel.x - cellSize / 2 + 1}
-                          y={pixel.y - cellSize / 2 + 1}
-                          width={cellSize - 2}
-                          height={cellSize - 2}
-                          fill="rgba(139, 92, 246, 0.15)"
-                          stroke="rgba(139, 92, 246, 0.9)"
-                          strokeWidth={3}
-                          rx={5}
-                        />
-                        <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
-                          <circle cx={0} cy={0} r={6} fill="rgba(139, 92, 246, 0.95)" />
-                          <text x={0} y={1} textAnchor="middle" fontSize={8} fill="white" fontWeight="bold">↔</text>
-                        </g>
-                      </g>
-                    )}
-
-                    {/* Circular Chain: Purple with cycle icon */}
-                    {isCircularChain && (
-                      <g pointerEvents="none">
-                        <rect
-                          x={pixel.x - cellSize / 2 + 1}
-                          y={pixel.y - cellSize / 2 + 1}
-                          width={cellSize - 2}
-                          height={cellSize - 2}
-                          fill="rgba(139, 92, 246, 0.15)"
-                          stroke="rgba(139, 92, 246, 0.9)"
-                          strokeWidth={3}
-                          rx={5}
-                        />
-                        <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
-                          <circle cx={0} cy={0} r={6} fill="rgba(139, 92, 246, 0.95)" />
-                          <text x={0} y={1} textAnchor="middle" fontSize={8} fill="white" fontWeight="bold">↻</text>
-                        </g>
-                      </g>
-                    )}
-
-                    {/* Blocked by chain leading to edge (not root, not mutual/circular) */}
-                    {isStuck && !isMutualBlock && !isCircularChain && !isRootCause && rootCause === 'edge_blocked' && (
-                      <g pointerEvents="none">
-                        <rect
-                          x={pixel.x - cellSize / 2 + 1}
-                          y={pixel.y - cellSize / 2 + 1}
-                          width={cellSize - 2}
-                          height={cellSize - 2}
-                          fill="rgba(239, 68, 68, 0.15)"
-                          stroke="rgba(239, 68, 68, 0.9)"
-                          strokeWidth={3}
-                          strokeDasharray="5 2"
-                          rx={5}
-                        />
-                        {/* Chain length indicator */}
-                        <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
-                          <circle cx={0} cy={0} r={6} fill="rgba(239, 68, 68, 0.95)" />
-                          <text x={0} y={1} textAnchor="middle" fontSize={chainLength > 9 ? 6 : 8} fill="white" fontWeight="bold">
-                            {chainLength > 1 ? chainLength : '!'}
-                          </text>
-                        </g>
-                      </g>
-                    )}
-
-                    {/* Pure blocker (not stuck itself) */}
-                    {isBlocker && !isStuck && (
-                      <g pointerEvents="none">
-                        <rect
-                          x={pixel.x - cellSize / 2 + 1}
-                          y={pixel.y - cellSize / 2 + 1}
-                          width={cellSize - 2}
-                          height={cellSize - 2}
-                          fill="rgba(245, 158, 11, 0.15)"
-                          stroke="rgba(245, 158, 11, 0.9)"
-                          strokeWidth={3}
-                          rx={5}
-                        />
-                        <g transform={`translate(${pixel.x + cellSize / 2 - 8}, ${pixel.y - cellSize / 2 + 8})`}>
-                          <circle cx={0} cy={0} r={6} fill="rgba(245, 158, 11, 0.95)" />
-                          <text x={0} y={1} textAnchor="middle" fontSize={8} fill="white" fontWeight="bold">⛓</text>
-                        </g>
-                      </g>
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
-          </div>
-
-          {/* Scroll hint for large grids */}
-          {(rows > 10 || cols > 10) && (
-            <p className="text-xs text-center text-muted-foreground mt-1">
-              Scroll to navigate, Ctrl+scroll to zoom
-            </p>
-          )}
-
-          {/* Deadlock Legend - shown when deadlock occurs */}
-          {deadlockInfo.hasDeadlock && (
-            <div className="mt-3 p-3 bg-muted/50 rounded-lg border border-muted">
-              <p className="text-xs font-medium text-muted-foreground mb-2">Deadlock - Why blocks are stuck:</p>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded border-2 border-amber-400 bg-amber-400/20 flex items-center justify-center">
-                    <span className="text-[8px]">▭</span>
-                  </div>
-                  <span className="text-muted-foreground">Points at edge (root cause)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded border-2 border-purple-500 bg-purple-500/20 flex items-center justify-center">
-                    <span className="text-[8px]">↔</span>
-                  </div>
-                  <span className="text-muted-foreground">Mutual block (A↔B)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded border-2 border-purple-500 bg-purple-500/20 flex items-center justify-center">
-                    <span className="text-[8px]">↻</span>
-                  </div>
-                  <span className="text-muted-foreground">Circular chain (A→B→C→A)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded border-2 border-red-500 border-dashed bg-red-500/20 flex items-center justify-center">
-                    <span className="text-[8px] font-bold">3</span>
-                  </div>
-                  <span className="text-muted-foreground">Blocked (# = chain length)</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Difficulty Adjustment Buttons */}
-          {blocks.size > 0 && solvability.solvable && (
-            <div className="space-y-2">
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={decreaseDifficulty}
-                  disabled={isAdjusting || !canDecreaseDifficulty}
-                  className="flex-1"
-                >
-                  <TrendingDown className="h-4 w-4 mr-2" />
-                  Easier
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={increaseDifficulty}
-                  disabled={isAdjusting || !canIncreaseDifficulty}
-                  className="flex-1"
-                >
-                  <TrendingUp className="h-4 w-4 mr-2" />
-                  Harder
-                </Button>
-              </div>
-
-              {/* Adjustment Feedback Toast */}
-              {lastAdjustmentResult && (
-                <div className={`p-2 rounded-lg text-sm ${
-                  lastAdjustmentResult.success
-                    ? 'bg-green-500/10 border border-green-500/30 text-green-400'
-                    : 'bg-amber-500/10 border border-amber-500/30 text-amber-400'
-                }`}>
-                  <p className="font-medium">{lastAdjustmentResult.action}</p>
-                  {lastAdjustmentResult.success && (
-                    <p className="text-xs">
-                      Score: {lastAdjustmentResult.scoreBefore} → {lastAdjustmentResult.scoreAfter}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Difficulty Breakdown */}
-          {blocks.size > 0 && puzzleAnalysis && (
-            <div className="p-3 bg-muted/30 rounded-lg space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium flex items-center gap-2">
-                  <BarChart3 className="h-4 w-4" />
-                  Difficulty Analysis
-                </span>
-                {difficultyBreakdown && (
-                  <Badge className={`${
-                    difficultyBreakdown.tier === 'easy' ? 'bg-green-500' :
-                    difficultyBreakdown.tier === 'medium' ? 'bg-yellow-500 text-black' :
-                    difficultyBreakdown.tier === 'hard' ? 'bg-orange-500' :
-                    'bg-red-500'
-                  }`}>
-                    {difficultyBreakdown.score}/100 ({difficultyBreakdown.tier})
-                  </Badge>
-                )}
-              </div>
-
-              {difficultyBreakdown && (
-                <div className="space-y-2">
-                  {/* Progress bar */}
-                  <div className="h-2 bg-muted rounded-full overflow-hidden">
-                    <div
-                      className={`h-full transition-all ${
-                        difficultyBreakdown.tier === 'easy' ? 'bg-green-500' :
-                        difficultyBreakdown.tier === 'medium' ? 'bg-yellow-500' :
-                        difficultyBreakdown.tier === 'hard' ? 'bg-orange-500' :
-                        'bg-red-500'
-                      }`}
-                      style={{ width: `${difficultyBreakdown.score}%` }}
-                    />
-                  </div>
-
-                  {/* Score breakdown */}
-                  <div className="space-y-2 text-xs">
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Avg Blockers ({difficultyBreakdown.components.avgBlockers.toFixed(2)} × 4.5)</span>
-                      <span className="font-mono">+{(difficultyBreakdown.components.avgBlockers * 4.5).toFixed(1)}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Clearability ({(difficultyBreakdown.components.clearability * 100).toFixed(1)}%)</span>
-                      <span className="font-mono">+{((1 - difficultyBreakdown.components.clearability) * 20).toFixed(1)}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Block Count ({difficultyBreakdown.components.blockCount})</span>
-                      <span className="font-mono">+{Math.min(difficultyBreakdown.components.blockCount / 40, 10).toFixed(1)}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Gate Blocks ({difficultyBreakdown.components.lockedCount})</span>
-                      <span className="font-mono">+{Math.min(difficultyBreakdown.components.lockedCount, 5)}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Ice Blocks ({difficultyBreakdown.components.icedCount}{difficultyBreakdown.components.icedCount > 0 ? `, avg ${difficultyBreakdown.components.avgIceCount.toFixed(1)}` : ''})</span>
-                      <span className="font-mono">+{(Math.min(difficultyBreakdown.components.icedCount, 5) + Math.min(difficultyBreakdown.components.avgIceCount * 0.5, 5)).toFixed(1)}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Mirror Blocks ({difficultyBreakdown.components.mirrorCount})</span>
-                      <span className="font-mono">+{Math.min(difficultyBreakdown.components.mirrorCount, 5)}</span>
-                    </div>
-                    {difficultyBreakdown.components.sizeBonus > 0 && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-muted-foreground">Size Bonus (400+ blocks)</span>
-                        <span className="font-mono">+{difficultyBreakdown.components.sizeBonus.toFixed(1)}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between items-center pt-2 border-t border-muted font-medium">
-                      <span>Total Score</span>
-                      <span className="font-mono">{difficultyBreakdown.score}/100</span>
-                    </div>
-                  </div>
-
-                  {/* Formula */}
-                  <div className="pt-2 border-t border-muted text-xs space-y-1.5">
-                    <p className="font-medium text-foreground">Difficulty Formula:</p>
-                    <div className="font-mono text-muted-foreground bg-muted/50 p-2 rounded space-y-1">
-                      <p>avgBlockers × 4.5 (primary)</p>
-                      <p>+ (1 - clearability) × 20</p>
-                      <p>+ min(blocks/40, 10)</p>
-                      <p>+ min(gate, 5)</p>
-                      <p>+ min(ice, 5) + min(avgIce × 0.5, 5)</p>
-                      <p>+ min(mirror, 5)</p>
-                      <p>+ sizeBonus (400+ blocks: up to +20)</p>
-                    </div>
-                    <p className="text-muted-foreground">0-24 = Easy, 25-49 = Medium, 50-74 = Hard, 75+ = Super Hard</p>
-                  </div>
-
-                  {/* Generation algorithm explanation */}
-                  <div className="pt-2 border-t border-muted text-xs space-y-2">
-                    <p className="font-medium text-foreground">How "Fill Grid Randomly" works:</p>
-                    <div className="space-y-1.5 text-muted-foreground">
-                      <p>1. Fills every cell with a block pointing toward nearest edge</p>
-                      <p>2. Randomly flips ~50% of directions while keeping solvable</p>
-                      <p>3. Adds random gate blocks while keeping solvable</p>
-                      <p>4. Calculates difficulty based on blockers, gate %, and clearability</p>
-                    </div>
-                    <p className="text-muted-foreground italic">Click multiple times to get different configurations.</p>
-                  </div>
-                </div>
-              )}
-
-              {!puzzleAnalysis.solvable && (
-                <p className="text-xs text-amber-500">Level is not solvable - metrics unavailable</p>
-              )}
-            </div>
-          )}
-
-          {/* Grid Size */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">Grid Size</label>
-              <span className="text-sm text-muted-foreground">{rows} x {cols} ({rows * cols} cells)</span>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs text-muted-foreground">Rows</label>
-                <Slider
-                  value={[rows]}
-                  onValueChange={([v]) => handleSizeChange(v, cols)}
-                  min={3}
-                  max={50}
-                  step={1}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">Columns</label>
-                <Slider
-                  value={[cols]}
-                  onValueChange={([v]) => handleSizeChange(rows, v)}
-                  min={3}
-                  max={50}
-                  step={1}
-                />
-              </div>
-            </div>
-          </div>
-
-        </CardContent>
-      </Card>
-
-      {/* Configuration Panel */}
-      <Card>
-        <CardContent className="pt-4 space-y-4">
-          {/* Smart Fill */}
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={smartFillLevel}
-            disabled={isGenerating}
-            className="w-full"
-            title="Fill entire grid with random solvable blocks"
-          >
-            {isGenerating ? (
-              <>
-                <span className="animate-spin mr-2">⏳</span>
-                Generating...
-              </>
-            ) : (
-              <>
-                <Sparkles className="h-4 w-4 mr-2" />
-                Fill Grid Randomly
-              </>
-            )}
-          </Button>
-
-          {/* View Options */}
-          <div className="flex gap-2">
-            <Button
-              variant={showBlocksAhead ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setShowBlocksAhead(!showBlocksAhead)}
-              className="flex-1"
-            >
-              {showBlocksAhead ? (
-                <>
-                  <Eye className="h-4 w-4 mr-2" />
-                  Hide Blockers
-                </>
-              ) : (
-                <>
-                  <EyeOff className="h-4 w-4 mr-2" />
-                  Show Blockers
-                </>
-              )}
-            </Button>
-          </div>
-
-          {/* Actions */}
-          <div className="flex gap-2 pt-2">
-            <Button variant="outline" size="sm" onClick={clearAll} disabled={blocks.size === 0} className="flex-1">
-              <Trash2 className="h-4 w-4 mr-2" />
-              Clear All
-            </Button>
-            <Button size="sm" onClick={handlePlay} disabled={!solvability.solvable} className="flex-1">
-              <Play className="h-4 w-4 mr-2" />
-              Play Level
-            </Button>
-          </div>
-
-          {/* Level Number & Add to Collection */}
-          {onAddToCollection && (
-            <div className="space-y-3 pt-3 border-t">
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-medium">Level Position</label>
-                <Badge variant="outline">#{levelNumber}</Badge>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onLevelNumberChange?.(Math.max(1, levelNumber - 1))}
-                  disabled={levelNumber <= 1}
-                >
-                  -
-                </Button>
-                <Slider
-                  value={[levelNumber]}
-                  min={1}
-                  max={maxLevelNumber}
-                  step={1}
-                  onValueChange={([v]) => onLevelNumberChange?.(v)}
-                  className="flex-1"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onLevelNumberChange?.(Math.min(maxLevelNumber, levelNumber + 1))}
-                  disabled={levelNumber >= maxLevelNumber}
-                >
-                  +
-                </Button>
-              </div>
-              <div className="text-xs text-muted-foreground text-center">
-                Expected: <span className={`font-medium ${DIFFICULTY_BADGE_COLORS[getExpectedDifficulty(levelNumber)]?.text || 'text-foreground'}`}>
-                  {getExpectedDifficulty(levelNumber)}
-                </span> (Position {getSawtoothPosition(levelNumber)} in cycle)
-              </div>
-              {/* Collection Target Selector */}
-              {collections && collections.length > 1 && (
-                <div className="flex items-center gap-2">
-                  <FolderOpen className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm" className="flex-1 justify-between h-8">
-                        <span className="truncate text-xs">
-                          {collections.find(c => c.id === targetCollectionId)?.name || 'Select collection'}
-                        </span>
-                        <ChevronDown className="h-3 w-3 ml-1 shrink-0" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-56">
-                      {collections.map(c => (
-                        <DropdownMenuItem
-                          key={c.id}
-                          onClick={() => setTargetCollectionId(c.id)}
-                          className={c.id === targetCollectionId ? 'bg-accent' : ''}
-                        >
-                          <span className="flex-1 truncate">{c.name}</span>
-                          <span className="text-xs text-muted-foreground ml-2">{c.levelCount}</span>
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              )}
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={handleAddToCollection}
-                disabled={!solvability.solvable || blocks.size === 0}
-                className="w-full"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                {editingLevel ? 'Update Level' : `Add to ${collections?.find(c => c.id === targetCollectionId)?.name || 'Collection'}`}
-              </Button>
-            </div>
-          )}
-
-          {/* Import/Export JSON */}
-          <div className="pt-3 border-t space-y-2">
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleImportMultipleFiles}
-                className="flex-1"
-                title="Import multiple JSON files"
-              >
-                <Upload className="h-4 w-4 mr-2" />
-                Import Files
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleExportJSON}
-                disabled={blocks.size === 0}
-                className="flex-1"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export JSON
-              </Button>
-            </div>
-          </div>
+          <ConfigurationPanel
+            blocks={blocks}
+            holes={holes}
+            rows={rows}
+            cols={cols}
+            solvability={solvability}
+            isGenerating={isGenerating}
+            showBlocksAhead={showBlocksAhead}
+            setShowBlocksAhead={setShowBlocksAhead}
+            smartFillLevel={smartFillLevel}
+            clearAll={clearAll}
+            handlePlay={handlePlay}
+            handleExportJSON={handleExportJSON}
+            handleImportMultipleFiles={handleImportMultipleFiles}
+            handleSizeChange={handleSizeChange}
+            onAddToCollection={onAddToCollection}
+            editingLevel={editingLevel}
+            levelNumber={levelNumber}
+            onLevelNumberChange={onLevelNumberChange}
+            maxLevelNumber={maxLevelNumber}
+            handleAddToCollection={handleAddToCollection}
+            collections={collections}
+            targetCollectionId={targetCollectionId}
+            setTargetCollectionId={setTargetCollectionId}
+          />
         </CardContent>
       </Card>
 
@@ -2456,282 +1428,5 @@ export function SquareBlockLevelDesigner({
         />
       )}
     </div>
-  );
-}
-
-// ============================================================================
-// Sub-components
-// ============================================================================
-
-interface EmbeddedMetricsPanelProps {
-  blocks: Map<string, SquareBlock>;
-  holes: Set<string>;
-  rows: number;
-  cols: number;
-  levelNumber: number;
-  solvable: boolean;
-}
-
-function EmbeddedMetricsPanel({
-  blocks,
-  holes,
-  rows,
-  cols,
-  levelNumber,
-  solvable,
-}: EmbeddedMetricsPanelProps) {
-  const cellCount = blocks.size;
-  const holeCount = holes.size;
-  const lockedCount = Array.from(blocks.values()).filter(b => b.locked).length;
-  const icedCount = Array.from(blocks.values()).filter(b => b.iceCount && b.iceCount > 0).length;
-  const mirrorCount = Array.from(blocks.values()).filter(b => b.mirror).length;
-
-  // Use new analyzer
-  const analysis = useMemo(() => {
-    if (cellCount === 0) return null;
-    return analyzePuzzle(blocks, holes, rows, cols);
-  }, [blocks, holes, rows, cols, cellCount]);
-
-  const breakdown = useMemo(() => {
-    if (!analysis || !analysis.solvable) return null;
-    return calculateDifficultyScore(analysis);
-  }, [analysis]);
-
-  const difficulty = breakdown?.tier ?? 'easy';
-  const sawtoothPosition = getSawtoothPosition(levelNumber);
-  const expectedDiff = getExpectedDifficulty(levelNumber);
-  const flowZone = calculateFlowZone(difficulty, levelNumber);
-  const estimation = cellCount > 0 ? estimateLevel(difficulty, cellCount) : null;
-
-  const flowColors = FLOW_ZONE_COLORS[flowZone];
-  const diffColors = DIFFICULTY_BADGE_COLORS[difficulty];
-  const expectedColors = DIFFICULTY_BADGE_COLORS[expectedDiff];
-
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <BarChart3 className="h-4 w-4" />
-          Level {levelNumber} Metrics
-        </CardTitle>
-        <CardDescription>Position {sawtoothPosition} in 10-level cycle</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Basic Stats */}
-        <div className="grid grid-cols-5 gap-2 text-center">
-          <div className="p-2 bg-muted/50 rounded-lg">
-            <p className="text-2xl font-bold">{cellCount}</p>
-            <p className="text-xs text-muted-foreground">Blocks</p>
-          </div>
-          <div className="p-2 bg-muted/50 rounded-lg">
-            <p className="text-2xl font-bold">{holeCount}</p>
-            <p className="text-xs text-muted-foreground">Holes</p>
-          </div>
-          <div className="p-2 bg-muted/50 rounded-lg">
-            <p className="text-2xl font-bold text-amber-400">{lockedCount}</p>
-            <p className="text-xs text-muted-foreground">Gate</p>
-          </div>
-          <div className="p-2 bg-muted/50 rounded-lg">
-            <p className="text-2xl font-bold text-cyan-400">{icedCount}</p>
-            <p className="text-xs text-muted-foreground">Iced</p>
-          </div>
-          <div className="p-2 bg-muted/50 rounded-lg">
-            <p className="text-2xl font-bold text-purple-400">{mirrorCount}</p>
-            <p className="text-xs text-muted-foreground">Mirror</p>
-          </div>
-        </div>
-
-        {/* Mistake Mechanic Info */}
-        <div className="p-3 bg-muted/30 rounded-lg text-center">
-          <p className="text-sm text-muted-foreground">
-            Players have <span className="font-bold text-red-500">3 chances</span> (❤️❤️❤️)
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Tapping a blocked block = lose a heart
-          </p>
-        </div>
-
-        {/* Difficulty Score */}
-        {breakdown && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Difficulty Score</span>
-              <span className={`font-bold ${
-                breakdown.tier === 'easy' ? 'text-green-500' :
-                breakdown.tier === 'medium' ? 'text-yellow-500' :
-                breakdown.tier === 'hard' ? 'text-orange-500' :
-                'text-red-500'
-              }`}>{breakdown.score}/100</span>
-            </div>
-            <Progress value={breakdown.score} className="h-2" />
-
-            {/* Breakdown Components */}
-            <div className="text-xs space-y-1 mt-2 p-2 bg-muted/30 rounded">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Avg Blockers ({breakdown.components.avgBlockers.toFixed(1)}×4.5)</span>
-                <span>+{(breakdown.components.avgBlockers * 4.5).toFixed(1)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Clearability ({(breakdown.components.clearability * 100).toFixed(0)}%)</span>
-                <span>+{((1 - breakdown.components.clearability) * 20).toFixed(1)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Blocks ({breakdown.components.blockCount})</span>
-                <span>+{Math.min(breakdown.components.blockCount / 40, 10).toFixed(1)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Gate ({breakdown.components.lockedCount})</span>
-                <span>+{Math.min(breakdown.components.lockedCount, 5)}</span>
-              </div>
-              {breakdown.components.sizeBonus > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Size Bonus (400+)</span>
-                  <span>+{breakdown.components.sizeBonus.toFixed(1)}</span>
-                </div>
-              )}
-              <div className="flex justify-between pt-1 border-t border-muted font-medium">
-                <span>Score</span>
-                <span>{breakdown.score}/100</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Difficulty Tier */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-sm">
-            <Target className="h-4 w-4 text-muted-foreground" />
-            <span className="text-muted-foreground">Difficulty Tier</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Actual</span>
-            <Badge className={`${diffColors.bg} ${diffColors.text}`}>
-              {difficulty === 'superHard' ? 'Super Hard' : difficulty.charAt(0).toUpperCase() + difficulty.slice(1)}
-            </Badge>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Expected</span>
-            <Badge variant="outline" className={expectedColors.text}>
-              {expectedDiff === 'superHard' ? 'Super Hard' : expectedDiff.charAt(0).toUpperCase() + expectedDiff.slice(1)}
-            </Badge>
-          </div>
-        </div>
-
-        {/* Flow Zone */}
-        <div className={`p-3 rounded-lg border ${flowColors.bg} ${flowColors.border}`}>
-          <div className="flex items-center gap-2">
-            <Activity className={`h-4 w-4 ${flowColors.text}`} />
-            <span className={`font-medium ${flowColors.text}`}>
-              {flowZone === 'flow' ? 'Flow State' : flowZone === 'boredom' ? 'Too Easy' : 'Too Hard'}
-            </span>
-          </div>
-        </div>
-
-        {/* Estimation */}
-        {estimation && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-sm">
-              <Clock className="h-4 w-4 text-muted-foreground" />
-              <span className="text-muted-foreground">Player Estimation</span>
-            </div>
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div className="p-2 bg-muted/50 rounded-lg">
-                <p className="text-sm font-bold">{estimation.timePerAttemptDisplay}</p>
-                <p className="text-xs text-muted-foreground">Per Attempt</p>
-              </div>
-              <div className="p-2 bg-muted/50 rounded-lg">
-                <p className="text-sm font-bold">{estimation.attemptsDisplay}</p>
-                <p className="text-xs text-muted-foreground">Attempts</p>
-              </div>
-              <div className="p-2 bg-muted/50 rounded-lg">
-                <p className="text-sm font-bold">{estimation.totalTimeDisplay}</p>
-                <p className="text-xs text-muted-foreground">Total Time</p>
-              </div>
-            </div>
-            <div className="flex items-center justify-between p-2 bg-muted/30 rounded-lg text-xs">
-              <div className="flex items-center gap-1.5">
-                <Percent className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="text-muted-foreground">Target Win Rate:</span>
-              </div>
-              <span className="font-medium">{estimation.targetWinRate[0]}% - {estimation.targetWinRate[1]}%</span>
-            </div>
-          </div>
-        )}
-
-        {/* Sawtooth */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-sm">
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            <span className="text-muted-foreground">Sawtooth Position</span>
-          </div>
-          <div className="flex gap-0.5">
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((pos) => {
-              const expected = SAWTOOTH_EXPECTED_DISPLAY[pos as keyof typeof SAWTOOTH_EXPECTED_DISPLAY];
-              const colors = DIFFICULTY_BADGE_COLORS[expected];
-              const isActive = pos === sawtoothPosition;
-              return (
-                <div
-                  key={pos}
-                  className={`flex-1 h-8 rounded-sm flex items-center justify-center text-xs font-medium transition-all ${
-                    isActive ? `${colors.bg} ${colors.text} ring-2 ring-white` : 'bg-muted/30 text-muted-foreground'
-                  }`}
-                >
-                  {pos}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ============================================================================
-// Direction Arrow
-// ============================================================================
-
-interface DirectionArrowProps {
-  cx: number;
-  cy: number;
-  direction: BlockDirection;
-  size: number;
-  color?: string;
-}
-
-function DirectionArrow({ cx, cy, direction, size, color = '#ffffff' }: DirectionArrowProps) {
-  const arrowLength = size * 0.7;
-  const arrowHeadSize = size * 0.35;
-  const strokeWidth = 3;
-  const outlineWidth = strokeWidth + 2;
-
-  if (isBidirectional(direction)) {
-    const angle = AXIS_ANGLES[direction];
-    const lineStart = -arrowLength * 0.35;
-    const lineEnd = arrowLength * 0.35;
-
-    return (
-      <g transform={`translate(${cx}, ${cy}) rotate(${angle})`}>
-        <line x1={lineStart} y1={0} x2={lineEnd} y2={0} stroke="rgba(0, 0, 0, 0.6)" strokeWidth={outlineWidth} strokeLinecap="round" />
-        <polygon points={`${lineEnd - arrowHeadSize * 0.7},${-arrowHeadSize * 0.5} ${lineEnd + 3},0 ${lineEnd - arrowHeadSize * 0.7},${arrowHeadSize * 0.5}`} fill="rgba(0, 0, 0, 0.6)" />
-        <polygon points={`${lineStart + arrowHeadSize * 0.7},${-arrowHeadSize * 0.5} ${lineStart - 3},0 ${lineStart + arrowHeadSize * 0.7},${arrowHeadSize * 0.5}`} fill="rgba(0, 0, 0, 0.6)" />
-        <line x1={lineStart} y1={0} x2={lineEnd} y2={0} stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-        <polygon points={`${lineEnd - arrowHeadSize * 0.7},${-arrowHeadSize * 0.5} ${lineEnd + 3},0 ${lineEnd - arrowHeadSize * 0.7},${arrowHeadSize * 0.5}`} fill={color} />
-        <polygon points={`${lineStart + arrowHeadSize * 0.7},${-arrowHeadSize * 0.5} ${lineStart - 3},0 ${lineStart + arrowHeadSize * 0.7},${arrowHeadSize * 0.5}`} fill={color} />
-      </g>
-    );
-  }
-
-  const angle = DIRECTION_ANGLES[direction as SquareDirection];
-  const lineStart = -arrowLength * 0.3;
-  const lineEnd = arrowLength * 0.35;
-
-  return (
-    <g transform={`translate(${cx}, ${cy}) rotate(${angle})`}>
-      <line x1={lineStart} y1={0} x2={lineEnd} y2={0} stroke="rgba(0, 0, 0, 0.6)" strokeWidth={outlineWidth} strokeLinecap="round" />
-      <polygon points={`${lineEnd - arrowHeadSize * 0.7},${-arrowHeadSize * 0.55} ${lineEnd + 3},0 ${lineEnd - arrowHeadSize * 0.7},${arrowHeadSize * 0.55}`} fill="rgba(0, 0, 0, 0.6)" />
-      <line x1={lineStart} y1={0} x2={lineEnd} y2={0} stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-      <polygon points={`${lineEnd - arrowHeadSize * 0.7},${-arrowHeadSize * 0.55} ${lineEnd + 3},0 ${lineEnd - arrowHeadSize * 0.7},${arrowHeadSize * 0.55}`} fill={color} />
-    </g>
   );
 }

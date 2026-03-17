@@ -28,7 +28,6 @@ import { SAWTOOTH_CYCLE } from '@/lib/constants';
 export interface DifficultyRecipe {
   mismatchDepth: number;       // 0-1
   maxSelectableItems: number;  // 1-20
-  waitingStandSlots: number;   // 3-7
   activeLauncherCount: number; // 1-3
   seed: number;
 }
@@ -134,7 +133,6 @@ function runSingleSimulation(
   const simConfig: StudioGameConfig = {
     ...config,
     maxSelectableItems: recipe.maxSelectableItems,
-    waitingStandSlots: recipe.waitingStandSlots,
     activeLauncherCount: recipe.activeLauncherCount,
     mismatchDepth: recipe.mismatchDepth,
     seed: Math.floor(rng() * 2147483647),
@@ -242,12 +240,12 @@ const TIER_CONFIG: Record<DifficultyTier, { min: number; max: number; winRate: [
 
 /** Recipe presets for each tier (starting point for targeting). */
 const TIER_PRESETS: Record<DifficultyTier, Omit<DifficultyRecipe, 'seed'>> = {
-  trivial:   { mismatchDepth: 0,    maxSelectableItems: 10, waitingStandSlots: 7, activeLauncherCount: 3 },
-  easy:      { mismatchDepth: 0.15, maxSelectableItems: 9,  waitingStandSlots: 6, activeLauncherCount: 2 },
-  medium:    { mismatchDepth: 0.35, maxSelectableItems: 8,  waitingStandSlots: 5, activeLauncherCount: 2 },
-  hard:      { mismatchDepth: 0.6,  maxSelectableItems: 7,  waitingStandSlots: 5, activeLauncherCount: 2 },
-  expert:    { mismatchDepth: 0.8,  maxSelectableItems: 6,  waitingStandSlots: 4, activeLauncherCount: 2 },
-  nightmare: { mismatchDepth: 1.0,  maxSelectableItems: 6,  waitingStandSlots: 3, activeLauncherCount: 1 },
+  trivial:   { mismatchDepth: 0,    maxSelectableItems: 10, activeLauncherCount: 3 },
+  easy:      { mismatchDepth: 0.15, maxSelectableItems: 9,  activeLauncherCount: 2 },
+  medium:    { mismatchDepth: 0.35, maxSelectableItems: 8,  activeLauncherCount: 2 },
+  hard:      { mismatchDepth: 0.6,  maxSelectableItems: 7,  activeLauncherCount: 2 },
+  expert:    { mismatchDepth: 0.8,  maxSelectableItems: 6,  activeLauncherCount: 2 },
+  nightmare: { mismatchDepth: 1.0,  maxSelectableItems: 6,  activeLauncherCount: 1 },
 };
 
 /** Get tier for a score. */
@@ -282,7 +280,6 @@ function initialRecipeFromTarget(targetScore: number, seed: number): DifficultyR
   return {
     mismatchDepth: Math.round(lerp(preset.mismatchDepth, nextPreset.mismatchDepth, t) * 20) / 20, // snap to 0.05
     maxSelectableItems: Math.round(lerp(preset.maxSelectableItems, nextPreset.maxSelectableItems, t)),
-    waitingStandSlots: Math.round(lerp(preset.waitingStandSlots, nextPreset.waitingStandSlots, t)),
     activeLauncherCount: Math.round(lerp(preset.activeLauncherCount, nextPreset.activeLauncherCount, t)),
     seed,
   };
@@ -296,7 +293,6 @@ function computeRecipeScore(config: StudioGameConfig, recipe: DifficultyRecipe):
     uniqueColors,
     groupCount: new Set(config.launchers.map((l) => l.group)).size,
     launcherCount: config.launchers.length,
-    waitingStandSlots: recipe.waitingStandSlots,
     maxSelectableItems: recipe.maxSelectableItems,
     totalTiles: config.selectableItems.length,
     mismatchDepth: recipe.mismatchDepth,
@@ -334,8 +330,6 @@ export function targetDifficulty(
       // Need to increase difficulty
       if (recipe.mismatchDepth < 1) {
         recipe = { ...recipe, mismatchDepth: Math.min(1, +(recipe.mismatchDepth + 0.05).toFixed(2)) };
-      } else if (recipe.waitingStandSlots > 3) {
-        recipe = { ...recipe, waitingStandSlots: recipe.waitingStandSlots - 1 };
       } else if (recipe.maxSelectableItems > 1) {
         recipe = { ...recipe, maxSelectableItems: recipe.maxSelectableItems - 1 };
       } else if (recipe.activeLauncherCount > 1) {
@@ -345,8 +339,6 @@ export function targetDifficulty(
       // Need to decrease difficulty
       if (recipe.mismatchDepth > 0) {
         recipe = { ...recipe, mismatchDepth: Math.max(0, +(recipe.mismatchDepth - 0.05).toFixed(2)) };
-      } else if (recipe.waitingStandSlots < 7) {
-        recipe = { ...recipe, waitingStandSlots: recipe.waitingStandSlots + 1 };
       } else if (recipe.maxSelectableItems < 20) {
         recipe = { ...recipe, maxSelectableItems: recipe.maxSelectableItems + 1 };
       } else if (recipe.activeLauncherCount < 3) {

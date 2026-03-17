@@ -301,7 +301,6 @@ describe('Recommended Settings', () => {
         expect(settings.gridSize.recommended).toBeLessThanOrEqual(settings.gridSize.max);
 
         expect(settings.fruitTypes.min).toBeLessThanOrEqual(settings.fruitTypes.max);
-        expect(settings.waitingStandSlots.min).toBeLessThanOrEqual(settings.waitingStandSlots.max);
         expect(settings.sinkWidth.min).toBeLessThanOrEqual(settings.sinkWidth.max);
       });
     }
@@ -313,11 +312,11 @@ describe('Recommended Settings', () => {
       expect(trivial.gridSize.recommended).toBeLessThan(nightmare.gridSize.recommended);
     });
 
-    it('should recommend more waiting slots for easier difficulties', () => {
+    it('should recommend fewer fruit types for easier difficulties', () => {
       const easy = getRecommendedSettings('easy');
       const hard = getRecommendedSettings('hard');
 
-      expect(easy.waitingStandSlots.recommended).toBeGreaterThan(hard.waitingStandSlots.recommended);
+      expect(easy.fruitTypes.recommended).toBeLessThanOrEqual(hard.fruitTypes.recommended);
     });
   });
 });
@@ -350,7 +349,6 @@ describe('Completion Time Estimation', () => {
         averageStackDepth: 2,
         maxStackDepth: 2,
         waitingStandSlots: 9,
-        bufferRatio: 4.5,
         decisionComplexity: 0.3,
         visibilityScore: 1,
         distributionEvenness: 1,
@@ -439,39 +437,7 @@ describe('Launcher Metrics', () => {
   });
 });
 
-// ============================================================================
-// Buffer Metrics
-// ============================================================================
-
-describe('Buffer Metrics', () => {
-  describe('Buffer ratio calculation', () => {
-    it('should calculate slots per fruit type', () => {
-      const pixelArt = createTestPixelArt([
-        ['apple', 'orange'], // 2 fruit types
-      ]);
-
-      const sinkStacks = createTestSinkStacks([['apple', 'apple', 'apple']]);
-      const level = createTestFruitMatchLevel(pixelArt, sinkStacks, {
-        waitingStandSlots: 8,
-      });
-
-      const metrics = calculateDifficultyMetrics(level);
-      // 8 slots / 2 fruit types = 4 ratio
-      expect(metrics.bufferRatio).toBe(4);
-    });
-
-    it('should handle single fruit type', () => {
-      const pixelArt = createTestPixelArt([['apple']]);
-      const sinkStacks = createTestSinkStacks([['apple', 'apple', 'apple']]);
-      const level = createTestFruitMatchLevel(pixelArt, sinkStacks, {
-        waitingStandSlots: 7,
-      });
-
-      const metrics = calculateDifficultyMetrics(level);
-      expect(metrics.bufferRatio).toBe(7);
-    });
-  });
-});
+// Buffer ratio was removed — waitingStandSlots is a fixed game constant, not a difficulty lever.
 
 // ============================================================================
 // Sink Metrics

@@ -273,24 +273,19 @@ export function pixelKey(row: number, col: number): string {
 
 export function calculateFruitMatchDifficulty(
   totalPixels: number,
-  waitingStandSlots: number,
   uniqueFruits: number
 ): { score: number; tier: DifficultyTier } {
   // Factors:
   // 1. More pixels = harder (more matches needed)
-  // 2. Fewer waiting slots = harder (less room for error)
-  // 3. More fruit types = harder (more variety to manage)
+  // 2. More fruit types = harder (more variety to manage)
 
-  // Base score from pixel count (0-40 points)
-  const pixelScore = Math.min(40, totalPixels / 2);
+  // Base score from pixel count (0-55 points)
+  const pixelScore = Math.min(55, totalPixels / 1.5);
 
-  // Slot penalty (0-30 points) - fewer slots = harder
-  const slotScore = Math.max(0, (9 - waitingStandSlots) * 6);
+  // Variety score (0-45 points)
+  const varietyScore = Math.min(45, uniqueFruits * 7.5);
 
-  // Variety score (0-30 points)
-  const varietyScore = Math.min(30, uniqueFruits * 5);
-
-  const score = Math.min(100, Math.round(pixelScore + slotScore + varietyScore));
+  const score = Math.min(100, Math.round(pixelScore + varietyScore));
 
   let tier: DifficultyTier;
   if (score < 20) tier = 'trivial';
