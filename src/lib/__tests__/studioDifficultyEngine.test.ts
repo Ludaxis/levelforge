@@ -13,6 +13,8 @@ import {
   mulberry32,
   seededShuffle,
   initializeStateSeeded,
+  buildDeterministicSequence,
+  getDeterministicMaxSwap,
   buildSolvableSequenceSeeded,
   buildChallengingSequenceSeeded,
 } from '@/lib/useStudioGame';
@@ -319,8 +321,6 @@ describe('Difficulty targeting', () => {
       expect(r.mismatchDepth).toBeLessThanOrEqual(1);
       expect(r.maxSelectableItems).toBeGreaterThanOrEqual(1);
       expect(r.maxSelectableItems).toBeLessThanOrEqual(20);
-      expect(r.waitingStandSlots).toBeGreaterThanOrEqual(3);
-      expect(r.waitingStandSlots).toBeLessThanOrEqual(7);
       expect(r.activeLauncherCount).toBeGreaterThanOrEqual(1);
       expect(r.activeLauncherCount).toBeLessThanOrEqual(3);
     }
@@ -353,7 +353,6 @@ describe('Monte Carlo simulation', () => {
     const easyRecipe: DifficultyRecipe = {
       mismatchDepth: 0,
       maxSelectableItems: 10,
-      waitingStandSlots: 7,
       activeLauncherCount: 2,
       seed: 42,
     };
@@ -361,7 +360,6 @@ describe('Monte Carlo simulation', () => {
     const hardRecipe: DifficultyRecipe = {
       mismatchDepth: 0.8,
       maxSelectableItems: 6,
-      waitingStandSlots: 3,
       activeLauncherCount: 1,
       seed: 42,
     };
@@ -377,7 +375,6 @@ describe('Monte Carlo simulation', () => {
     const recipe: DifficultyRecipe = {
       mismatchDepth: 0,
       maxSelectableItems: 6,
-      waitingStandSlots: 5,
       activeLauncherCount: 2,
       seed: 42,
     };
@@ -400,7 +397,6 @@ describe('Monte Carlo simulation', () => {
     const recipe: DifficultyRecipe = {
       mismatchDepth: 0.2,
       maxSelectableItems: 8,
-      waitingStandSlots: 5,
       activeLauncherCount: 2,
       seed: 42,
     };
@@ -504,5 +500,213 @@ describe('Batch generation', () => {
       // Achieved score should be within 5 points of target
       expect(Math.abs(entry.result.achievedScore - entry.target.targetScore)).toBeLessThanOrEqual(5);
     }
+  });
+});
+
+// ============================================================================
+// Section 8: buildDeterministicSequence
+// ============================================================================
+
+describe('buildDeterministicSequence', () => {
+  function makeTiles(colorCounts: Record<number, number>): StudioTile[] {
+    const tiles: StudioTile[] = [];
+    let idx = 0;
+    for (const [ct, count] of Object.entries(colorCounts)) {
+      for (let i = 0; i < count; i++) {
+        const colorType = Number(ct);
+        tiles.push({
+          id: `t${idx++}`,
+          colorType,
+          variant: 0,
+          fruitType: COLOR_TYPE_TO_FRUIT[colorType] || 'apple',
+        });
+      }
+    }
+    return tiles;
+  }
+
+  const launchers2 = [
+    { colorType: 0, order: 0 },
+    { colorType: 1, order: 1 },
+  ];
+
+  const launchers4 = [
+    { colorType: 0, order: 0 },
+    { colorType: 1, order: 1 },
+    { colorType: 2, order: 2 },
+    { colorType: 3, order: 3 },
+  ];
+
+  it('same inputs = same output (deterministic, no RNG)', () => {
+    const tiles = makeTiles({ 0: 3, 1: 3 });
+
+    const seq1 = buildDeterministicSequence([...tiles], launchers2, 2, 0.5);
+    const seq2 = buildDeterministicSequence([...tiles], launchers2, 2, 0.5);
+
+    expect(seq1.map((t) => t.id)).toEqual(seq2.map((t) => t.id));
+  });
+
+  it('depth=0 places first launcher tiles first (easy)', () => {
+    const tiles = makeTiles({ 0: 3, 1: 3, 2: 3, 3: 3 });
+
+    const seq = buildDeterministicSequence(tiles, launchers4, 2, 0);
+
+    // With activeLauncherCount=2 and depth=0: first round-batches (launchers 0,1) come first
+    // First 6 tiles should be from colorTypes 0 and 1
+    const first6Colors = seq.slice(0, 6).map((t) => t.colorType);
+    for (const ct of first6Colors) {
+      expect([0, 1]).toContain(ct);
+    }
+  });
+
+  it('depth=1 reverses round-batches (hard — last launcher tiles first)', () => {
+    const tiles = makeTiles({ 0: 3, 1: 3, 2: 3, 3: 3 });
+
+    const seq = buildDeterministicSequence(tiles, launchers4, 2, 1);
+
+    // 4 launchers, active=2 → 2 groups × 3 rounds = 6 round-batches
+    // depth=1 → swapCount = round(1.0 × floor(6/2)) = 3 → fully reversed
+    // First tiles should be from launchers 2,3 (last group)
+    const first6Colors = seq.slice(0, 6).map((t) => t.colorType);
+    for (const ct of first6Colors) {
+      expect([2, 3]).toContain(ct);
+    }
+  });
+
+  it('round-batches give finer granularity than group-batches', () => {
+    const tiles = makeTiles({ 0: 3, 1: 3 });
+
+    // 2 launchers, active=2 → 1 group × 3 rounds = 3 round-batches
+    // maxSwap = floor(3/2) = 1 → CAN change difficulty (unlike group-based which had 0)
+    const maxSwap = getDeterministicMaxSwap(tiles, launchers2, 2);
+    expect(maxSwap).toBe(1);
+
+    // depth=0 and depth=1 should produce different sequences
+    const seq0 = buildDeterministicSequence([...tiles], launchers2, 2, 0);
+    const seq1 = buildDeterministicSequence([...tiles], launchers2, 2, 1);
+    expect(seq0.map((t) => t.id)).not.toEqual(seq1.map((t) => t.id));
+  });
+
+  it('interleaves round-robin within each round-batch', () => {
+    const tiles = makeTiles({ 0: 3, 1: 3 });
+
+    // 2 launchers, active=2, depth=0 → 3 round-batches in order
+    // Each round-batch = [color0, color1] (one tile per launcher)
+    // Sequence: [0,1, 0,1, 0,1]
+    const seq = buildDeterministicSequence(tiles, launchers2, 2, 0);
+
+    expect(seq[0].colorType).toBe(0);
+    expect(seq[1].colorType).toBe(1);
+    expect(seq[2].colorType).toBe(0);
+    expect(seq[3].colorType).toBe(1);
+    expect(seq[4].colorType).toBe(0);
+    expect(seq[5].colorType).toBe(1);
+  });
+
+  it('handles uneven tile counts per color', () => {
+    const tiles = makeTiles({ 0: 3, 1: 1 });
+
+    const seq = buildDeterministicSequence(tiles, launchers2, 2, 0);
+
+    expect(seq.length).toBe(4);
+    // All tiles are present
+    expect(seq.filter((t) => t.colorType === 0).length).toBe(3);
+    expect(seq.filter((t) => t.colorType === 1).length).toBe(1);
+  });
+
+  it('leftover tiles (no matching launcher) go to end', () => {
+    const tiles = makeTiles({ 0: 3, 1: 3, 5: 2 }); // colorType 5 has no launcher
+    const launchers = [
+      { colorType: 0, order: 0 },
+      { colorType: 1, order: 1 },
+    ];
+
+    const seq = buildDeterministicSequence(tiles, launchers, 2, 0);
+
+    expect(seq.length).toBe(8);
+    // Last 2 tiles should be colorType 5 (leftover)
+    expect(seq[6].colorType).toBe(5);
+    expect(seq[7].colorType).toBe(5);
+  });
+
+  it('preserves original order within each color group (no shuffle)', () => {
+    const tiles: StudioTile[] = [
+      { id: 'a0', colorType: 0, variant: 0, fruitType: 'blueberry' },
+      { id: 'a1', colorType: 0, variant: 1, fruitType: 'blueberry' },
+      { id: 'a2', colorType: 0, variant: 2, fruitType: 'blueberry' },
+      { id: 'b0', colorType: 1, variant: 0, fruitType: 'orange' },
+      { id: 'b1', colorType: 1, variant: 1, fruitType: 'orange' },
+      { id: 'b2', colorType: 1, variant: 2, fruitType: 'orange' },
+    ];
+
+    const seq = buildDeterministicSequence(tiles, launchers2, 2, 0);
+
+    // Color 0 tiles should maintain their relative order: a0, a1, a2
+    const color0Tiles = seq.filter((t) => t.colorType === 0);
+    expect(color0Tiles.map((t) => t.id)).toEqual(['a0', 'a1', 'a2']);
+
+    // Color 1 tiles should maintain their relative order: b0, b1, b2
+    const color1Tiles = seq.filter((t) => t.colorType === 1);
+    expect(color1Tiles.map((t) => t.id)).toEqual(['b0', 'b1', 'b2']);
+  });
+});
+
+// ============================================================================
+// Section 9: State shape — activeLauncherCount field
+// ============================================================================
+
+describe('State shape', () => {
+  it('initializeStateSeeded includes activeLauncherCount in state', () => {
+    const config = makeTestConfig({ seed: 42, activeLauncherCount: 3 });
+    const state = initializeStateSeeded(config);
+
+    expect(state.activeLauncherCount).toBe(3);
+  });
+
+  it('activeLauncherCount defaults to 2', () => {
+    const config = makeTestConfig({ seed: 42 });
+    const state = initializeStateSeeded(config);
+
+    expect(state.activeLauncherCount).toBe(2);
+  });
+});
+
+// ============================================================================
+// Section 10: Solvability at various depths
+// ============================================================================
+
+describe('Solvability with deterministic builder', () => {
+  it('depth=0 is always solvable', () => {
+    const config = makeTestConfig({ seed: 42, mismatchDepth: 0 });
+    const state = initializeStateSeeded(config);
+
+    // Should have valid layer arrangement
+    expect(state.layerA.some((t) => t !== null)).toBe(true);
+    expect(state.isLost).toBe(false);
+    expect(state.isWon).toBe(false);
+  });
+
+  it('depth=1 degrades gracefully if unsolvable', () => {
+    const config = makeTestConfig({ seed: 42, mismatchDepth: 1.0 });
+    const state = initializeStateSeeded(config);
+
+    // Should still produce valid state even if depth had to degrade
+    expect(state.layerA.some((t) => t !== null)).toBe(true);
+    expect(state.isLost).toBe(false);
+  });
+
+  it('identical config + depth always produces identical state', () => {
+    const config = makeTestConfig({ seed: 42, mismatchDepth: 0.5 });
+
+    const state1 = initializeStateSeeded(config);
+    const state2 = initializeStateSeeded(config);
+
+    const colors1 = state1.layerA.map((t) => t?.colorType ?? null);
+    const colors2 = state2.layerA.map((t) => t?.colorType ?? null);
+    expect(colors1).toEqual(colors2);
+
+    const bColors1 = state1.layerB.map((t) => t?.colorType ?? null);
+    const bColors2 = state2.layerB.map((t) => t?.colorType ?? null);
+    expect(bColors1).toEqual(bColors2);
   });
 });

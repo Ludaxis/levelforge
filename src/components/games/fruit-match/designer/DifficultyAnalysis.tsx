@@ -15,25 +15,72 @@ import {
   Zap,
   Hash,
   Loader2,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
-import { StudioDifficultyResult } from '@/lib/useStudioGame';
+import { StudioDifficultyResult, DifficultyComponent } from '@/lib/useStudioGame';
 import { StudioSimulationResult } from '@/lib/studioDifficultyEngine';
 import { DIFFICULTY_COLORS } from './types';
 
-function DifficultyComponentBar({ label, value, weight }: { label: string; value: number; weight: number }) {
-  const pct = Math.round(value * 100);
+const IMPACT_COLORS: Record<string, string> = {
+  easy: 'text-green-600 bg-green-500/10',
+  medium: 'text-yellow-600 bg-yellow-500/10',
+  hard: 'text-red-600 bg-red-500/10',
+};
+
+function DifficultyComponentRow({ component, isExpanded, onToggle }: {
+  component: DifficultyComponent;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  const pct = Math.round(component.score * 100);
+  const weightPct = (component.weight * 100).toFixed(0);
+
   return (
-    <div className="space-y-0.5">
-      <div className="flex justify-between text-xs">
-        <span className="text-muted-foreground">{label} ({(weight * 100).toFixed(0)}%)</span>
-        <span className="font-mono">{pct}/100</span>
-      </div>
-      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-        <div
-          className="h-full bg-primary rounded-full transition-all"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+    <div className="space-y-1">
+      <button
+        onClick={onToggle}
+        className="w-full text-left flex items-center gap-1 group"
+      >
+        {isExpanded ? (
+          <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+        ) : (
+          <ChevronRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex justify-between text-xs">
+            <span className="text-muted-foreground group-hover:text-foreground transition-colors">
+              {component.name}
+              <span className="text-[10px] ml-1 opacity-60">({weightPct}%)</span>
+            </span>
+            <div className="flex items-center gap-1.5">
+              <Badge
+                variant="outline"
+                className={`text-[9px] px-1 py-0 h-4 border-0 ${IMPACT_COLORS[component.impact]}`}
+              >
+                {component.impact}
+              </Badge>
+              <span className="font-mono text-[11px]">{pct}</span>
+            </div>
+          </div>
+          <div className="h-1.5 bg-muted rounded-full overflow-hidden mt-0.5">
+            <div
+              className="h-full bg-primary rounded-full transition-all"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </div>
+      </button>
+      {isExpanded && (
+        <div className="ml-4 space-y-1">
+          <p className="text-[10px] text-muted-foreground leading-tight">
+            {component.description}
+          </p>
+          <p className="text-[11px] leading-tight border-l-2 border-primary/30 pl-2">
+            {component.explanation}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -78,6 +125,7 @@ export function DifficultyAnalysis({
   onSimulate: () => void;
 }) {
   const [targetInput, setTargetInput] = useState('50');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   if (!difficultyResult) {
     return (
@@ -89,7 +137,7 @@ export function DifficultyAnalysis({
     );
   }
 
-  const { score, tier, components } = difficultyResult;
+  const { score, tier, breakdown } = difficultyResult;
 
   return (
     <Card>
@@ -189,21 +237,24 @@ export function DifficultyAnalysis({
           </div>
         )}
 
-        {/* Component breakdown */}
-        <div className="space-y-2">
-          <DifficultyComponentBar label="Tile Burial" value={components.tileBurial} weight={0.35} />
-          <DifficultyComponentBar label="Stand Pressure" value={components.standPressure} weight={0.15} />
-          <DifficultyComponentBar label="Color Complexity" value={components.colorComplexity} weight={0.10} />
-          <DifficultyComponentBar label="Sequence Length" value={components.sequenceLength} weight={0.10} />
-          <DifficultyComponentBar label="Layer Depth" value={components.layerDepth} weight={0.10} />
-          <DifficultyComponentBar label="Grid Constraint" value={components.gridConstraint} weight={0.20} />
+        {/* Component breakdown — tap to expand explanation */}
+        <div className="space-y-1.5">
+          <div className="text-[10px] text-muted-foreground">Tap a factor to see explanation</div>
+          {breakdown.map((component) => (
+            <DifficultyComponentRow
+              key={component.id}
+              component={component}
+              isExpanded={expandedId === component.id}
+              onToggle={() => setExpandedId(expandedId === component.id ? null : component.id)}
+            />
+          ))}
         </div>
 
         {/* Sliders */}
         <div className="space-y-2 pt-1 border-t border-border">
           <div className="space-y-1">
             <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Tile Burial</span>
+              <span className="text-muted-foreground">Layer Mixing</span>
               <span className="font-mono">{Math.round(mismatchDepth * 100)}%</span>
             </div>
             <Slider
@@ -214,12 +265,12 @@ export function DifficultyAnalysis({
               onValueChange={([v]) => onMismatchDepthChange(v / 100)}
             />
             <p className="text-[10px] text-muted-foreground">
-              0% = matching tiles on top (easy). Higher = tiles buried deeper.
+              0% = fruits for active blenders on top. 100% = fruits for later blenders on top — player must pick them to backup slots so matching fruits come up from Layer B.
             </p>
           </div>
           <div className="space-y-1">
             <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Max Selectable Items</span>
+              <span className="text-muted-foreground">Surface Size (Layer A)</span>
               <span className="font-mono">{maxSelectableItems}</span>
             </div>
             <Slider
@@ -232,14 +283,15 @@ export function DifficultyAnalysis({
           </div>
           <div className="space-y-1">
             <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Waiting Stand Slots</span>
-              <span className="font-mono">{waitingStandSlots}</span>
+              <span className="text-muted-foreground">Backup Slots</span>
+              <span className="font-mono">{waitingStandSlots} (fixed)</span>
             </div>
             <Slider
               value={[waitingStandSlots]}
               min={3}
               max={7}
               step={1}
+              disabled
               onValueChange={([v]) => onWaitingStandSlotsChange(v)}
             />
           </div>
