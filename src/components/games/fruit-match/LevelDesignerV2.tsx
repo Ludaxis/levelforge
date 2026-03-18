@@ -1405,37 +1405,7 @@ export function LevelDesignerV2({
         </Card>
       )}
 
-      {/* 6b. Difficulty Controls (sticky) + Arrangement Preview */}
-      {hasData && (
-        <div className="sticky top-0 z-10">
-          <DifficultyAnalysis
-            difficultyResult={difficultyResult}
-            difficultyParams={studioDifficultyParams}
-            maxSelectableItems={maxSelectableItems}
-            blockingOffset={blockingOffset}
-            waitingStandSlots={waitingStandSlots}
-            activeLauncherCount={activeLauncherCount}
-            maxActiveLaunchers={maxActiveLaunchers}
-            seed={seed}
-            parameterLocks={parameterLocks}
-            simulationResult={simulationResult}
-            isTargeting={isTargeting}
-            isSimulating={isSimulating}
-            onMaxSelectableChange={setMaxSelectableItems}
-            onBlockingOffsetChange={setBlockingOffset}
-            onWaitingStandSlotsChange={setWaitingStandSlots}
-            onActiveLauncherCountChange={setActiveLauncherCount}
-            onSeedChange={setSeed}
-            onToggleParameterLock={handleToggleParameterLock}
-            onEasier={handleEasier}
-            onHarder={handleHarder}
-            onAutoTarget={handleAutoTarget}
-            onSimulate={handleSimulate}
-          />
-        </div>
-      )}
-
-      {/* 7. Arrangement Preview */}
+      {/* 6b. Arrangement Preview + Difficulty Controls (expandable inside) */}
       {hasData && arrangementPreviewState && (
         <Card>
           <CardHeader className="pb-2">
@@ -1443,7 +1413,31 @@ export function LevelDesignerV2({
               Arrangement Preview
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
+            <DifficultyAnalysis
+              difficultyResult={difficultyResult}
+              difficultyParams={studioDifficultyParams}
+              maxSelectableItems={maxSelectableItems}
+              blockingOffset={blockingOffset}
+              waitingStandSlots={waitingStandSlots}
+              activeLauncherCount={activeLauncherCount}
+              maxActiveLaunchers={maxActiveLaunchers}
+              seed={seed}
+              parameterLocks={parameterLocks}
+              simulationResult={simulationResult}
+              isTargeting={isTargeting}
+              isSimulating={isSimulating}
+              onMaxSelectableChange={setMaxSelectableItems}
+              onBlockingOffsetChange={setBlockingOffset}
+              onWaitingStandSlotsChange={setWaitingStandSlots}
+              onActiveLauncherCountChange={setActiveLauncherCount}
+              onSeedChange={setSeed}
+              onToggleParameterLock={handleToggleParameterLock}
+              onEasier={handleEasier}
+              onHarder={handleHarder}
+              onAutoTarget={handleAutoTarget}
+              onSimulate={handleSimulate}
+            />
             <StudioArrangementPreview
               previewState={arrangementPreviewState}
               colorTypeToHex={colorTypeToHex}

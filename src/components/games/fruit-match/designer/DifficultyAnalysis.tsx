@@ -305,225 +305,172 @@ export function DifficultyAnalysis({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const unlockDistance = maxSelectableItems * 2 + blockingOffset;
 
+  const [isExpanded, setIsExpanded] = useState(false);
+
   if (!difficultyResult) {
-    return (
-      <Card>
-        <CardContent className="pt-4 text-center text-xs text-muted-foreground py-8">
-          Import pixel art to see difficulty analysis.
-        </CardContent>
-      </Card>
-    );
+    return null;
   }
 
   const { score, tier, breakdown } = difficultyResult;
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <BarChart3 className="h-4 w-4" />
-            Difficulty Analysis
-          </div>
-          <div className="flex items-center gap-1.5">
-            {simulationResult && (
-              <Badge variant="outline" className="text-[10px]">
-                WR: {Math.round(simulationResult.winRate * 100)}%
-              </Badge>
-            )}
-            <Badge className={DIFFICULTY_COLORS[tier] || 'bg-gray-500'}>
-              {score}/100 ({tier})
-            </Badge>
-          </div>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <Progress value={score} className="h-2" />
-
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={onEasier} className="flex-1">
-            <TrendingDown className="h-4 w-4 mr-1" />
-            Easier
-          </Button>
-          <Button variant="outline" size="sm" onClick={onHarder} className="flex-1">
-            <TrendingUp className="h-4 w-4 mr-1" />
-            Harder
-          </Button>
-        </div>
-
-        {/* Auto Target */}
-        <div className="flex items-center gap-2 pt-1 border-t border-border">
-          <Input
-            type="number"
-            min={0}
-            max={100}
-            value={targetInput}
-            onChange={(e) => setTargetInput(e.target.value)}
-            className="h-7 w-20 text-xs"
-            placeholder="Score"
-          />
-          <Button
-            variant="default"
-            size="sm"
-            className="flex-1 h-7"
-            onClick={() => onAutoTarget(Math.max(0, Math.min(100, Number(targetInput) || 50)))}
-            disabled={isTargeting}
+    <div className="rounded-lg border border-border bg-card">
+      {/* Always-visible compact bar: score + sliders + Easier/Harder */}
+      <div className="space-y-2 p-3">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
-            {isTargeting ? (
-              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-            ) : (
-              <Target className="h-3.5 w-3.5 mr-1" />
-            )}
-            Auto Target
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7"
-            onClick={onSimulate}
-            disabled={isSimulating}
-            title="Run simulation"
-          >
-            {isSimulating ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Zap className="h-3.5 w-3.5" />
-            )}
-          </Button>
-        </div>
-
-        {/* Simulation Results */}
-        {simulationResult && (
-          <div className="p-2 bg-muted/30 rounded-lg space-y-1">
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Win Rate</span>
-              <span className="font-mono">{Math.round(simulationResult.winRate * 100)}% ({Math.round(simulationResult.confidenceInterval[0] * 100)}-{Math.round(simulationResult.confidenceInterval[1] * 100)}%)</span>
-            </div>
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Avg Moves</span>
-              <span className="font-mono">{Math.round(simulationResult.avgMoves)}</span>
-            </div>
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Peak Stand</span>
-              <span className="font-mono">{simulationResult.peakStandUsage}</span>
-            </div>
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Near-Loss Rate</span>
-              <span className="font-mono">{Math.round(simulationResult.nearLossRate * 100)}%</span>
-            </div>
-            <div className="text-[10px] text-muted-foreground text-right">{simulationResult.runs} runs</div>
+            {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            <BarChart3 className="h-3.5 w-3.5" />
+          </button>
+          <Badge className={`${DIFFICULTY_COLORS[tier] || 'bg-gray-500'} h-5 text-[10px]`}>
+            {score} ({tier})
+          </Badge>
+          <span className="text-[10px] text-muted-foreground">Unlock {unlockDistance}</span>
+          <div className="ml-auto flex items-center gap-1">
+            <Button variant="outline" size="sm" onClick={onEasier} className="h-6 px-2 text-[10px]">
+              <TrendingDown className="h-3 w-3 mr-0.5" />
+              Easier
+            </Button>
+            <Button variant="outline" size="sm" onClick={onHarder} className="h-6 px-2 text-[10px]">
+              <TrendingUp className="h-3 w-3 mr-0.5" />
+              Harder
+            </Button>
           </div>
-        )}
-
-        {/* Component breakdown — tap to expand explanation */}
-        <div className="space-y-1.5">
-          <div className="text-[10px] text-muted-foreground">Tap a factor to see explanation</div>
-          {breakdown.map((component) => (
-            <DifficultyComponentRow
-              key={component.id}
-              component={component}
-              isExpanded={expandedId === component.id}
-              onToggle={() => setExpandedId(expandedId === component.id ? null : component.id)}
-            />
-          ))}
         </div>
 
-        {/* Live Formula */}
-        {difficultyParams && <FormulaBreakdown params={difficultyParams} score={score} />}
-
-        {/* Sliders */}
-        <div className="space-y-2 pt-1 border-t border-border">
-          <div className="space-y-1">
+        {/* Compact sliders — always visible */}
+        <div className="grid gap-x-4 gap-y-1 sm:grid-cols-3">
+          <div className="space-y-0.5">
             <SliderHeading
               label="Blocking"
-              value={`${blockingOffset} (${blockingLabel(blockingOffset)})`}
+              value={`${blockingOffset}`}
               locked={parameterLocks.blocking}
               onToggleLock={() => onToggleParameterLock('blocking')}
             />
-            <Slider
-              value={[blockingOffset]}
-              min={0}
-              max={10}
-              step={1}
-              onValueChange={([v]) => onBlockingOffsetChange(v)}
-            />
-            <p className="text-[10px] text-muted-foreground">
-              Unlock distance = Layer A x 2 + blocking offset = {maxSelectableItems} x 2 + {blockingOffset} = {unlockDistance}. Higher values spread the required matches deeper into B/C behind more blockers.
-            </p>
+            <Slider value={[blockingOffset]} min={0} max={10} step={1} onValueChange={([v]) => onBlockingOffsetChange(v)} />
           </div>
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             <SliderHeading
-              label="Surface Size (Layer A)"
+              label="Surface"
               value={`${maxSelectableItems}`}
               locked={parameterLocks.surfaceSize}
               onToggleLock={() => onToggleParameterLock('surfaceSize')}
             />
-            <Slider
-              value={[maxSelectableItems]}
-              min={1}
-              max={20}
-              step={1}
-              onValueChange={([v]) => onMaxSelectableChange(v)}
-            />
+            <Slider value={[maxSelectableItems]} min={1} max={20} step={1} onValueChange={([v]) => onMaxSelectableChange(v)} />
           </div>
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             <SliderHeading
-              label="Backup Slots"
-              value={`${waitingStandSlots} (fixed)`}
-            />
-            <Slider
-              value={[waitingStandSlots]}
-              min={3}
-              max={7}
-              step={1}
-              disabled
-              onValueChange={([v]) => onWaitingStandSlotsChange(v)}
-            />
-          </div>
-          <div className="space-y-1">
-            <SliderHeading
-              label="Active Launchers"
+              label="Active"
               value={`${activeLauncherCount}`}
               locked={parameterLocks.activeLaunchers}
               onToggleLock={() => onToggleParameterLock('activeLaunchers')}
             />
-            <Slider
-              value={[activeLauncherCount]}
-              min={1}
-              max={maxActiveLaunchers}
-              step={1}
-              onValueChange={([v]) => onActiveLauncherCountChange(v)}
-            />
+            <Slider value={[activeLauncherCount]} min={1} max={maxActiveLaunchers} step={1} onValueChange={([v]) => onActiveLauncherCountChange(v)} />
           </div>
-          <div className="space-y-1">
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Seed</span>
-              <span className="font-mono">{seed ?? 'random'}</span>
+        </div>
+      </div>
+
+      {/* Expanded: full analysis */}
+      {isExpanded && (
+        <div className="border-t border-border p-3 space-y-3">
+          <Progress value={score} className="h-2" />
+
+          {/* Auto Target */}
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={targetInput}
+              onChange={(e) => setTargetInput(e.target.value)}
+              className="h-7 w-20 text-xs"
+              placeholder="Score"
+            />
+            <Button
+              variant="default"
+              size="sm"
+              className="flex-1 h-7"
+              onClick={() => onAutoTarget(Math.max(0, Math.min(100, Number(targetInput) || 50)))}
+              disabled={isTargeting}
+            >
+              {isTargeting ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Target className="h-3.5 w-3.5 mr-1" />}
+              Auto Target
+            </Button>
+            <Button variant="outline" size="sm" className="h-7" onClick={onSimulate} disabled={isSimulating} title="Run simulation">
+              {isSimulating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+
+          {/* Simulation Results */}
+          {simulationResult && (
+            <div className="p-2 bg-muted/30 rounded-lg space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Win Rate</span>
+                <span className="font-mono">{Math.round(simulationResult.winRate * 100)}% ({Math.round(simulationResult.confidenceInterval[0] * 100)}-{Math.round(simulationResult.confidenceInterval[1] * 100)}%)</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Avg Moves</span>
+                <span className="font-mono">{Math.round(simulationResult.avgMoves)}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Peak Stand</span>
+                <span className="font-mono">{simulationResult.peakStandUsage}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Near-Loss Rate</span>
+                <span className="font-mono">{Math.round(simulationResult.nearLossRate * 100)}%</span>
+              </div>
+              <div className="text-[10px] text-muted-foreground text-right">{simulationResult.runs} runs</div>
             </div>
-            <div className="flex items-center gap-2">
-              <Input
-                type="number"
-                value={seed ?? ''}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  onSeedChange(val === '' ? undefined : Number(val));
-                }}
-                placeholder="Random"
-                className="h-7 text-xs flex-1"
+          )}
+
+          {/* Component breakdown */}
+          <div className="space-y-1.5">
+            <div className="text-[10px] text-muted-foreground">Tap a factor to see explanation</div>
+            {breakdown.map((component) => (
+              <DifficultyComponentRow
+                key={component.id}
+                component={component}
+                isExpanded={expandedId === component.id}
+                onToggle={() => setExpandedId(expandedId === component.id ? null : component.id)}
               />
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => onSeedChange(Math.floor(Math.random() * 2147483647))}
-              >
-                <Hash className="h-3 w-3 mr-1" />
-                New
-              </Button>
+            ))}
+          </div>
+
+          {/* Live Formula */}
+          {difficultyParams && <FormulaBreakdown params={difficultyParams} score={score} />}
+
+          {/* Extra controls */}
+          <div className="space-y-2 pt-1 border-t border-border">
+            <div className="space-y-1">
+              <SliderHeading label="Backup Slots" value={`${waitingStandSlots} (fixed)`} />
+              <Slider value={[waitingStandSlots]} min={3} max={7} step={1} disabled onValueChange={([v]) => onWaitingStandSlotsChange(v)} />
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Seed</span>
+                <span className="font-mono">{seed ?? 'random'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  value={seed ?? ''}
+                  onChange={(e) => { const val = e.target.value; onSeedChange(val === '' ? undefined : Number(val)); }}
+                  placeholder="Random"
+                  className="h-7 text-xs flex-1"
+                />
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => onSeedChange(Math.floor(Math.random() * 2147483647))}>
+                  <Hash className="h-3 w-3 mr-1" />
+                  New
+                </Button>
+              </div>
             </div>
           </div>
         </div>
-      </CardContent>
-    </Card>
+      )}
+    </div>
   );
 }
