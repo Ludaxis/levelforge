@@ -3,17 +3,25 @@
 import { Badge } from '@/components/ui/badge';
 import { StudioGameState, StudioTile, StudioLauncherState } from '@/lib/useStudioGame';
 import { COLOR_TYPE_TO_FRUIT, COLOR_TYPE_TO_HEX } from '@/lib/juicyBlastExport';
+import { VARIANT_NAMES, FruitType } from '@/types/fruitMatch';
 import { ColorSwatch } from './designer/types';
 
 function resolveHex(colorType: number, colorTypeToHex?: Record<number, string>): string {
   return colorTypeToHex?.[colorType] ?? COLOR_TYPE_TO_HEX[colorType] ?? '888888';
 }
 
-function shortName(colorType: number): string {
-  const fruit = COLOR_TYPE_TO_FRUIT[colorType];
+function variantName(colorType: number, variant: number): string {
+  const fruit = COLOR_TYPE_TO_FRUIT[colorType] as FruitType | undefined;
   if (!fruit) return `C${colorType}`;
-  // Capitalize first 3 chars
-  return fruit.charAt(0).toUpperCase() + fruit.slice(1, 4);
+  const names = VARIANT_NAMES[fruit];
+  if (!names) return fruit.charAt(0).toUpperCase() + fruit.slice(1, 4);
+  const fullName = names[variant] ?? names[0];
+  // Short: first 4 chars
+  return fullName.slice(0, 4);
+}
+
+function shortName(colorType: number): string {
+  return variantName(colorType, 0);
 }
 
 function CompactLauncher({
@@ -79,7 +87,7 @@ function CompactTile({
     >
       <span className="text-[9px] text-muted-foreground w-5 flex-shrink-0">{label}</span>
       <ColorSwatch colorType={tile.colorType} size={10} hex={hex} className="rounded-full flex-shrink-0" />
-      <span className="text-[10px] font-medium truncate">{shortName(tile.colorType)}</span>
+      <span className="text-[10px] font-medium truncate">{variantName(tile.colorType, tile.variant)}</span>
     </div>
   );
 }
