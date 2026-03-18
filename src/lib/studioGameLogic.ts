@@ -908,33 +908,24 @@ export function buildDeterministicSequence(
       }
     }
 
-    // Enforce max 2 of this color in the enforcement window
-    // For blocking 1: push excess from A into B (behind non-active A items)
-    // For blocking 2+: push excess from A+B into C
-    const enfEnd = blockingOffset <= 1 ? Math.min(N, sequence.length) : Math.min(2 * N, sequence.length);
-    const pushSearchEnd = blockingOffset <= 1
-      ? Math.min(2 * N, sequence.length)      // push into B range
-      : Math.min(2 * N + blockingOffset + activeLauncherCount, sequence.length); // push into C
-    let count = 0;
-    for (let i = 0; i < enfEnd; i++) {
-      if (sequence[i].colorType !== ct) continue;
-      count++;
-      if (count <= 2) continue;
-      // Find non-active tile in the push zone
-      let swapIdx = -1;
-      for (let j = pushSearchEnd - 1; j > i; j--) {
-        if (!activeColorTypes.has(sequence[j].colorType)) {
-          // For blocking 1: ensure push target is in B behind non-active A
-          if (blockingOffset === 1 && j >= N && j < 2 * N) {
-            const aAbove = j - N;
-            if (activeColorTypes.has(sequence[aAbove].colorType)) continue;
-          }
-          swapIdx = j;
-          break;
+    // Enforce max 2 of this color in A+B — only for blocking 2+.
+    // Blocking 0-1 only move the specific 3rd tile; extra tiles from later
+    // launcher groups stay in their canonical positions.
+    if (blockingOffset >= 2) {
+      const enfEnd = Math.min(2 * N, sequence.length);
+      const pushSearchEnd = Math.min(2 * N + blockingOffset + activeLauncherCount, sequence.length);
+      let count = 0;
+      for (let i = 0; i < enfEnd; i++) {
+        if (sequence[i].colorType !== ct) continue;
+        count++;
+        if (count <= 2) continue;
+        let swapIdx = -1;
+        for (let j = pushSearchEnd - 1; j > i; j--) {
+          if (!activeColorTypes.has(sequence[j].colorType)) { swapIdx = j; break; }
         }
-      }
-      if (swapIdx !== -1) {
-        [sequence[i], sequence[swapIdx]] = [sequence[swapIdx], sequence[i]];
+        if (swapIdx !== -1) {
+          [sequence[i], sequence[swapIdx]] = [sequence[swapIdx], sequence[i]];
+        }
       }
     }
 
