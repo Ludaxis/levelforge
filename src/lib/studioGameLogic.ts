@@ -680,12 +680,10 @@ const SOURCE_LAYER_ORDER: Record<'A' | 'B' | 'C', number> = {
 function sortSelectableItemsForSequence(
   selectableItems: StudioGameConfig['selectableItems'],
 ) {
-  return [...selectableItems].sort((a, b) => {
-    const layerA = SOURCE_LAYER_ORDER[a.layer || 'A'];
-    const layerB = SOURCE_LAYER_ORDER[b.layer || 'A'];
-    if (layerA !== layerB) return layerA - layerB;
-    return a.order - b.order;
-  });
+  // Sort by order ONLY — the layer field is a derived output (from blocking),
+  // not a canonical input. Using layer for sorting creates a circular dependency
+  // where the sync effect changes layers → changes sort → changes blocking output.
+  return [...selectableItems].sort((a, b) => a.order - b.order);
 }
 
 /**
@@ -803,8 +801,7 @@ export function buildDeterministicSequence(
   blockingValue: number,
   maxSelectableItems: number = 10,
 ): StudioTile[] {
-  const blockingOffset =
-    blockingValue > 1 ? clampBlockingOffset(blockingValue) : clampBlockingOffset(Math.round(blockingValue * MAX_BLOCKING_OFFSET));
+  const blockingOffset = clampBlockingOffset(Math.round(blockingValue));
 
   const sequence = [...allTiles];
   if (sequence.length === 0) return sequence;
