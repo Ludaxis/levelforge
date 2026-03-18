@@ -86,7 +86,8 @@ function pickTileByStrategy(
     if (!tile) continue;
 
     const launcher = state.activeLaunchers.find(
-      (l) => l.colorType === tile.colorType && l.collected.length < 3,
+      (l) => l.colorType === tile.colorType && l.collected.length < 3 &&
+        (l.collected.length === 0 || l.collected[0].variant === tile.variant),
     );
 
     let score: number;

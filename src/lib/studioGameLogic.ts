@@ -1399,13 +1399,26 @@ export function fireLauncher(
 // Find matching launcher for a tile
 // ============================================================================
 
+/**
+ * Find an active launcher that accepts this tile.
+ * Variant-aware: once a launcher has collected 1+ tiles, it only accepts
+ * tiles with the same variant. This makes Cherry ≠ Strawberry even though
+ * both are Red (colorType=2).
+ */
 export function findMatchingLauncher(
   colorType: number,
   activeLaunchers: StudioLauncherState[],
+  variant?: number,
 ): StudioLauncherState | null {
-  return activeLaunchers.find(
-    (l) => l.colorType === colorType && l.collected.length < 3,
-  ) || null;
+  return activeLaunchers.find((l) => {
+    if (l.colorType !== colorType || l.collected.length >= 3) return false;
+    // If variant matching is active and launcher already has tiles,
+    // only accept the same variant
+    if (variant !== undefined && l.collected.length > 0) {
+      return l.collected[0].variant === variant;
+    }
+    return true;
+  }) || null;
 }
 
 // ============================================================================
@@ -1448,9 +1461,13 @@ export function postFireCascade(
       const canTake = 3 - launcher.collected.length;
       const matchingIndices: number[] = [];
 
+      // Variant-aware: if launcher has collected tiles, only match same variant
+      const requiredVariant = launcher.collected.length > 0 ? launcher.collected[0].variant : undefined;
       for (let i = 0; i < stand.length && matchingIndices.length < canTake; i++) {
         if (stand[i].colorType === launcher.colorType) {
-          matchingIndices.push(i);
+          if (requiredVariant === undefined || stand[i].variant === requiredVariant) {
+            matchingIndices.push(i);
+          }
         }
       }
 
@@ -1512,7 +1529,7 @@ export function pickTileLogic(state: StudioGameState, slotIndex: number): Studio
   }
 
   // 3. Check if any active launcher needs this tile
-  const matchingLauncher = findMatchingLauncher(tile.colorType, state.activeLaunchers);
+  const matchingLauncher = findMatchingLauncher(tile.colorType, state.activeLaunchers, tile.variant);
 
   let newWaitingStand = [...state.waitingStand];
   let activeLaunchers = state.activeLaunchers.map((l) => ({
