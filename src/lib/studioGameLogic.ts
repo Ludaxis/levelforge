@@ -699,106 +699,18 @@ function seededLauncherId(rng: () => number): string {
 // ============================================================================
 
 /**
- * Build a deterministic sequence that stretches the active launcher group's
- * completion across an unlock window:
+ * Build a deterministic sequence from the canonical Item Pool order.
  *
- *   unlockDistance = LayerA * 2 + blockingOffset
+ * blocking=0: returns the canonical order unchanged.
+ * blocking>0: pushes the "unlock tile" (3rd matching tile) for each active
+ *   blender deeper into the sequence by swapping it with a non-matching tile.
+ *   The unlock distance target is: maxSelectableItems * 2 + blockingOffset.
+ *   Only swaps with tiles whose color does NOT match any active blender,
+ *   so every displaced tile is a real blocker.
  *
- * The active group's 3 collection rounds are staged at the start, middle, and
- * tail of that window, while the gaps are filled with later-group tiles that act
- * as real blockers. This matches the "same level, harder arrangement" model from
- * the design docs more closely than the older batch-swapping approach.
+ * This preserves the authored order as much as possible — Surface Size
+ * changes just move the A/B/C cut point on the same sequence.
  */
-interface LauncherTileBundle {
-  launcherIndex: number;
-  colorType: number;
-  tiles: StudioTile[];
-}
-
-function takeTilesRoundRobin(
-  bundles: LauncherTileBundle[],
-  count: number,
-): StudioTile[] {
-  const taken: StudioTile[] = [];
-  if (count <= 0) return taken;
-
-  while (taken.length < count) {
-    let moved = false;
-    for (const bundle of bundles) {
-      if (bundle.tiles.length === 0) continue;
-      taken.push(bundle.tiles.shift()!);
-      moved = true;
-      if (taken.length >= count) break;
-    }
-    if (!moved) break;
-  }
-
-  return taken;
-}
-
-function takePreferredLeftovers(
-  leftovers: StudioTile[],
-  count: number,
-  activeColorTypes: Set<number>,
-): StudioTile[] {
-  const taken: StudioTile[] = [];
-  if (count <= 0) return taken;
-
-  for (let pass = 0; pass < 2 && taken.length < count; pass++) {
-    for (let i = 0; i < leftovers.length && taken.length < count;) {
-      const isActiveColor = activeColorTypes.has(leftovers[i].colorType);
-      const shouldTake = pass === 0 ? !isActiveColor : isActiveColor;
-      if (shouldTake) {
-        taken.push(leftovers.splice(i, 1)[0]);
-      } else {
-        i++;
-      }
-    }
-  }
-
-  return taken;
-}
-
-function buildUnlockAnchors(windowSize: number, activeLauncherCount: number): number[] {
-  const safeWindow = Math.max(windowSize, activeLauncherCount);
-  const spanMax = Math.max(0, safeWindow - activeLauncherCount);
-  return [0, Math.round(spanMax / 2), spanMax];
-}
-
-function buildLauncherBundles(
-  allTiles: StudioTile[],
-  launcherConfigs: { colorType: number; order: number }[],
-): { bundles: LauncherTileBundle[]; leftovers: StudioTile[] } {
-  const sortedLaunchers = [...launcherConfigs].sort((a, b) => a.order - b.order);
-  const tilesByColor = new Map<number, StudioTile[]>();
-
-  for (const tile of allTiles) {
-    if (!tilesByColor.has(tile.colorType)) tilesByColor.set(tile.colorType, []);
-    tilesByColor.get(tile.colorType)!.push(tile);
-  }
-
-  const usedIds = new Set<string>();
-  const bundles: LauncherTileBundle[] = sortedLaunchers.map((launcher, launcherIndex) => {
-    const pool = tilesByColor.get(launcher.colorType) || [];
-    const tiles: StudioTile[] = [];
-    while (pool.length > 0 && tiles.length < 3) {
-      const tile = pool.shift()!;
-      tiles.push(tile);
-      usedIds.add(tile.id);
-    }
-    return {
-      launcherIndex,
-      colorType: launcher.colorType,
-      tiles,
-    };
-  });
-
-  return {
-    bundles,
-    leftovers: allTiles.filter((tile) => !usedIds.has(tile.id)),
-  };
-}
-
 export function buildDeterministicSequence(
   allTiles: StudioTile[],
   launcherConfigs: { colorType: number; order: number }[],
@@ -807,73 +719,54 @@ export function buildDeterministicSequence(
   maxSelectableItems: number = 10,
 ): StudioTile[] {
   const blockingOffset =
-    blockingValue > 1 ? clampBlockingOffset(blockingValue) : clampBlockingOffset(blockingValue * MAX_BLOCKING_OFFSET);
+    blockingValue > 1 ? clampBlockingOffset(blockingValue) : clampBlockingOffset(Math.round(blockingValue * MAX_BLOCKING_OFFSET));
+
+  // Start from a copy of the canonical order
+  const sequence = [...allTiles];
+
+  if (blockingOffset === 0 || sequence.length === 0) return sequence;
+
+  const sorted = [...launcherConfigs].sort((a, b) => a.order - b.order);
   const unlockDistance = maxSelectableItems * 2 + blockingOffset;
-  const sequence: StudioTile[] = [];
-  const { bundles, leftovers } = buildLauncherBundles(allTiles, launcherConfigs);
 
-  for (let groupStart = 0; groupStart < bundles.length; groupStart += activeLauncherCount) {
-    const activeBundles = bundles.slice(groupStart, groupStart + activeLauncherCount);
-    const futureBundles = bundles.slice(groupStart + activeLauncherCount);
-    const activeColorTypes = new Set(activeBundles.map((bundle) => bundle.colorType));
-    const matchingCount = activeBundles.reduce((sum, bundle) => sum + bundle.tiles.length, 0);
-    const remainingCount =
-      matchingCount +
-      futureBundles.reduce((sum, bundle) => sum + bundle.tiles.length, 0) +
-      leftovers.length;
+  // Process one launcher group at a time
+  for (let groupStart = 0; groupStart < sorted.length; groupStart += activeLauncherCount) {
+    const activeGroup = sorted.slice(groupStart, groupStart + activeLauncherCount);
+    const activeColorTypes = new Set(activeGroup.map((l) => l.colorType));
 
-    if (matchingCount === 0) continue;
-
-    const windowSize = Math.max(
-      matchingCount,
-      Math.min(unlockDistance, remainingCount),
-    );
-    const anchors = buildUnlockAnchors(windowSize, activeBundles.length);
-    const window: (StudioTile | null)[] = new Array(windowSize).fill(null);
-
-    for (let round = 0; round < 3; round++) {
-      const anchor = anchors[Math.min(round, anchors.length - 1)];
-      for (let launcherOffset = 0; launcherOffset < activeBundles.length; launcherOffset++) {
-        const bundle = activeBundles[launcherOffset];
-        if (bundle.tiles.length === 0) continue;
-        const position = Math.min(windowSize - 1, anchor + launcherOffset);
-        if (window[position] !== null) continue;
-        window[position] = bundle.tiles.shift()!;
+    // For each active blender, find positions of its 3 matching tiles in current sequence
+    for (const launcher of activeGroup) {
+      const matchPositions: number[] = [];
+      for (let i = 0; i < sequence.length && matchPositions.length < 3; i++) {
+        if (sequence[i].colorType === launcher.colorType) {
+          matchPositions.push(i);
+        }
       }
-    }
 
-    // Fill gaps with TRUE blockers only — tiles whose color does NOT match
-    // any active blender. Using active-color tiles as blockers is pointless
-    // because the player picks them straight into the blender.
-    const emptySlots = window.reduce((sum, tile) => sum + (tile === null ? 1 : 0), 0);
-    const trueBlockerBundles = futureBundles.filter(
-      (bundle) => !activeColorTypes.has(bundle.colorType),
-    );
-    const blockers = [
-      ...takeTilesRoundRobin(trueBlockerBundles, emptySlots),
-      ...takePreferredLeftovers(leftovers, Math.max(0, emptySlots - trueBlockerBundles.reduce((s, b) => s + b.tiles.length, 0)), activeColorTypes),
-    ];
+      if (matchPositions.length < 3) continue;
 
-    // Fill only as many gaps as we have true blockers — compact the window
-    // rather than stuffing it with fake (active-color) blockers.
-    let blockerIndex = 0;
-    const compacted: StudioTile[] = [];
-    for (let i = 0; i < window.length; i++) {
-      if (window[i] !== null) {
-        compacted.push(window[i]!);
-      } else if (blockerIndex < blockers.length) {
-        compacted.push(blockers[blockerIndex++]);
+      // The "unlock tile" is the 3rd match — push it toward unlockDistance
+      const unlockPos = matchPositions[2];
+      const targetPos = Math.min(unlockDistance - 1, sequence.length - 1);
+
+      if (unlockPos >= targetPos) continue; // already deep enough
+
+      // Find the best swap target: a non-active-color tile at or near targetPos
+      let swapIdx = -1;
+      // Search backward from targetPos for a non-active-color tile
+      for (let j = targetPos; j > unlockPos; j--) {
+        if (!activeColorTypes.has(sequence[j].colorType)) {
+          swapIdx = j;
+          break;
+        }
       }
-      // else: skip this slot — window shrinks naturally
+
+      if (swapIdx === -1) continue; // no valid swap target — cap hardness
+
+      // Swap the unlock tile with the blocker
+      [sequence[unlockPos], sequence[swapIdx]] = [sequence[swapIdx], sequence[unlockPos]];
     }
-
-    sequence.push(...compacted);
   }
-
-  for (const bundle of bundles) {
-    sequence.push(...bundle.tiles);
-  }
-  sequence.push(...leftovers);
 
   return sequence;
 }

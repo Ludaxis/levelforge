@@ -582,19 +582,17 @@ describe('buildDeterministicSequence', () => {
     expect(maxSwap).toBe(10);
   });
 
-  it('interleaves round-robin within each round-batch', () => {
+  it('blocking=0 preserves canonical Item Pool order', () => {
     const tiles = makeTiles({ 0: 3, 1: 3 });
 
-    // 2 launchers, active=2, depth=0 → 3 round-batches in order
-    // Each round-batch = [color0, color1] (one tile per launcher)
-    // Sequence: [0,1, 0,1, 0,1]
+    // blocking=0 → returns canonical order unchanged: [0,0,0,1,1,1]
     const seq = buildDeterministicSequence(tiles, launchers2, 2, 0);
 
     expect(seq[0].colorType).toBe(0);
-    expect(seq[1].colorType).toBe(1);
+    expect(seq[1].colorType).toBe(0);
     expect(seq[2].colorType).toBe(0);
     expect(seq[3].colorType).toBe(1);
-    expect(seq[4].colorType).toBe(0);
+    expect(seq[4].colorType).toBe(1);
     expect(seq[5].colorType).toBe(1);
   });
 
