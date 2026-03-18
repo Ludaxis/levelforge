@@ -783,21 +783,23 @@ function seededLauncherId(rng: () => number): string {
  * Preserves authored order — Surface Size changes just move the A/B/C
  * cut point on the same sequence.
  *
- * Blocking rules (L1, L2 = active launchers, each needs 3 items):
+ * Blocking rules (L1, L2 = active launchers):
  *
- *   blocking=0: canonical order unchanged. All items stay where authored.
+ *   blocking=0: canonical order unchanged.
  *
- *   blocking=1: Push 1-2 unlock tiles from Layer A into Layer B.
- *     The swap targets must be non-active-color tiles (real blockers).
+ *   blocking=1: Enforce at most 2 tiles of each active color in Layer A.
+ *     Push excess to Layer B, behind non-active-color A items.
+ *     Both launchers are blocked — neither can fire from A alone.
  *
- *   blocking=2: Push BOTH launchers' unlock tiles (3rd match) into Layer C.
- *     L1's unlock tile → C1 (position 2*N + 0).
- *     L2's unlock tile → C2 (position 2*N + 1).
+ *   blocking=2..7: Enforce at most 2 tiles of each active color in A+B combined.
+ *     Push ALL excess (3rd, 4th, 5th...) matching tiles into Layer C.
+ *     First excess → C(blocking-1), subsequent → next C positions.
  *     Neither launcher can be completed from A+B alone.
+ *     e.g. blocking=2: excess → C1,C2,...  blocking=6: excess → C5,C6,...
  *
- *   blocking=3..7: Same as 2 but unlock tiles move deeper into C.
- *     L1's unlock tile → C(blocking-1), L2's → C(blocking).
- *     e.g. blocking=6: L1 → C5, L2 → C6.
+ * "Excess" means ANY tile whose colorType matches an active launcher
+ * beyond the first 2 in the enforcement window. This prevents the player
+ * from completing a launcher using tiles from later launcher groups.
  */
 export function buildDeterministicSequence(
   allTiles: StudioTile[],
@@ -813,66 +815,65 @@ export function buildDeterministicSequence(
   if (blockingOffset === 0 || sequence.length === 0) return sequence;
 
   const sorted = [...launcherConfigs].sort((a, b) => a.order - b.order);
-  const N = maxSelectableItems; // Layer A size = Layer B size
+  const N = maxSelectableItems;
+  const activeGroup = sorted.slice(0, activeLauncherCount);
+  const activeColorTypes = new Set(activeGroup.map((l) => l.colorType));
 
-  // Process one launcher group at a time
-  for (let groupStart = 0; groupStart < sorted.length; groupStart += activeLauncherCount) {
-    const activeGroup = sorted.slice(groupStart, groupStart + activeLauncherCount);
-    const activeColorTypes = new Set(activeGroup.map((l) => l.colorType));
+  // Enforcement window: where we allow at most 2 per active color
+  const enforcementEnd = blockingOffset === 1
+    ? Math.min(N, sequence.length)        // Blocking 1: Layer A only
+    : Math.min(2 * N, sequence.length);   // Blocking 2+: A + B combined
 
-    // Find the 3rd matching tile (unlock tile) for each active launcher
-    const unlockTiles: { launcherIdx: number; pos: number }[] = [];
-    for (let li = 0; li < activeGroup.length; li++) {
-      const launcher = activeGroup[li];
-      let count = 0;
-      for (let i = 0; i < sequence.length; i++) {
-        if (sequence[i].colorType === launcher.colorType) {
-          count++;
-          if (count === 3) {
-            unlockTiles.push({ launcherIdx: li, pos: i });
-            break;
+  // Target zone: where excess tiles get pushed to
+  const targetStart = blockingOffset === 1
+    ? N                                   // Blocking 1: start of Layer B
+    : 2 * N + (blockingOffset - 2);       // Blocking 2+: C(blocking-1)
+
+  // Scan the enforcement window and collect ALL excess active-color tiles
+  // (3rd, 4th, 5th... of each active color)
+  const colorCounts = new Map<number, number>();
+  const excessPositions: number[] = [];
+
+  for (let i = 0; i < enforcementEnd; i++) {
+    const ct = sequence[i].colorType;
+    if (!activeColorTypes.has(ct)) continue;
+    const count = (colorCounts.get(ct) || 0) + 1;
+    colorCounts.set(ct, count);
+    if (count > 2) {
+      excessPositions.push(i);
+    }
+  }
+
+  if (excessPositions.length === 0) return sequence;
+
+  // Process excess tiles from last to first to preserve earlier positions
+  for (let e = excessPositions.length - 1; e >= 0; e--) {
+    const excessPos = excessPositions[e];
+    const targetPos = Math.min(targetStart + e, sequence.length - 1);
+
+    if (targetPos <= excessPos) continue; // already deep enough
+
+    // Find swap target: non-active-color tile at or near targetPos
+    // Search backward from target for a valid (non-active) tile
+    let swapIdx = -1;
+    for (let j = targetPos; j > excessPos; j--) {
+      if (!activeColorTypes.has(sequence[j].colorType)) {
+        // For Blocking 1: also check that the A item above this B position
+        // is non-active, so the blocker is real (player must pick non-matching to reveal)
+        if (blockingOffset === 1 && j >= N && j < 2 * N) {
+          const aAbove = j - N;
+          if (aAbove < sequence.length && activeColorTypes.has(sequence[aAbove].colorType)) {
+            continue; // skip — A item above is active-color, not a real blocker
           }
         }
+        swapIdx = j;
+        break;
       }
     }
 
-    if (unlockTiles.length === 0) continue;
+    if (swapIdx === -1) continue; // no valid swap — cap hardness
 
-    // Sort by position descending so earlier swaps don't shift later positions
-    unlockTiles.sort((a, b) => b.pos - a.pos);
-
-    for (let ui = 0; ui < unlockTiles.length; ui++) {
-      const { pos: unlockPos } = unlockTiles[ui];
-
-      // Compute target position based on blocking level
-      let targetPos: number;
-      if (blockingOffset === 1) {
-        // Blocking 1: push into Layer B (somewhere in N..2N-1)
-        // Target the end of Layer B
-        targetPos = Math.min(2 * N - 1, sequence.length - 1);
-      } else {
-        // Blocking 2-7: push into Layer C
-        // L1 → C(blocking-1), L2 → C(blocking), etc.
-        // C starts at position 2*N, so C(k) = 2*N + k - 1
-        const cPosition = (blockingOffset - 1) + ui; // first launcher gets blocking-1, second gets blocking
-        targetPos = Math.min(2 * N + cPosition, sequence.length - 1);
-      }
-
-      if (unlockPos >= targetPos) continue; // already deep enough
-
-      // Find swap target: non-active-color tile at or near targetPos
-      let swapIdx = -1;
-      for (let j = targetPos; j > unlockPos; j--) {
-        if (!activeColorTypes.has(sequence[j].colorType)) {
-          swapIdx = j;
-          break;
-        }
-      }
-
-      if (swapIdx === -1) continue; // no valid swap — cap hardness
-
-      [sequence[unlockPos], sequence[swapIdx]] = [sequence[swapIdx], sequence[unlockPos]];
-    }
+    [sequence[excessPos], sequence[swapIdx]] = [sequence[swapIdx], sequence[excessPos]];
   }
 
   return sequence;
