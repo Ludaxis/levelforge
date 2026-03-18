@@ -281,46 +281,37 @@ export function LevelDesignerV2({
   }, [studioGameConfig]);
 
   // Sync Item Pool layer assignments from the arrangement preview.
-  // When blocking/surface changes, tiles move between A/B/C in the preview —
-  // the Item Pool should reflect the derived arrangement.
+  // buildPreviewState creates tiles with id="preview-{idx}" where idx
+  // matches the sorted-by-order position. After blocking swaps tiles around,
+  // the tile ID tells us which original item it is, and its position in
+  // A/B/C tells us the derived layer.
   useEffect(() => {
     if (!arrangementPreviewState) return;
     const { layerA, layerB, layerC } = arrangementPreviewState;
+    const N = maxSelectableItems;
 
-    // Build a map from (colorType, variant, occurrence) → derived layer
-    // We match by colorType+variant in order to handle multiple tiles of same color
-    const derivedLayers = new Map<string, 'A' | 'B' | 'C'>();
-    const counters = new Map<string, number>();
-    const key = (ct: number, v: number, n: number) => `${ct}-${v}-${n}`;
-    const incCounter = (ct: number, v: number) => {
-      const k = `${ct}-${v}`;
-      const n = (counters.get(k) || 0);
-      counters.set(k, n + 1);
-      return n;
-    };
-
+    // Map original item index → derived layer
+    const idxToLayer = new Map<number, 'A' | 'B' | 'C'>();
     for (const tile of layerA) {
       if (!tile) continue;
-      derivedLayers.set(key(tile.colorType, tile.variant, incCounter(tile.colorType, tile.variant)), 'A');
+      const idx = parseInt(tile.id.replace('preview-', ''), 10);
+      if (!isNaN(idx)) idxToLayer.set(idx, 'A');
     }
     for (const tile of layerB) {
       if (!tile) continue;
-      derivedLayers.set(key(tile.colorType, tile.variant, incCounter(tile.colorType, tile.variant)), 'B');
+      const idx = parseInt(tile.id.replace('preview-', ''), 10);
+      if (!isNaN(idx)) idxToLayer.set(idx, 'B');
     }
     for (const tile of layerC) {
-      derivedLayers.set(key(tile.colorType, tile.variant, incCounter(tile.colorType, tile.variant)), 'C');
+      const idx = parseInt(tile.id.replace('preview-', ''), 10);
+      if (!isNaN(idx)) idxToLayer.set(idx, 'C');
     }
 
-    // Apply to selectableItems
-    const itemCounters = new Map<string, number>();
     setSelectableItems((prev) => {
       const sorted = [...prev].sort((a, b) => a.order - b.order);
       let changed = false;
-      const updated = sorted.map((item) => {
-        const k = `${item.colorType}-${item.variant}`;
-        const n = (itemCounters.get(k) || 0);
-        itemCounters.set(k, n + 1);
-        const newLayer = derivedLayers.get(key(item.colorType, item.variant, n));
+      const updated = sorted.map((item, idx) => {
+        const newLayer = idxToLayer.get(idx);
         if (newLayer && newLayer !== item.layer) {
           changed = true;
           return { ...item, layer: newLayer };
@@ -329,7 +320,7 @@ export function LevelDesignerV2({
       });
       return changed ? updated : prev;
     });
-  }, [arrangementPreviewState]);
+  }, [arrangementPreviewState, maxSelectableItems]);
 
   // ============================================================================
   // JSON Import
