@@ -27,7 +27,7 @@ import {
   StudioDifficultyResult,
   calculateStudioDifficulty,
   StudioGameConfig,
-  initializeState,
+  buildPreviewState,
   findMaxSolvableBlockingOffset,
 } from '@/lib/useStudioGame';
 import {
@@ -277,10 +277,7 @@ export function LevelDesignerV2({
 
   const arrangementPreviewState = useMemo(() => {
     if (!studioGameConfig) return null;
-    return initializeState({
-      ...studioGameConfig,
-      seed: studioGameConfig.seed ?? 42,
-    });
+    return buildPreviewState(studioGameConfig);
   }, [studioGameConfig]);
 
   // ============================================================================

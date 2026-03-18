@@ -341,7 +341,7 @@ export function DifficultyAnalysis({
           </div>
         </div>
 
-        {/* Compact sliders — commit on release to avoid expensive recomputation during drag */}
+        {/* Compact sliders */}
         <div className="grid gap-x-4 gap-y-1 sm:grid-cols-3">
           <div className="space-y-0.5">
             <SliderHeading
@@ -350,7 +350,7 @@ export function DifficultyAnalysis({
               locked={parameterLocks.blocking}
               onToggleLock={() => onToggleParameterLock('blocking')}
             />
-            <Slider value={[blockingOffset]} min={0} max={10} step={1} onValueCommit={([v]) => onBlockingOffsetChange(v)} />
+            <Slider value={[blockingOffset]} min={0} max={10} step={1} onValueChange={([v]) => onBlockingOffsetChange(v)} />
           </div>
           <div className="space-y-0.5">
             <SliderHeading
@@ -359,7 +359,7 @@ export function DifficultyAnalysis({
               locked={parameterLocks.surfaceSize}
               onToggleLock={() => onToggleParameterLock('surfaceSize')}
             />
-            <Slider value={[maxSelectableItems]} min={1} max={20} step={1} onValueCommit={([v]) => onMaxSelectableChange(v)} />
+            <Slider value={[maxSelectableItems]} min={1} max={20} step={1} onValueChange={([v]) => onMaxSelectableChange(v)} />
           </div>
           <div className="space-y-0.5">
             <SliderHeading
@@ -368,7 +368,7 @@ export function DifficultyAnalysis({
               locked={parameterLocks.activeLaunchers}
               onToggleLock={() => onToggleParameterLock('activeLaunchers')}
             />
-            <Slider value={[activeLauncherCount]} min={1} max={maxActiveLaunchers} step={1} onValueCommit={([v]) => onActiveLauncherCountChange(v)} />
+            <Slider value={[activeLauncherCount]} min={1} max={maxActiveLaunchers} step={1} onValueChange={([v]) => onActiveLauncherCountChange(v)} />
           </div>
         </div>
       </div>

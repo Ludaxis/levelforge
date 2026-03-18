@@ -1132,6 +1132,57 @@ function buildDerivedLayers(
 }
 
 /**
+ * Fast preview — builds the arrangement without solvability verification.
+ * Used by the designer UI for real-time slider feedback.
+ */
+export function buildPreviewState(config: StudioGameConfig): StudioGameState {
+  const {
+    pixelArt,
+    maxSelectableItems,
+    waitingStandSlots,
+    selectableItems,
+    launchers,
+    activeLauncherCount = 2,
+  } = config;
+  const blockingOffset = resolveBlockingOffset(config);
+
+  const sortedItems = sortSelectableItemsForSequence(selectableItems);
+  const allTiles: StudioTile[] = sortedItems.map((item, idx) => ({
+    id: `preview-${idx}`,
+    colorType: item.colorType,
+    variant: item.variant,
+    fruitType: COLOR_TYPE_TO_FRUIT[item.colorType] || 'apple',
+    designerLayer: item.layer,
+  }));
+
+  const sortedLauncherConfigs = [...launchers].sort((a, b) => a.order - b.order);
+
+  const sequence = buildDeterministicSequence(
+    allTiles, sortedLauncherConfigs, activeLauncherCount, blockingOffset, maxSelectableItems,
+  );
+  const { a: layerA, b: layerB, c: layerC } = distributeToLayersSeeded(sequence, maxSelectableItems);
+
+  const allLaunchers: StudioLauncherState[] = sortedLauncherConfigs.map((l, i) => ({
+    id: `preview-launcher-${i}`,
+    colorType: l.colorType,
+    fruitType: COLOR_TYPE_TO_FRUIT[l.colorType] || 'apple',
+    pixelCount: l.pixelCount,
+    group: l.group,
+    collected: [],
+  }));
+
+  return {
+    layerA, layerB, layerC,
+    waitingStand: [],
+    activeLaunchers: allLaunchers.slice(0, activeLauncherCount),
+    launcherQueue: allLaunchers.slice(activeLauncherCount),
+    pixelArt: pixelArt.map((cell) => ({ ...cell, filled: false })),
+    moveCount: 0, matchCount: 0, isWon: false, isLost: false,
+    waitingStandSlots, activeLauncherCount,
+  };
+}
+
+/**
  * Deterministic version of initializeState.
  * Uses the seed from config to produce identical tile arrangements.
  */
