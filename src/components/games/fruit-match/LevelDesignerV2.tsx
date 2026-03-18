@@ -280,51 +280,46 @@ export function LevelDesignerV2({
     return buildPreviewState(studioGameConfig);
   }, [studioGameConfig]);
 
-  // Sync Item Pool layer + order from the arrangement preview.
-  // buildPreviewState creates tiles with id="preview-{idx}" where idx
-  // matches the sorted-by-order position. After blocking swaps tiles around,
-  // the tile ID tells us which original item it is, and its sequence position
-  // tells us the derived layer and order.
+  // Sync Item Pool layer assignments from the arrangement preview.
+  // Only syncs the LAYER field (A/B/C), not the order — changing order
+  // would alter the canonical sequence and create an infinite loop.
+  // The Item Pool keeps its authored order; the Arrangement Preview
+  // shows the derived sequence after blocking swaps.
   useEffect(() => {
     if (!arrangementPreviewState) return;
     const { layerA, layerB, layerC } = arrangementPreviewState;
 
-    // Build flat sequence: A tiles, then B tiles, then C tiles — with their position
-    const idxToLayerAndOrder = new Map<number, { layer: 'A' | 'B' | 'C'; order: number }>();
-    let seqPos = 0;
+    // Map original item index → derived layer
+    const idxToLayer = new Map<number, 'A' | 'B' | 'C'>();
     for (const tile of layerA) {
-      if (!tile) { seqPos++; continue; }
+      if (!tile) continue;
       const idx = parseInt(tile.id.replace('preview-', ''), 10);
-      if (!isNaN(idx)) idxToLayerAndOrder.set(idx, { layer: 'A', order: seqPos });
-      seqPos++;
+      if (!isNaN(idx)) idxToLayer.set(idx, 'A');
     }
     for (const tile of layerB) {
-      if (!tile) { seqPos++; continue; }
+      if (!tile) continue;
       const idx = parseInt(tile.id.replace('preview-', ''), 10);
-      if (!isNaN(idx)) idxToLayerAndOrder.set(idx, { layer: 'B', order: seqPos });
-      seqPos++;
+      if (!isNaN(idx)) idxToLayer.set(idx, 'B');
     }
     for (const tile of layerC) {
       const idx = parseInt(tile.id.replace('preview-', ''), 10);
-      if (!isNaN(idx)) idxToLayerAndOrder.set(idx, { layer: 'C', order: seqPos });
-      seqPos++;
+      if (!isNaN(idx)) idxToLayer.set(idx, 'C');
     }
 
     setSelectableItems((prev) => {
       const sorted = [...prev].sort((a, b) => a.order - b.order);
       let changed = false;
       const updated = sorted.map((item, idx) => {
-        const derived = idxToLayerAndOrder.get(idx);
-        if (!derived) return item;
-        if (derived.layer !== item.layer || derived.order !== item.order) {
+        const newLayer = idxToLayer.get(idx);
+        if (newLayer && newLayer !== item.layer) {
           changed = true;
-          return { ...item, layer: derived.layer, order: derived.order };
+          return { ...item, layer: newLayer };
         }
         return item;
       });
       return changed ? updated : prev;
     });
-  }, [arrangementPreviewState, maxSelectableItems]);
+  }, [arrangementPreviewState]);
 
   // ============================================================================
   // JSON Import
