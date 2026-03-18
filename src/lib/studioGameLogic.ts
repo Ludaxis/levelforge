@@ -783,24 +783,18 @@ function seededLauncherId(rng: () => number): string {
  * Preserves authored order — Surface Size changes just move the A/B/C
  * cut point on the same sequence.
  *
- * Blocking places the 3rd matching tile (unlock tile) for each active
- * launcher at a specific target position, and ensures at most 2 matching
- * tiles per active color exist before that target:
+ * Blocking rules:
  *
- *   blocking=0: canonical order unchanged.
+ *   blocking=0: Ensure all 3 tiles per active color are accessible.
+ *     3rd tile should be in Layer A, or in Layer B behind a SAME-color A item
+ *     (picking the matching A reveals matching B — no wasted pick).
+ *     If 3rd tile is deep in C, pull it up to an accessible position.
  *
- *   blocking=1: 3rd tile of each active color → Layer B.
+ *   blocking=1: 3rd tile → Layer B, behind a NON-active A item (B5-B10 range).
+ *     The player must pick a non-matching item (goes to backup) to reveal it.
  *     At most 2 matching per active color in Layer A.
  *
- *   blocking=2: 3rd tile → C1 (position 2N).
- *     At most 2 matching per active color in A+B.
- *
- *   blocking=3..7: 3rd tile → C(blocking-1).
- *     e.g. blocking=6: 3rd tile → C5.
- *
- * The tile is MOVED to the target — pulled up if deeper, pushed down if
- * shallower. Any additional matching tiles (4th, 5th...) beyond the first 2
- * in the enforcement window are also pushed past the target.
+ *   blocking=2..7: 3rd tile → C(blocking-1). Neither launcher completable from A+B.
  */
 export function buildDeterministicSequence(
   allTiles: StudioTile[],
@@ -813,70 +807,110 @@ export function buildDeterministicSequence(
     blockingValue > 1 ? clampBlockingOffset(blockingValue) : clampBlockingOffset(Math.round(blockingValue * MAX_BLOCKING_OFFSET));
 
   const sequence = [...allTiles];
-  if (blockingOffset === 0 || sequence.length === 0) return sequence;
+  if (sequence.length === 0) return sequence;
 
   const sorted = [...launcherConfigs].sort((a, b) => a.order - b.order);
   const N = maxSelectableItems;
   const activeGroup = sorted.slice(0, activeLauncherCount);
   const activeColorTypes = new Set(activeGroup.map((l) => l.colorType));
 
-  // Target position for the 3rd tile (unlock tile):
-  //   blocking=1 → end of Layer B (position 2N-1)
-  //   blocking=2 → C1 (position 2N)
-  //   blocking=N → C(N-1) (position 2N + N - 2)
-  const baseTarget = blockingOffset === 1
-    ? Math.min(2 * N - 1, sequence.length - 1)
-    : Math.min(2 * N + (blockingOffset - 2), sequence.length - 1);
-
-  // Enforcement window: positions before the target where we allow max 2 per active color
-  const enforcementEnd = blockingOffset === 1
-    ? Math.min(N, sequence.length)
-    : Math.min(2 * N, sequence.length);
-
-  // For each active launcher color, place the 3rd tile at the target
-  let targetSlot = baseTarget;
-
   for (const launcher of activeGroup) {
     const ct = launcher.colorType;
-    const target = Math.min(targetSlot, sequence.length - 1);
-    targetSlot = target + 1; // next launcher's target is one position later
 
-    // Find ALL positions of this color in the sequence
-    const allPositions: number[] = [];
+    // Find ALL positions of this color
+    const positions: number[] = [];
     for (let i = 0; i < sequence.length; i++) {
-      if (sequence[i].colorType === ct) allPositions.push(i);
+      if (sequence[i].colorType === ct) positions.push(i);
+    }
+    if (positions.length < 3) continue;
+
+    const thirdPos = positions[2];
+
+    if (blockingOffset === 0) {
+      // ── Blocking 0: make the 3rd tile accessible ──
+      // Target: either in Layer A, or in B behind a same-color A item.
+      // If already in A (pos < N), fine.
+      if (thirdPos < N) continue;
+
+      // Try to place in B behind a same-color A item
+      let target = -1;
+      for (let b = N; b < Math.min(2 * N, sequence.length); b++) {
+        const aAbove = b - N;
+        if (sequence[aAbove].colorType === ct && !activeColorTypes.has(sequence[b].colorType)) {
+          // B position behind a matching A item, and current B tile is non-active (good swap)
+          target = b;
+          break;
+        }
+      }
+
+      // Fallback: place in A by swapping with a non-active tile in A
+      if (target === -1) {
+        for (let a = N - 1; a >= 0; a--) {
+          if (!activeColorTypes.has(sequence[a].colorType)) {
+            target = a;
+            break;
+          }
+        }
+      }
+
+      if (target !== -1 && target !== thirdPos) {
+        [sequence[thirdPos], sequence[target]] = [sequence[target], sequence[thirdPos]];
+      }
+
+    } else if (blockingOffset === 1) {
+      // ── Blocking 1: 3rd tile → B behind non-active A item ──
+      // Search B positions where A item above is NOT active-color
+      let target = -1;
+      for (let b = 2 * N - 1; b >= N; b--) {
+        if (b >= sequence.length) continue;
+        const aAbove = b - N;
+        if (!activeColorTypes.has(sequence[aAbove].colorType) &&
+            !activeColorTypes.has(sequence[b].colorType)) {
+          target = b;
+          break;
+        }
+      }
+
+      if (target !== -1 && target !== thirdPos) {
+        [sequence[thirdPos], sequence[target]] = [sequence[target], sequence[thirdPos]];
+      }
+
+    } else {
+      // ── Blocking 2-7: 3rd tile → C(blocking-1) ──
+      const cTarget = Math.min(2 * N + (blockingOffset - 2), sequence.length - 1);
+
+      // Find a non-active tile at or near cTarget to swap with
+      let target = -1;
+      if (thirdPos === cTarget) {
+        continue; // already there
+      } else if (!activeColorTypes.has(sequence[cTarget]?.colorType ?? -1)) {
+        target = cTarget;
+      } else {
+        // Search nearby for non-active tile
+        for (let j = cTarget; j > Math.max(thirdPos, 2 * N - 1); j--) {
+          if (!activeColorTypes.has(sequence[j].colorType)) {
+            target = j;
+            break;
+          }
+        }
+      }
+
+      if (target !== -1 && target !== thirdPos) {
+        [sequence[thirdPos], sequence[target]] = [sequence[target], sequence[thirdPos]];
+      }
     }
 
-    if (allPositions.length < 3) continue;
-
-    // The 3rd tile (index 2) needs to be at `target`
-    const thirdPos = allPositions[2];
-
-    if (thirdPos !== target) {
-      // Swap the 3rd tile to the target position
-      [sequence[thirdPos], sequence[target]] = [sequence[target], sequence[thirdPos]];
-    }
-
-    // Now enforce: at most 2 tiles of this color in the enforcement window
-    // (the swap above might have moved a non-matching tile into the window,
-    //  or there might be 4th/5th tiles from other launcher groups)
+    // Enforce max 2 of this color in the enforcement window
+    const enfEnd = blockingOffset <= 1 ? Math.min(N, sequence.length) : Math.min(2 * N, sequence.length);
     let count = 0;
-    for (let i = 0; i < enforcementEnd; i++) {
+    for (let i = 0; i < enfEnd; i++) {
       if (sequence[i].colorType !== ct) continue;
       count++;
       if (count <= 2) continue;
-
-      // Excess tile in enforcement window — swap it past the target
-      const pushTarget = Math.min(target + 1 + (count - 3), sequence.length - 1);
-      if (pushTarget <= i) continue;
-
-      // Find non-active tile at push target
+      // Push excess past the placed 3rd tile
       let swapIdx = -1;
-      for (let j = pushTarget; j > i; j--) {
-        if (!activeColorTypes.has(sequence[j].colorType)) {
-          swapIdx = j;
-          break;
-        }
+      for (let j = Math.min(2 * N + blockingOffset, sequence.length - 1); j > i; j--) {
+        if (!activeColorTypes.has(sequence[j].colorType)) { swapIdx = j; break; }
       }
       if (swapIdx !== -1) {
         [sequence[i], sequence[swapIdx]] = [sequence[swapIdx], sequence[i]];
