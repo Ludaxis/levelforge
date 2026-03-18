@@ -2,20 +2,21 @@
 
 import { Badge } from '@/components/ui/badge';
 import { StudioGameState, StudioTile, StudioLauncherState } from '@/lib/useStudioGame';
-import { COLOR_TYPE_TO_FRUIT, hexToColorName, COLOR_TYPE_TO_HEX } from '@/lib/juicyBlastExport';
+import { COLOR_TYPE_TO_FRUIT, COLOR_TYPE_TO_HEX } from '@/lib/juicyBlastExport';
 import { ColorSwatch } from './designer/types';
 
 function resolveHex(colorType: number, colorTypeToHex?: Record<number, string>): string {
   return colorTypeToHex?.[colorType] ?? COLOR_TYPE_TO_HEX[colorType] ?? '888888';
 }
 
-function formatFruitName(colorType: number): string {
+function shortName(colorType: number): string {
   const fruit = COLOR_TYPE_TO_FRUIT[colorType];
-  if (!fruit) return `Color ${colorType}`;
-  return fruit.charAt(0).toUpperCase() + fruit.slice(1);
+  if (!fruit) return `C${colorType}`;
+  // Capitalize first 3 chars
+  return fruit.charAt(0).toUpperCase() + fruit.slice(1, 4);
 }
 
-function LauncherPreview({
+function CompactLauncher({
   launcher,
   index,
   active,
@@ -29,64 +30,56 @@ function LauncherPreview({
   const hex = resolveHex(launcher.colorType, colorTypeToHex);
   return (
     <div
-      className={`rounded-xl border p-2.5 transition-colors ${
+      className={`flex items-center gap-1.5 rounded border px-2 py-1 text-[10px] ${
         active
           ? 'border-primary/40 bg-primary/5'
-          : 'border-border bg-muted/25 opacity-70'
+          : 'border-border bg-muted/20 opacity-60'
       }`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-            Blender {index + 1}
-          </div>
-          <div className="text-xs font-medium">{formatFruitName(launcher.colorType)}</div>
-        </div>
-        <ColorSwatch colorType={launcher.colorType} size={18} hex={hex} className="rounded-full" />
-      </div>
-      <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
-        <span>{active ? 'Active' : 'Queued'}</span>
-        <span className="font-mono">{launcher.collected.length}/3</span>
-      </div>
+      <ColorSwatch colorType={launcher.colorType} size={12} hex={hex} className="rounded-full flex-shrink-0" />
+      <span className="font-medium truncate">{shortName(launcher.colorType)}</span>
+      <span className="text-muted-foreground ml-auto font-mono">{launcher.collected.length}/3</span>
     </div>
   );
 }
 
-function TileCell({
+function CompactTile({
   tile,
   label,
   colorTypeToHex,
   muted = false,
+  activeColorTypes,
 }: {
   tile: StudioTile | null;
   label: string;
   colorTypeToHex?: Record<number, string>;
   muted?: boolean;
+  activeColorTypes?: Set<number>;
 }) {
   if (!tile) {
     return (
-      <div className="rounded-lg border border-dashed border-border bg-muted/20 p-2 text-center">
-        <div className="text-[10px] text-muted-foreground">{label}</div>
-        <div className="mt-2 text-[10px] text-muted-foreground/70">Empty</div>
+      <div className="flex items-center gap-1 rounded border border-dashed border-border bg-muted/10 px-1.5 py-0.5">
+        <span className="text-[9px] text-muted-foreground/50">{label}</span>
       </div>
     );
   }
 
   const hex = resolveHex(tile.colorType, colorTypeToHex);
+  const isActive = activeColorTypes?.has(tile.colorType) ?? false;
+
   return (
     <div
-      className={`rounded-lg border p-2 transition-colors ${
-        muted
-          ? 'border-amber-300/60 bg-amber-50/60 dark:bg-amber-950/10'
-          : 'border-emerald-300/60 bg-emerald-50/60 dark:bg-emerald-950/10'
+      className={`flex items-center gap-1 rounded border px-1.5 py-0.5 ${
+        isActive
+          ? 'border-emerald-400/70 bg-emerald-50/80 dark:bg-emerald-950/20'
+          : muted
+            ? 'border-amber-300/50 bg-amber-50/50 dark:bg-amber-950/10'
+            : 'border-border bg-background'
       }`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <span className="text-[10px] text-muted-foreground">{label}</span>
-        <ColorSwatch colorType={tile.colorType} size={16} hex={hex} className="rounded-full" />
-      </div>
-      <div className="mt-2 text-[11px] font-medium">{formatFruitName(tile.colorType)}</div>
-      <div className="text-[10px] text-muted-foreground">{hexToColorName(hex)}</div>
+      <span className="text-[9px] text-muted-foreground w-5 flex-shrink-0">{label}</span>
+      <ColorSwatch colorType={tile.colorType} size={10} hex={hex} className="rounded-full flex-shrink-0" />
+      <span className="text-[10px] font-medium truncate">{shortName(tile.colorType)}</span>
     </div>
   );
 }
@@ -113,21 +106,24 @@ export function StudioArrangementPreview({
   }
 
   const unlockDistance = maxSelectableItems * 2 + blockingOffset;
-  const launchers = [...previewState.activeLaunchers, ...previewState.launcherQueue];
-  const visibleLayerC = previewState.layerC.slice(0, 10);
+  const allLaunchers = [...previewState.activeLaunchers, ...previewState.launcherQueue];
+  const activeColorTypes = new Set(previewState.activeLaunchers.map((l) => l.colorType));
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline">Unlock Distance {unlockDistance}</Badge>
-        <Badge variant="outline">Layer A {previewState.layerA.length}</Badge>
-        <Badge variant="outline">Layer B {previewState.layerB.length}</Badge>
-        <Badge variant="outline">Layer C {previewState.layerC.length}</Badge>
+    <div className="space-y-3">
+      {/* Stats */}
+      <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+        <Badge variant="outline" className="h-5 text-[10px]">Unlock {unlockDistance}</Badge>
+        <Badge variant="outline" className="h-5 text-[10px]">A: {previewState.layerA.filter(t => t).length}</Badge>
+        <Badge variant="outline" className="h-5 text-[10px]">B: {previewState.layerB.filter(t => t).length}</Badge>
+        <Badge variant="outline" className="h-5 text-[10px]">C: {previewState.layerC.length}</Badge>
+        <Badge variant="outline" className="h-5 text-[10px]">Slots: {waitingStandSlots}</Badge>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {launchers.map((launcher, index) => (
-          <LauncherPreview
+      {/* Blenders — compact inline list */}
+      <div className="grid gap-1.5 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        {allLaunchers.map((launcher, index) => (
+          <CompactLauncher
             key={launcher.id}
             launcher={launcher}
             index={index}
@@ -137,82 +133,59 @@ export function StudioArrangementPreview({
         ))}
       </div>
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="text-xs font-medium">Backup Slots</div>
-          <div className="text-[10px] text-muted-foreground">Live gameplay uses these as overflow pressure.</div>
-        </div>
-        <div className="grid grid-cols-5 gap-2 lg:grid-cols-7">
-          {Array.from({ length: waitingStandSlots }, (_, index) => (
-            <div
-              key={index}
-              className="rounded-lg border border-border bg-background/60 p-2 text-center"
-            >
-              <div className="text-[10px] text-muted-foreground">Slot {index + 1}</div>
-              <div className="mt-2 text-[10px] text-muted-foreground/70">Empty</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="text-xs font-medium">Layer A (Surface)</div>
-          <div className="text-[10px] text-muted-foreground">Clickable items visible at the start.</div>
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+      {/* Layer A */}
+      <div className="space-y-1">
+        <div className="text-[10px] font-medium text-muted-foreground">Layer A (Surface)</div>
+        <div className="grid gap-1 grid-cols-3 sm:grid-cols-5 lg:grid-cols-8 xl:grid-cols-10">
           {previewState.layerA.map((tile, index) => (
-            <TileCell
-              key={`a-${index}-${tile?.id ?? 'empty'}`}
+            <CompactTile
+              key={`a-${index}-${tile?.id ?? 'e'}`}
               tile={tile}
               label={`A${index + 1}`}
               colorTypeToHex={colorTypeToHex}
+              activeColorTypes={activeColorTypes}
             />
           ))}
         </div>
       </div>
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="text-xs font-medium">Layer B (Hinted)</div>
-          <div className="text-[10px] text-muted-foreground">Slides up when the matching A slot is cleared.</div>
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+      {/* Layer B */}
+      <div className="space-y-1">
+        <div className="text-[10px] font-medium text-muted-foreground">Layer B (Hinted)</div>
+        <div className="grid gap-1 grid-cols-3 sm:grid-cols-5 lg:grid-cols-8 xl:grid-cols-10">
           {previewState.layerB.map((tile, index) => (
-            <TileCell
-              key={`b-${index}-${tile?.id ?? 'empty'}`}
+            <CompactTile
+              key={`b-${index}-${tile?.id ?? 'e'}`}
               tile={tile}
               label={`B${index + 1}`}
               colorTypeToHex={colorTypeToHex}
               muted
+              activeColorTypes={activeColorTypes}
             />
           ))}
         </div>
       </div>
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="text-xs font-medium">Layer C (Hidden Queue)</div>
-          <div className="text-[10px] text-muted-foreground">
-            Shared refill queue feeding B slots. Showing {visibleLayerC.length} of {previewState.layerC.length}.
-          </div>
+      {/* Layer C — show ALL items */}
+      <div className="space-y-1">
+        <div className="text-[10px] font-medium text-muted-foreground">
+          Layer C (Hidden Queue) — {previewState.layerC.length} items
         </div>
-        {visibleLayerC.length > 0 ? (
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-            {visibleLayerC.map((tile, index) => (
-              <TileCell
+        {previewState.layerC.length > 0 ? (
+          <div className="grid gap-1 grid-cols-3 sm:grid-cols-5 lg:grid-cols-8 xl:grid-cols-10">
+            {previewState.layerC.map((tile, index) => (
+              <CompactTile
                 key={`c-${index}-${tile.id}`}
                 tile={tile}
                 label={`C${index + 1}`}
                 colorTypeToHex={colorTypeToHex}
                 muted
+                activeColorTypes={activeColorTypes}
               />
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-border bg-muted/20 p-3 text-[11px] text-muted-foreground">
-            No hidden queue for this arrangement.
-          </div>
+          <div className="text-[10px] text-muted-foreground/60 italic">No hidden queue items.</div>
         )}
       </div>
     </div>

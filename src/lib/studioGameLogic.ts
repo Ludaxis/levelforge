@@ -842,38 +842,32 @@ export function buildDeterministicSequence(
       }
     }
 
+    // Fill gaps with TRUE blockers only — tiles whose color does NOT match
+    // any active blender. Using active-color tiles as blockers is pointless
+    // because the player picks them straight into the blender.
     const emptySlots = window.reduce((sum, tile) => sum + (tile === null ? 1 : 0), 0);
-    const preferredFutureBundles = futureBundles.filter(
+    const trueBlockerBundles = futureBundles.filter(
       (bundle) => !activeColorTypes.has(bundle.colorType),
     );
-    const fallbackFutureBundles = futureBundles.filter(
-      (bundle) => activeColorTypes.has(bundle.colorType),
-    );
-    const preferredBlockers = takeTilesRoundRobin(preferredFutureBundles, emptySlots);
-    const blockerTiles = [
-      ...preferredBlockers,
-      ...takeTilesRoundRobin(
-        fallbackFutureBundles,
-        Math.max(0, emptySlots - preferredBlockers.length),
-      ),
-    ];
-    const extraNeeded = Math.max(0, emptySlots - blockerTiles.length);
     const blockers = [
-      ...blockerTiles,
-      ...takePreferredLeftovers(leftovers, extraNeeded, activeColorTypes),
+      ...takeTilesRoundRobin(trueBlockerBundles, emptySlots),
+      ...takePreferredLeftovers(leftovers, Math.max(0, emptySlots - trueBlockerBundles.reduce((s, b) => s + b.tiles.length, 0)), activeColorTypes),
     ];
 
+    // Fill only as many gaps as we have true blockers — compact the window
+    // rather than stuffing it with fake (active-color) blockers.
     let blockerIndex = 0;
+    const compacted: StudioTile[] = [];
     for (let i = 0; i < window.length; i++) {
-      if (window[i] !== null) continue;
-      if (blockerIndex < blockers.length) {
-        window[i] = blockers[blockerIndex++];
+      if (window[i] !== null) {
+        compacted.push(window[i]!);
+      } else if (blockerIndex < blockers.length) {
+        compacted.push(blockers[blockerIndex++]);
       }
+      // else: skip this slot — window shrinks naturally
     }
 
-    for (const tile of window) {
-      if (tile) sequence.push(tile);
-    }
+    sequence.push(...compacted);
   }
 
   for (const bundle of bundles) {

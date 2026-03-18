@@ -1405,7 +1405,37 @@ export function LevelDesignerV2({
         </Card>
       )}
 
-      {/* 6b. Arrangement Preview */}
+      {/* 6b. Difficulty Controls (sticky) + Arrangement Preview */}
+      {hasData && (
+        <div className="sticky top-0 z-10">
+          <DifficultyAnalysis
+            difficultyResult={difficultyResult}
+            difficultyParams={studioDifficultyParams}
+            maxSelectableItems={maxSelectableItems}
+            blockingOffset={blockingOffset}
+            waitingStandSlots={waitingStandSlots}
+            activeLauncherCount={activeLauncherCount}
+            maxActiveLaunchers={maxActiveLaunchers}
+            seed={seed}
+            parameterLocks={parameterLocks}
+            simulationResult={simulationResult}
+            isTargeting={isTargeting}
+            isSimulating={isSimulating}
+            onMaxSelectableChange={setMaxSelectableItems}
+            onBlockingOffsetChange={setBlockingOffset}
+            onWaitingStandSlotsChange={setWaitingStandSlots}
+            onActiveLauncherCountChange={setActiveLauncherCount}
+            onSeedChange={setSeed}
+            onToggleParameterLock={handleToggleParameterLock}
+            onEasier={handleEasier}
+            onHarder={handleHarder}
+            onAutoTarget={handleAutoTarget}
+            onSimulate={handleSimulate}
+          />
+        </div>
+      )}
+
+      {/* 7. Arrangement Preview */}
       {hasData && arrangementPreviewState && (
         <Card>
           <CardHeader className="pb-2">
@@ -1425,7 +1455,7 @@ export function LevelDesignerV2({
         </Card>
       )}
 
-      {/* 7. Item Pool */}
+      {/* 8. Item Pool */}
       {hasData && (
         <ItemPoolSection
           items={itemsWithLayers}
@@ -1436,34 +1466,6 @@ export function LevelDesignerV2({
           onReorder={handleReorderItem}
           onChangeLayer={handleChangeLayer}
           colorTypeToHex={colorTypeToHex}
-        />
-      )}
-
-      {/* 8. Difficulty Analysis */}
-      {hasData && (
-        <DifficultyAnalysis
-          difficultyResult={difficultyResult}
-          difficultyParams={studioDifficultyParams}
-          maxSelectableItems={maxSelectableItems}
-          blockingOffset={blockingOffset}
-          waitingStandSlots={waitingStandSlots}
-          activeLauncherCount={activeLauncherCount}
-          maxActiveLaunchers={maxActiveLaunchers}
-          seed={seed}
-          parameterLocks={parameterLocks}
-          simulationResult={simulationResult}
-          isTargeting={isTargeting}
-          isSimulating={isSimulating}
-          onMaxSelectableChange={setMaxSelectableItems}
-          onBlockingOffsetChange={setBlockingOffset}
-          onWaitingStandSlotsChange={setWaitingStandSlots}
-          onActiveLauncherCountChange={setActiveLauncherCount}
-          onSeedChange={setSeed}
-          onToggleParameterLock={handleToggleParameterLock}
-          onEasier={handleEasier}
-          onHarder={handleHarder}
-          onAutoTarget={handleAutoTarget}
-          onSimulate={handleSimulate}
         />
       )}
 
