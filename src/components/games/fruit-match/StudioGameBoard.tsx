@@ -61,21 +61,38 @@ const EMOJI_COLOR_REFS: { emoji: string; r: number; g: number; b: number }[] = [
   { emoji: '\u{1FAD2}', r: 76, g: 67, b: 67 },      // Dark/Black -> olive
 ];
 
+// Variant emojis: [variant0, variant1, variant2] per fruit type
+// Variant 0 = base fruit, 1-2 = alternatives within the same color
+const VARIANT_EMOJIS: Record<string, [string, string, string]> = {
+  blueberry:   ['\u{1FAD0}', '\u{1F347}', '\u{1F347}'],  // Blueberry, Fig/Grape, Grape
+  orange:      ['\u{1F34A}', '\u{1F351}', '\u{1F96D}'],  // Orange, Persimmon(peach), Mango
+  strawberry:  ['\u{1F353}', '\u{1F352}', '\u{1F345}'],  // Strawberry, Cherry, Tomato
+  dragonfruit: ['\u{1F409}', '\u{1F351}', '\u{1F514}'],  // Dragon, Peach, Bell
+  banana:      ['\u{1F34C}', '\u{1F34B}', '\u{2B50}'],   // Banana, Lemon, Star(carambola)
+  apple:       ['\u{1F34F}', '\u{1F951}', '\u{1F348}'],  // Apple, Avocado, Gooseberry(melon)
+  plum:        ['\u{1F347}', '\u{1F49C}', '\u{1F352}'],  // Plum/Grape, PassionFruit(heart), Mangosteen(cherry)
+  pear:        ['\u{1F350}', '\u{1F353}', '\u{26AA}'],   // Pear, WhiteStrawberry, Snowberry(circle)
+  blackberry:  ['\u{1FAD2}', '\u{1FAD2}', '\u{1F0CF}'],  // Blackberry/Olive, Olive, Blackcurrant(card)
+};
+
 /**
- * Pick the emoji whose reference color is closest to the ACTUAL hex color.
- * This avoids mismatches when artwork hex ≠ standard palette hex for a given colorType.
+ * Pick emoji based on colorType and variant.
+ * Variant 0 = base fruit emoji, 1/2 = different fruits of the same color.
  */
 function resolveEmoji(
   colorType: number,
   colorTypeToHex: Record<number, string> | undefined,
+  variant: number = 0,
 ): string {
-  const hex = colorTypeToHex?.[colorType] ?? COLOR_TYPE_TO_HEX[colorType];
-  if (!hex) {
-    return FRUIT_EMOJI[COLOR_TYPE_TO_FRUIT[colorType] as FruitType] ?? '\u2B1C';
+  const fruit = COLOR_TYPE_TO_FRUIT[colorType] as string | undefined;
+  if (fruit && VARIANT_EMOJIS[fruit]) {
+    const emojis = VARIANT_EMOJIS[fruit];
+    return emojis[variant] ?? emojis[0];
   }
-
+  // Fallback to color-distance matching
+  const hex = colorTypeToHex?.[colorType] ?? COLOR_TYPE_TO_HEX[colorType];
+  if (!hex) return FRUIT_EMOJI[COLOR_TYPE_TO_FRUIT[colorType] as FruitType] ?? '\u2B1C';
   const { r, g, b } = hexToRgb(hex);
-
   let bestEmoji = '\u2B1C';
   let bestDist = Infinity;
   for (const ref of EMOJI_COLOR_REFS) {
@@ -574,7 +591,7 @@ function StudioWaitingStand({
               borderColor: `${color}88`,
             }}
           >
-            <span className="text-lg">{resolveEmoji(tile.colorType, colorTypeToHex)}</span>
+            <span className="text-lg">{resolveEmoji(tile.colorType, colorTypeToHex, tile.variant)}</span>
           </div>
         );
       })}
@@ -639,7 +656,7 @@ function SinkSlot({
             boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
           }}
         >
-          <span className="text-lg">{resolveEmoji(tileA.colorType, colorTypeToHex)}</span>
+          <span className="text-lg">{resolveEmoji(tileA.colorType, colorTypeToHex, tileA.variant)}</span>
         </button>
       ) : (
         <div className="w-10 h-10 rounded-md border border-dashed border-muted-foreground/10 bg-black/5 z-10" />
@@ -655,7 +672,7 @@ function SinkSlot({
             opacity: 0.5,
           }}
         >
-          <span className="text-xs opacity-70 mb-0.5">{resolveEmoji(tileB.colorType, colorTypeToHex)}</span>
+          <span className="text-xs opacity-70 mb-0.5">{resolveEmoji(tileB.colorType, colorTypeToHex, tileB.variant)}</span>
         </div>
       ) : tileA ? (
         <div className="w-10 h-3 -mt-1" />
@@ -826,7 +843,7 @@ export function StudioGameBoard({ config, onBack }: StudioGameBoardProps) {
                         borderColor: `${color}60`,
                       }}
                     >
-                      <span className="text-[10px]">{resolveEmoji(tile.colorType, colorTypeToHex)}</span>
+                      <span className="text-[10px]">{resolveEmoji(tile.colorType, colorTypeToHex, tile.variant)}</span>
                     </div>
                   );
                 })}
