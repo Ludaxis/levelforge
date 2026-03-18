@@ -10,6 +10,7 @@ import {
   NUMBER_TO_DIFFICULTY,
   hexToColorType,
   ReferenceLevel,
+  exportStudioLevel,
 } from '../juicyBlastExport';
 import { FruitType, DifficultyTier, PixelCell } from '@/types/fruitMatch';
 import { createTestPixelArt } from './helpers/fruitMatchTestHelpers';
@@ -511,6 +512,47 @@ describe('Export to Reference Format', () => {
       expect(exported.Artwork.PixelData[0].ColorHex).toBe('CUSTOM1');
       expect(exported.Artwork.PixelData[0].Group).toBe(99);
     });
+  });
+});
+
+// ============================================================================
+// Studio Export Format
+// ============================================================================
+
+describe('Studio export format', () => {
+  it('preserves studio recipe metadata for re-import', () => {
+    const exported = exportStudioLevel({
+      palette: ['4C9EF2'],
+      levelId: 'Level1_1',
+      levelIndex: 1,
+      difficulty: 'hard',
+      graphicId: 'graphic_test',
+      width: 4,
+      height: 4,
+      pixels: [],
+      selectableItems: [
+        { colorType: 0, variant: 0, layer: 'A', order: 0 },
+      ],
+      requirements: [
+        { colorType: 0, value: 3, group: 1 },
+      ],
+      launchers: [
+        { colorType: 0, pixelCount: 3, group: 1, order: 0, isLocked: false },
+      ],
+      unlockStageData: [{ requiredCompletedGroups: [1] }],
+      maxSelectableItems: 10,
+      blockingOffset: 7,
+      mismatchDepth: 0.7,
+      waitingStandSlots: 5,
+      activeLauncherCount: 2,
+      seed: 42,
+    });
+
+    expect(exported.BlockingOffset).toBe(7);
+    expect(exported.MismatchDepth).toBe(0.7);
+    expect(exported.WaitingStandSlots).toBe(5);
+    expect(exported.ActiveLauncherCount).toBe(2);
+    expect(exported.Seed).toBe(42);
   });
 });
 

@@ -249,6 +249,24 @@ export interface DesignedFruitMatchLevel {
   metrics: FruitMatchLevelMetrics;
   createdAt: number;
   launcherOrderConfig?: LauncherOrderConfig; // Optional manual launcher ordering
+  studioSelectableItems?: {
+    colorType: number;
+    variant: number;
+    layer: 'A' | 'B' | 'C';
+    order: number;
+  }[];
+  studioLaunchers?: {
+    colorType: number;
+    pixelCount: number;
+    group: number;
+    order: number;
+    isLocked: boolean;
+  }[];
+  studioMaxSelectableItems?: number;
+  studioBlockingOffset?: number;
+  studioWaitingStandSlots?: number;
+  studioActiveLauncherCount?: number;
+  studioSeed?: number;
 }
 
 // ============================================================================

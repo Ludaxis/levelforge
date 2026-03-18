@@ -17,6 +17,8 @@ import {
   Loader2,
   ChevronDown,
   ChevronRight,
+  Lock,
+  LockOpen,
 } from 'lucide-react';
 import { StudioDifficultyResult, StudioDifficultyParams, DifficultyComponent } from '@/lib/useStudioGame';
 import { StudioSimulationResult } from '@/lib/studioDifficultyEngine';
@@ -31,6 +33,64 @@ const IMPACT_COLORS: Record<string, string> = {
   medium: 'text-yellow-600 bg-yellow-500/10',
   hard: 'text-red-600 bg-red-500/10',
 };
+
+type ParameterLockKey = 'blocking' | 'surfaceSize' | 'activeLaunchers';
+
+function blockingLabel(blockingOffset: number): string {
+  if (blockingOffset <= 0) return 'Easy';
+  if (blockingOffset <= 2) return 'Light';
+  if (blockingOffset <= 4) return 'Medium';
+  if (blockingOffset <= 6) return 'Hard';
+  if (blockingOffset <= 8) return 'Very Hard';
+  return 'Nightmare';
+}
+
+function LockToggle({
+  locked,
+  onToggle,
+  label,
+}: {
+  locked: boolean;
+  onToggle: () => void;
+  label: string;
+}) {
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
+      onClick={onToggle}
+      title={locked ? `Unlock ${label}` : `Lock ${label}`}
+      aria-label={locked ? `Unlock ${label}` : `Lock ${label}`}
+    >
+      {locked ? <Lock className="h-3 w-3" /> : <LockOpen className="h-3 w-3" />}
+    </Button>
+  );
+}
+
+function SliderHeading({
+  label,
+  value,
+  locked,
+  onToggleLock,
+}: {
+  label: string;
+  value: string;
+  locked?: boolean;
+  onToggleLock?: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between text-xs">
+      <div className="flex items-center gap-1">
+        <span className="text-muted-foreground">{label}</span>
+        {typeof locked === 'boolean' && onToggleLock && (
+          <LockToggle locked={locked} onToggle={onToggleLock} label={label} />
+        )}
+      </div>
+      <span className="font-mono">{value}</span>
+    </div>
+  );
+}
 
 function DifficultyComponentRow({ component, isExpanded, onToggle }: {
   component: DifficultyComponent;
@@ -92,21 +152,23 @@ function DifficultyComponentRow({ component, isExpanded, onToggle }: {
 function FormulaBreakdown({ params, score }: { params: StudioDifficultyParams; score: number }) {
   const [isOpen, setIsOpen] = useState(false);
 
-  const { uniqueColors, launcherCount, maxSelectableItems, totalTiles, mismatchDepth } = params;
+  const { uniqueColors, launcherCount, maxSelectableItems, totalTiles } = params;
+  const blockingOffset = params.blockingOffset ?? Math.round((params.mismatchDepth ?? 0) * 10);
 
-  const layerMixing = clamp01(mismatchDepth);
+  const blockingFactor = clamp01(blockingOffset / 10);
   const colorVariety = clamp01((uniqueColors - 2) / 5);
   const surfaceSize = clamp01(1 - (maxSelectableItems - 1) / 19);
   const hiddenRatio = totalTiles > 0 ? clamp01((totalTiles - maxSelectableItems) / totalTiles) : 0;
   const launcherSequence = clamp01((launcherCount - 4) / 12);
+  const unlockDistance = maxSelectableItems * 2 + blockingOffset;
 
   const rows: { label: string; formula: string; raw: string; weight: string; contribution: string }[] = [
     {
-      label: 'Layer Mixing',
-      formula: `clamp01(${mismatchDepth.toFixed(2)})`,
-      raw: layerMixing.toFixed(2),
+      label: 'Blocking',
+      formula: `clamp01(${blockingOffset} / 10)`,
+      raw: blockingFactor.toFixed(2),
       weight: '0.40',
-      contribution: (layerMixing * 0.40).toFixed(3),
+      contribution: (blockingFactor * 0.40).toFixed(3),
     },
     {
       label: 'Surface Size',
@@ -138,7 +200,7 @@ function FormulaBreakdown({ params, score }: { params: StudioDifficultyParams; s
     },
   ];
 
-  const rawTotal = layerMixing * 0.40 + colorVariety * 0.10 + surfaceSize * 0.25 + hiddenRatio * 0.15 + launcherSequence * 0.10;
+  const rawTotal = blockingFactor * 0.40 + colorVariety * 0.10 + surfaceSize * 0.25 + hiddenRatio * 0.15 + launcherSequence * 0.10;
 
   return (
     <div className="pt-1 border-t border-border">
@@ -179,6 +241,7 @@ function FormulaBreakdown({ params, score }: { params: StudioDifficultyParams; s
             </div>
           </div>
           <div className="text-[9px] text-muted-foreground space-y-0.5 mt-1">
+            <div className="font-mono truncate">UnlockDistance = {maxSelectableItems} x 2 + {blockingOffset} = {unlockDistance}</div>
             {rows.map((row) => (
               <div key={row.label} className="font-mono truncate" title={row.formula}>
                 {row.label}: {row.formula}
@@ -195,18 +258,21 @@ export function DifficultyAnalysis({
   difficultyResult,
   difficultyParams,
   maxSelectableItems,
-  mismatchDepth,
+  blockingOffset,
   waitingStandSlots,
   activeLauncherCount,
+  maxActiveLaunchers,
   seed,
+  parameterLocks,
   simulationResult,
   isTargeting,
   isSimulating,
   onMaxSelectableChange,
-  onMismatchDepthChange,
+  onBlockingOffsetChange,
   onWaitingStandSlotsChange,
   onActiveLauncherCountChange,
   onSeedChange,
+  onToggleParameterLock,
   onEasier,
   onHarder,
   onAutoTarget,
@@ -215,18 +281,21 @@ export function DifficultyAnalysis({
   difficultyResult: StudioDifficultyResult | null;
   difficultyParams: StudioDifficultyParams | null;
   maxSelectableItems: number;
-  mismatchDepth: number;
+  blockingOffset: number;
   waitingStandSlots: number;
   activeLauncherCount: number;
+  maxActiveLaunchers: number;
   seed: number | undefined;
+  parameterLocks: Record<ParameterLockKey, boolean>;
   simulationResult: StudioSimulationResult | null;
   isTargeting: boolean;
   isSimulating: boolean;
   onMaxSelectableChange: (v: number) => void;
-  onMismatchDepthChange: (v: number) => void;
+  onBlockingOffsetChange: (v: number) => void;
   onWaitingStandSlotsChange: (v: number) => void;
   onActiveLauncherCountChange: (v: number) => void;
   onSeedChange: (v: number | undefined) => void;
+  onToggleParameterLock: (key: ParameterLockKey) => void;
   onEasier: () => void;
   onHarder: () => void;
   onAutoTarget: (targetScore: number) => void;
@@ -234,6 +303,7 @@ export function DifficultyAnalysis({
 }) {
   const [targetInput, setTargetInput] = useState('50');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const unlockDistance = maxSelectableItems * 2 + blockingOffset;
 
   if (!difficultyResult) {
     return (
@@ -364,26 +434,30 @@ export function DifficultyAnalysis({
         {/* Sliders */}
         <div className="space-y-2 pt-1 border-t border-border">
           <div className="space-y-1">
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Layer Mixing</span>
-              <span className="font-mono">{Math.round(mismatchDepth * 100)}%</span>
-            </div>
+            <SliderHeading
+              label="Blocking"
+              value={`${blockingOffset} (${blockingLabel(blockingOffset)})`}
+              locked={parameterLocks.blocking}
+              onToggleLock={() => onToggleParameterLock('blocking')}
+            />
             <Slider
-              value={[mismatchDepth * 100]}
+              value={[blockingOffset]}
               min={0}
-              max={100}
-              step={5}
-              onValueChange={([v]) => onMismatchDepthChange(v / 100)}
+              max={10}
+              step={1}
+              onValueChange={([v]) => onBlockingOffsetChange(v)}
             />
             <p className="text-[10px] text-muted-foreground">
-              0% = fruits for active blenders on top. 100% = fruits for later blenders on top — player must pick them to backup slots so matching fruits come up from Layer B.
+              Unlock distance = Layer A x 2 + blocking offset = {maxSelectableItems} x 2 + {blockingOffset} = {unlockDistance}. Higher values spread the required matches deeper into B/C behind more blockers.
             </p>
           </div>
           <div className="space-y-1">
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Surface Size (Layer A)</span>
-              <span className="font-mono">{maxSelectableItems}</span>
-            </div>
+            <SliderHeading
+              label="Surface Size (Layer A)"
+              value={`${maxSelectableItems}`}
+              locked={parameterLocks.surfaceSize}
+              onToggleLock={() => onToggleParameterLock('surfaceSize')}
+            />
             <Slider
               value={[maxSelectableItems]}
               min={1}
@@ -393,10 +467,10 @@ export function DifficultyAnalysis({
             />
           </div>
           <div className="space-y-1">
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Backup Slots</span>
-              <span className="font-mono">{waitingStandSlots} (fixed)</span>
-            </div>
+            <SliderHeading
+              label="Backup Slots"
+              value={`${waitingStandSlots} (fixed)`}
+            />
             <Slider
               value={[waitingStandSlots]}
               min={3}
@@ -407,14 +481,16 @@ export function DifficultyAnalysis({
             />
           </div>
           <div className="space-y-1">
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Active Launchers</span>
-              <span className="font-mono">{activeLauncherCount}</span>
-            </div>
+            <SliderHeading
+              label="Active Launchers"
+              value={`${activeLauncherCount}`}
+              locked={parameterLocks.activeLaunchers}
+              onToggleLock={() => onToggleParameterLock('activeLaunchers')}
+            />
             <Slider
               value={[activeLauncherCount]}
               min={1}
-              max={3}
+              max={maxActiveLaunchers}
               step={1}
               onValueChange={([v]) => onActiveLauncherCountChange(v)}
             />

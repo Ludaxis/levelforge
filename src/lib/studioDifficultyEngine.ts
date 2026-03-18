@@ -26,7 +26,9 @@ import { SAWTOOTH_CYCLE } from '@/lib/constants';
 
 /** All parameters controlling a level's difficulty. */
 export interface DifficultyRecipe {
-  mismatchDepth: number;       // 0-1
+  blockingOffset: number;      // 0-10
+  /** @deprecated Legacy mirror retained for older callers/tests. */
+  mismatchDepth?: number;
   maxSelectableItems: number;  // 1-20
   activeLauncherCount: number; // 1-3
   seed: number;
@@ -134,6 +136,7 @@ function runSingleSimulation(
     ...config,
     maxSelectableItems: recipe.maxSelectableItems,
     activeLauncherCount: recipe.activeLauncherCount,
+    blockingOffset: recipe.blockingOffset,
     mismatchDepth: recipe.mismatchDepth,
     seed: Math.floor(rng() * 2147483647),
   };
@@ -240,12 +243,12 @@ const TIER_CONFIG: Record<DifficultyTier, { min: number; max: number; winRate: [
 
 /** Recipe presets for each tier (starting point for targeting). */
 const TIER_PRESETS: Record<DifficultyTier, Omit<DifficultyRecipe, 'seed'>> = {
-  trivial:   { mismatchDepth: 0,    maxSelectableItems: 10, activeLauncherCount: 3 },
-  easy:      { mismatchDepth: 0.15, maxSelectableItems: 9,  activeLauncherCount: 2 },
-  medium:    { mismatchDepth: 0.35, maxSelectableItems: 8,  activeLauncherCount: 2 },
-  hard:      { mismatchDepth: 0.6,  maxSelectableItems: 7,  activeLauncherCount: 2 },
-  expert:    { mismatchDepth: 0.8,  maxSelectableItems: 6,  activeLauncherCount: 2 },
-  nightmare: { mismatchDepth: 1.0,  maxSelectableItems: 6,  activeLauncherCount: 1 },
+  trivial:   { blockingOffset: 0,  maxSelectableItems: 10, activeLauncherCount: 3 },
+  easy:      { blockingOffset: 1,  maxSelectableItems: 9,  activeLauncherCount: 2 },
+  medium:    { blockingOffset: 3,  maxSelectableItems: 8,  activeLauncherCount: 2 },
+  hard:      { blockingOffset: 5,  maxSelectableItems: 7,  activeLauncherCount: 2 },
+  expert:    { blockingOffset: 7,  maxSelectableItems: 6,  activeLauncherCount: 2 },
+  nightmare: { blockingOffset: 10, maxSelectableItems: 6,  activeLauncherCount: 1 },
 };
 
 /** Get tier for a score. */
@@ -278,7 +281,8 @@ function initialRecipeFromTarget(targetScore: number, seed: number): DifficultyR
   const lerp = (a: number, b: number, f: number) => a + (b - a) * f;
 
   return {
-    mismatchDepth: Math.round(lerp(preset.mismatchDepth, nextPreset.mismatchDepth, t) * 20) / 20, // snap to 0.05
+    blockingOffset: Math.round(lerp(preset.blockingOffset, nextPreset.blockingOffset, t)),
+    mismatchDepth: Math.round(lerp(preset.blockingOffset, nextPreset.blockingOffset, t)) / 10,
     maxSelectableItems: Math.round(lerp(preset.maxSelectableItems, nextPreset.maxSelectableItems, t)),
     activeLauncherCount: Math.round(lerp(preset.activeLauncherCount, nextPreset.activeLauncherCount, t)),
     seed,
@@ -295,6 +299,7 @@ function computeRecipeScore(config: StudioGameConfig, recipe: DifficultyRecipe):
     launcherCount: config.launchers.length,
     maxSelectableItems: recipe.maxSelectableItems,
     totalTiles: config.selectableItems.length,
+    blockingOffset: recipe.blockingOffset,
     mismatchDepth: recipe.mismatchDepth,
   }).score;
 }
@@ -328,8 +333,9 @@ export function targetDifficulty(
     // Adjust the highest-impact lever in the right direction
     if (diff > 0) {
       // Need to increase difficulty
-      if (recipe.mismatchDepth < 1) {
-        recipe = { ...recipe, mismatchDepth: Math.min(1, +(recipe.mismatchDepth + 0.05).toFixed(2)) };
+      if (recipe.blockingOffset < 10) {
+        const blockingOffset = Math.min(10, recipe.blockingOffset + 1);
+        recipe = { ...recipe, blockingOffset, mismatchDepth: blockingOffset / 10 };
       } else if (recipe.maxSelectableItems > 1) {
         recipe = { ...recipe, maxSelectableItems: recipe.maxSelectableItems - 1 };
       } else if (recipe.activeLauncherCount > 1) {
@@ -337,8 +343,9 @@ export function targetDifficulty(
       }
     } else {
       // Need to decrease difficulty
-      if (recipe.mismatchDepth > 0) {
-        recipe = { ...recipe, mismatchDepth: Math.max(0, +(recipe.mismatchDepth - 0.05).toFixed(2)) };
+      if (recipe.blockingOffset > 0) {
+        const blockingOffset = Math.max(0, recipe.blockingOffset - 1);
+        recipe = { ...recipe, blockingOffset, mismatchDepth: blockingOffset / 10 };
       } else if (recipe.maxSelectableItems < 20) {
         recipe = { ...recipe, maxSelectableItems: recipe.maxSelectableItems + 1 };
       } else if (recipe.activeLauncherCount < 3) {
@@ -365,13 +372,15 @@ export function targetDifficulty(
     const tierCfg = TIER_CONFIG[tier];
     if (simulation.winRate > tierCfg.winRate[1] && currentScore < targetScore) {
       // Too easy — push difficulty up slightly
-      if (recipe.mismatchDepth < 1) {
-        recipe = { ...recipe, mismatchDepth: Math.min(1, +(recipe.mismatchDepth + 0.05).toFixed(2)) };
+      if (recipe.blockingOffset < 10) {
+        const blockingOffset = Math.min(10, recipe.blockingOffset + 1);
+        recipe = { ...recipe, blockingOffset, mismatchDepth: blockingOffset / 10 };
       }
     } else if (simulation.winRate < tierCfg.winRate[0] && currentScore > targetScore) {
       // Too hard — ease off
-      if (recipe.mismatchDepth > 0) {
-        recipe = { ...recipe, mismatchDepth: Math.max(0, +(recipe.mismatchDepth - 0.05).toFixed(2)) };
+      if (recipe.blockingOffset > 0) {
+        const blockingOffset = Math.max(0, recipe.blockingOffset - 1);
+        recipe = { ...recipe, blockingOffset, mismatchDepth: blockingOffset / 10 };
       }
     }
 

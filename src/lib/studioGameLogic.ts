@@ -12,7 +12,9 @@ export interface StudioDifficultyParams {
   launcherCount: number;
   maxSelectableItems: number;
   totalTiles: number;
-  mismatchDepth: number; // 0-1: how buried matching tiles are
+  blockingOffset?: number; // 0-10: how many blocker items extend the unlock window
+  /** @deprecated Legacy field preserved for compatibility with older saved levels/tests. */
+  mismatchDepth?: number;
 }
 
 /** A single component of the difficulty score, with designer-facing explanation. */
@@ -37,20 +39,42 @@ function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
 }
 
+export const MAX_BLOCKING_OFFSET = 10;
+
+function clampBlockingOffset(v: number): number {
+  return Math.max(0, Math.min(MAX_BLOCKING_OFFSET, Math.round(v)));
+}
+
+export function blockingOffsetToDepth(blockingOffset: number): number {
+  return clamp01(clampBlockingOffset(blockingOffset) / MAX_BLOCKING_OFFSET);
+}
+
+export function resolveBlockingOffset(input: {
+  blockingOffset?: number;
+  mismatchDepth?: number;
+}): number {
+  if (typeof input.blockingOffset === 'number') {
+    return clampBlockingOffset(input.blockingOffset);
+  }
+  if (typeof input.mismatchDepth === 'number') {
+    return clampBlockingOffset(input.mismatchDepth * MAX_BLOCKING_OFFSET);
+  }
+  return 0;
+}
+
 export function calculateStudioDifficulty(params: StudioDifficultyParams): StudioDifficultyResult {
   const {
     uniqueColors,
     launcherCount,
     maxSelectableItems,
     totalTiles,
-    mismatchDepth,
   } = params;
+  const blockingOffset = resolveBlockingOffset(params);
 
-  // ── 1. Layer Mixing (0.40) ──────────────────────────────────────────
-  // How much are items shuffled across layers vs cleanly separated?
-  // 0 = Layer A has items for active launchers (easy to match)
-  // 1 = Layer A surface has items for later launchers (must fill backup slots)
-  const layerMixing = clamp01(mismatchDepth);
+  // ── 1. Blocking Pattern (0.40) ──────────────────────────────────────
+  // How long does it take before the player can complete the active set?
+  // 0 = no extra blockers beyond A+B, 10 = maximum burial into Layer C.
+  const blockingFactor = blockingOffsetToDepth(blockingOffset);
 
   // ── 2. Color Variety (0.10) ─────────────────────────────────────────
   // More distinct fruit colors = harder to spot matching triplets
@@ -72,7 +96,7 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
   const launcherSequence = clamp01((launcherCount - 4) / 12);
 
   const raw =
-    layerMixing * 0.40 +
+    blockingFactor * 0.40 +
     colorVariety * 0.10 +
     surfaceSize * 0.25 +
     hiddenRatio * 0.15 +
@@ -93,7 +117,7 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
   const hiddenItemCount = totalTiles - maxSelectableItems;
   const layerBCount = Math.min(maxSelectableItems, hiddenItemCount);
   const layerCCount = Math.max(0, hiddenItemCount - layerBCount);
-  const mixPct = Math.round(mismatchDepth * 100);
+  const unlockDistance = maxSelectableItems * 2 + blockingOffset;
 
   function impactOf(v: number): 'easy' | 'medium' | 'hard' {
     return v < 0.3 ? 'easy' : v < 0.6 ? 'medium' : 'hard';
@@ -101,20 +125,20 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
 
   const breakdown: DifficultyComponent[] = [
     {
-      id: 'layerMixing',
-      name: 'Layer Mixing',
-      description: 'Whether fruits for active blenders are on top (Layer A) or buried underneath (Layer B). Higher = player must pick non-matching fruits first to bring matching ones to the surface.',
-      score: layerMixing,
+      id: 'blocking',
+      name: 'Blocking',
+      description: 'How far the matching fruits for the active blenders are stretched through the unlock window. Higher = more non-matching fruits must be processed first.',
+      score: blockingFactor,
       weight: 0.40,
-      contribution: layerMixing * 0.40,
-      explanation: mixPct === 0
-        ? 'No mixing — fruits for active blenders are on top. Player can pick and match directly.'
-        : mixPct <= 30
-        ? `Light mixing (${mixPct}%) — most top fruits match active blenders. A few picks go to backup slots.`
-        : mixPct <= 60
-        ? `Moderate mixing (${mixPct}%) — many top fruits are for later blenders. Player must pick them to backup slots so matching fruits from Layer B come up.`
-        : `Heavy mixing (${mixPct}%) — top layer is mostly fruits for later blenders. Player must clear them to backup slots to uncover matching fruits in Layer B. Requires planning around backup slot capacity.`,
-      impact: impactOf(layerMixing),
+      contribution: blockingFactor * 0.40,
+      explanation: blockingOffset === 0
+        ? `Unlock distance ${unlockDistance} items — matching fruits stay within Layer A + Layer B, so the active blenders can be completed without digging into Layer C.`
+        : blockingOffset <= 3
+        ? `Unlock distance ${unlockDistance} items — a few blocker fruits push the final matches slightly into Layer C.`
+        : blockingOffset <= 6
+        ? `Unlock distance ${unlockDistance} items — the active blenders are delayed by a substantial blocker span across later fruits.`
+        : `Unlock distance ${unlockDistance} items — the final matches are buried behind a long blocker chain and typically appear at the tail of the unlock window.`,
+      impact: impactOf(blockingFactor),
     },
     {
       id: 'surfaceSize',
@@ -208,7 +232,9 @@ export interface StudioGameConfig {
   selectableItems: { colorType: number; variant: number; order: number; layer?: 'A' | 'B' | 'C' }[];
   launchers: { colorType: number; pixelCount: number; group: number; order: number }[];
   activeLauncherCount?: number; // default 2
-  /** 0-1: how much to bury matching tiles. 0=solvable, 1=max burial */
+  /** 0-10: how many blocker items extend the unlock window beyond Layer A + Layer B. */
+  blockingOffset?: number;
+  /** @deprecated Legacy field preserved for compatibility with older saved levels/tests. */
   mismatchDepth?: number;
   /** Actual hex colors per colorType from the artwork (e.g. { 0: '4C9EF2', 7: 'FFFBF7' }) */
   colorTypeToHex?: Record<number, string>;
@@ -566,12 +592,28 @@ function verifySolvability(
 // Find maximum solvable tile burial depth
 // ============================================================================
 
+const SOURCE_LAYER_ORDER: Record<'A' | 'B' | 'C', number> = {
+  A: 0,
+  B: 1,
+  C: 2,
+};
+
+function sortSelectableItemsForSequence(
+  selectableItems: StudioGameConfig['selectableItems'],
+) {
+  return [...selectableItems].sort((a, b) => {
+    const layerA = SOURCE_LAYER_ORDER[a.layer || 'A'];
+    const layerB = SOURCE_LAYER_ORDER[b.layer || 'A'];
+    if (layerA !== layerB) return layerA - layerB;
+    return a.order - b.order;
+  });
+}
+
 /**
- * Binary-search for the highest mismatchDepth (0–1, step 0.05) that still
- * produces a solvable tile arrangement.  Returns the depth value (e.g. 0.65).
- * Used by the Harder button so we never exceed a solvable configuration.
+ * Find the highest blocking offset (0-10) that still produces a solvable
+ * arrangement for the current level recipe.
  */
-export function findMaxSolvableDepth(config: StudioGameConfig): number {
+export function findMaxSolvableBlockingOffset(config: StudioGameConfig): number {
   const {
     maxSelectableItems,
     waitingStandSlots,
@@ -580,7 +622,7 @@ export function findMaxSolvableDepth(config: StudioGameConfig): number {
     activeLauncherCount = 2,
   } = config;
 
-  const sortedItems = [...selectableItems].sort((a, b) => a.order - b.order);
+  const sortedItems = sortSelectableItemsForSequence(selectableItems);
 
   const allTiles: StudioTile[] = sortedItems.map((item) => ({
     id: tileId(),
@@ -592,18 +634,26 @@ export function findMaxSolvableDepth(config: StudioGameConfig): number {
 
   const sortedLauncherConfigs = [...launchers].sort((a, b) => a.order - b.order);
 
-  // Deterministic builder reorders tiles — always distribute by sequence index
-  const maxSwap = getDeterministicMaxSwap(allTiles, sortedLauncherConfigs, activeLauncherCount);
-
-  for (let sc = maxSwap; sc >= 0; sc--) {
-    const depth = maxSwap > 0 ? sc / maxSwap : 0;
-    const seq = buildDeterministicSequence(allTiles, sortedLauncherConfigs, activeLauncherCount, depth);
+  for (let offset = MAX_BLOCKING_OFFSET; offset >= 0; offset--) {
+    const seq = buildDeterministicSequence(
+      allTiles,
+      sortedLauncherConfigs,
+      activeLauncherCount,
+      offset,
+      maxSelectableItems,
+    );
     const layers = distributeToLayersSeeded(seq, maxSelectableItems);
     if (verifySolvability(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
-      return depth;
+      return offset;
     }
   }
+
   return 0;
+}
+
+/** @deprecated Legacy helper preserved for older callers. */
+export function findMaxSolvableDepth(config: StudioGameConfig): number {
+  return blockingOffsetToDepth(findMaxSolvableBlockingOffset(config));
 }
 
 // ============================================================================
@@ -649,111 +699,204 @@ function seededLauncherId(rng: () => number): string {
 // ============================================================================
 
 /**
- * Build a fully deterministic tile sequence — same inputs = same output, always.
- * No Math.random, no seededShuffle, no RNG of any kind.
+ * Build a deterministic sequence that stretches the active launcher group's
+ * completion across an unlock window:
  *
- * Algorithm:
- * 1. Group tiles by colorType — preserve original order from designer
- * 2. Build round-batches — one batch per round per launcher group.
- *    Each round-batch = activeLauncherCount tiles (one per launcher in the group).
- *    This gives 3× more batches than grouping all rounds, enabling finer difficulty control
- *    and keeping each displaced batch small enough for the waiting stand.
- * 3. Swap outer round-batch pairs based on mismatchDepth:
- *    swapCount = round(mismatchDepth × floor(roundBatchCount / 2))
- *    depth=0: natural order (easy), depth=1: fully reversed (hard)
- * 4. Flatten batches into a single sequence
+ *   unlockDistance = LayerA * 2 + blockingOffset
+ *
+ * The active group's 3 collection rounds are staged at the start, middle, and
+ * tail of that window, while the gaps are filled with later-group tiles that act
+ * as real blockers. This matches the "same level, harder arrangement" model from
+ * the design docs more closely than the older batch-swapping approach.
  */
-export function buildDeterministicSequence(
+interface LauncherTileBundle {
+  launcherIndex: number;
+  colorType: number;
+  tiles: StudioTile[];
+}
+
+function takeTilesRoundRobin(
+  bundles: LauncherTileBundle[],
+  count: number,
+): StudioTile[] {
+  const taken: StudioTile[] = [];
+  if (count <= 0) return taken;
+
+  while (taken.length < count) {
+    let moved = false;
+    for (const bundle of bundles) {
+      if (bundle.tiles.length === 0) continue;
+      taken.push(bundle.tiles.shift()!);
+      moved = true;
+      if (taken.length >= count) break;
+    }
+    if (!moved) break;
+  }
+
+  return taken;
+}
+
+function takePreferredLeftovers(
+  leftovers: StudioTile[],
+  count: number,
+  activeColorTypes: Set<number>,
+): StudioTile[] {
+  const taken: StudioTile[] = [];
+  if (count <= 0) return taken;
+
+  for (let pass = 0; pass < 2 && taken.length < count; pass++) {
+    for (let i = 0; i < leftovers.length && taken.length < count;) {
+      const isActiveColor = activeColorTypes.has(leftovers[i].colorType);
+      const shouldTake = pass === 0 ? !isActiveColor : isActiveColor;
+      if (shouldTake) {
+        taken.push(leftovers.splice(i, 1)[0]);
+      } else {
+        i++;
+      }
+    }
+  }
+
+  return taken;
+}
+
+function buildUnlockAnchors(windowSize: number, activeLauncherCount: number): number[] {
+  const safeWindow = Math.max(windowSize, activeLauncherCount);
+  const spanMax = Math.max(0, safeWindow - activeLauncherCount);
+  return [0, Math.round(spanMax / 2), spanMax];
+}
+
+function buildLauncherBundles(
   allTiles: StudioTile[],
   launcherConfigs: { colorType: number; order: number }[],
-  activeLauncherCount: number,
-  mismatchDepth: number,
-): StudioTile[] {
-  // 1. Group tiles by colorType — preserve original order (NO shuffle)
+): { bundles: LauncherTileBundle[]; leftovers: StudioTile[] } {
+  const sortedLaunchers = [...launcherConfigs].sort((a, b) => a.order - b.order);
   const tilesByColor = new Map<number, StudioTile[]>();
+
   for (const tile of allTiles) {
     if (!tilesByColor.has(tile.colorType)) tilesByColor.set(tile.colorType, []);
     tilesByColor.get(tile.colorType)!.push(tile);
   }
 
-  // 2. Build round-batches: one batch per round per launcher group
-  const sorted = [...launcherConfigs].sort((a, b) => a.order - b.order);
-  const roundBatches: StudioTile[][] = [];
+  const usedIds = new Set<string>();
+  const bundles: LauncherTileBundle[] = sortedLaunchers.map((launcher, launcherIndex) => {
+    const pool = tilesByColor.get(launcher.colorType) || [];
+    const tiles: StudioTile[] = [];
+    while (pool.length > 0 && tiles.length < 3) {
+      const tile = pool.shift()!;
+      tiles.push(tile);
+      usedIds.add(tile.id);
+    }
+    return {
+      launcherIndex,
+      colorType: launcher.colorType,
+      tiles,
+    };
+  });
 
-  for (let g = 0; g < sorted.length; g += activeLauncherCount) {
-    const group = sorted.slice(g, g + activeLauncherCount);
+  return {
+    bundles,
+    leftovers: allTiles.filter((tile) => !usedIds.has(tile.id)),
+  };
+}
 
-    // Take up to 3 tiles per launcher from their color pool
-    const perLauncher: StudioTile[][] = group.map((cfg) => {
-      const pool = tilesByColor.get(cfg.colorType) || [];
-      return pool.splice(0, 3);
-    });
+export function buildDeterministicSequence(
+  allTiles: StudioTile[],
+  launcherConfigs: { colorType: number; order: number }[],
+  activeLauncherCount: number,
+  blockingValue: number,
+  maxSelectableItems: number = 10,
+): StudioTile[] {
+  const blockingOffset =
+    blockingValue > 1 ? clampBlockingOffset(blockingValue) : clampBlockingOffset(blockingValue * MAX_BLOCKING_OFFSET);
+  const unlockDistance = maxSelectableItems * 2 + blockingOffset;
+  const sequence: StudioTile[] = [];
+  const { bundles, leftovers } = buildLauncherBundles(allTiles, launcherConfigs);
 
-    // Each round becomes its own batch (1 tile per launcher per batch)
-    const maxRound = Math.max(...perLauncher.map((t) => t.length), 0);
-    for (let round = 0; round < maxRound; round++) {
-      const batch: StudioTile[] = [];
-      for (const tiles of perLauncher) {
-        if (round < tiles.length) {
-          batch.push(tiles[round]);
-        }
+  for (let groupStart = 0; groupStart < bundles.length; groupStart += activeLauncherCount) {
+    const activeBundles = bundles.slice(groupStart, groupStart + activeLauncherCount);
+    const futureBundles = bundles.slice(groupStart + activeLauncherCount);
+    const activeColorTypes = new Set(activeBundles.map((bundle) => bundle.colorType));
+    const matchingCount = activeBundles.reduce((sum, bundle) => sum + bundle.tiles.length, 0);
+    const remainingCount =
+      matchingCount +
+      futureBundles.reduce((sum, bundle) => sum + bundle.tiles.length, 0) +
+      leftovers.length;
+
+    if (matchingCount === 0) continue;
+
+    const windowSize = Math.max(
+      matchingCount,
+      Math.min(unlockDistance, remainingCount),
+    );
+    const anchors = buildUnlockAnchors(windowSize, activeBundles.length);
+    const window: (StudioTile | null)[] = new Array(windowSize).fill(null);
+
+    for (let round = 0; round < 3; round++) {
+      const anchor = anchors[Math.min(round, anchors.length - 1)];
+      for (let launcherOffset = 0; launcherOffset < activeBundles.length; launcherOffset++) {
+        const bundle = activeBundles[launcherOffset];
+        if (bundle.tiles.length === 0) continue;
+        const position = Math.min(windowSize - 1, anchor + launcherOffset);
+        if (window[position] !== null) continue;
+        window[position] = bundle.tiles.shift()!;
       }
-      roundBatches.push(batch);
+    }
+
+    const emptySlots = window.reduce((sum, tile) => sum + (tile === null ? 1 : 0), 0);
+    const preferredFutureBundles = futureBundles.filter(
+      (bundle) => !activeColorTypes.has(bundle.colorType),
+    );
+    const fallbackFutureBundles = futureBundles.filter(
+      (bundle) => activeColorTypes.has(bundle.colorType),
+    );
+    const preferredBlockers = takeTilesRoundRobin(preferredFutureBundles, emptySlots);
+    const blockerTiles = [
+      ...preferredBlockers,
+      ...takeTilesRoundRobin(
+        fallbackFutureBundles,
+        Math.max(0, emptySlots - preferredBlockers.length),
+      ),
+    ];
+    const extraNeeded = Math.max(0, emptySlots - blockerTiles.length);
+    const blockers = [
+      ...blockerTiles,
+      ...takePreferredLeftovers(leftovers, extraNeeded, activeColorTypes),
+    ];
+
+    let blockerIndex = 0;
+    for (let i = 0; i < window.length; i++) {
+      if (window[i] !== null) continue;
+      if (blockerIndex < blockers.length) {
+        window[i] = blockers[blockerIndex++];
+      }
+    }
+
+    for (const tile of window) {
+      if (tile) sequence.push(tile);
     }
   }
 
-  // 3. Swap outer round-batch pairs based on mismatchDepth
-  const n = roundBatches.length;
-  const swapCount = Math.round(mismatchDepth * Math.floor(n / 2));
-  for (let i = 0; i < swapCount; i++) {
-    const j = n - 1 - i;
-    if (i < j) {
-      [roundBatches[i], roundBatches[j]] = [roundBatches[j], roundBatches[i]];
-    }
+  for (const bundle of bundles) {
+    sequence.push(...bundle.tiles);
   }
-
-  // 4. Flatten
-  const sequence = roundBatches.flat();
-
-  // Leftover tiles that don't match any launcher
-  for (const arr of tilesByColor.values()) {
-    sequence.push(...arr);
-  }
+  sequence.push(...leftovers);
 
   return sequence;
 }
 
 /**
- * Compute the max swap count for a deterministic tile arrangement.
- * Used by callers to iterate swapCount from max down to 0 for solvability degradation.
+ * Legacy helper retained for compatibility with existing tests and callers.
+ * The new system uses a fixed 0-10 blocking offset range instead of swap counts.
  */
 export function getDeterministicMaxSwap(
   allTiles: StudioTile[],
   launcherConfigs: { colorType: number; order: number }[],
   activeLauncherCount: number,
 ): number {
-  // Count round-batches without actually building the sequence
-  const colorCounts = new Map<number, number>();
-  for (const tile of allTiles) {
-    colorCounts.set(tile.colorType, (colorCounts.get(tile.colorType) || 0) + 1);
-  }
-
-  const sorted = [...launcherConfigs].sort((a, b) => a.order - b.order);
-  let roundBatchCount = 0;
-
-  for (let g = 0; g < sorted.length; g += activeLauncherCount) {
-    const group = sorted.slice(g, g + activeLauncherCount);
-    let maxRound = 0;
-    for (const cfg of group) {
-      const avail = colorCounts.get(cfg.colorType) || 0;
-      const take = Math.min(3, avail);
-      colorCounts.set(cfg.colorType, avail - take);
-      maxRound = Math.max(maxRound, take);
-    }
-    roundBatchCount += maxRound;
-  }
-
-  return Math.floor(roundBatchCount / 2);
+  void allTiles;
+  void launcherConfigs;
+  void activeLauncherCount;
+  return MAX_BLOCKING_OFFSET;
 }
 
 /** @deprecated Use buildDeterministicSequence instead — this uses seeded RNG. */
@@ -921,6 +1064,70 @@ function verifySolvabilitySeeded(
   return fired >= totalLaunchers;
 }
 
+function buildDerivedLayers(
+  selectableItems: StudioGameConfig['selectableItems'],
+  launchers: StudioGameConfig['launchers'],
+  activeLauncherCount: number,
+  maxSelectableItems: number,
+  waitingStandSlots: number,
+  blockingOffset: number,
+  makeTileId: () => string,
+  verify: typeof verifySolvability | typeof verifySolvabilitySeeded,
+): {
+  layerA: (StudioTile | null)[];
+  layerB: (StudioTile | null)[];
+  layerC: StudioTile[];
+  sortedLauncherConfigs: { colorType: number; pixelCount: number; group: number; order: number }[];
+} {
+  const sortedItems = sortSelectableItemsForSequence(selectableItems);
+  const allTiles: StudioTile[] = sortedItems.map((item) => ({
+    id: makeTileId(),
+    colorType: item.colorType,
+    variant: item.variant,
+    fruitType: COLOR_TYPE_TO_FRUIT[item.colorType] || 'apple',
+    designerLayer: item.layer,
+  }));
+
+  const sortedLauncherConfigs = [...launchers].sort((a, b) => a.order - b.order);
+  let layerA: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
+  let layerB: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
+  let layerC: StudioTile[] = [];
+  let found = false;
+
+  for (let offset = clampBlockingOffset(blockingOffset); offset >= 0 && !found; offset--) {
+    const sequence = buildDeterministicSequence(
+      allTiles,
+      sortedLauncherConfigs,
+      activeLauncherCount,
+      offset,
+      maxSelectableItems,
+    );
+    const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
+    if (verify(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
+      layerA = layers.a;
+      layerB = layers.b;
+      layerC = layers.c;
+      found = true;
+    }
+  }
+
+  if (!found) {
+    const sequence = buildDeterministicSequence(
+      allTiles,
+      sortedLauncherConfigs,
+      activeLauncherCount,
+      0,
+      maxSelectableItems,
+    );
+    const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
+    layerA = layers.a;
+    layerB = layers.b;
+    layerC = layers.c;
+  }
+
+  return { layerA, layerB, layerC, sortedLauncherConfigs };
+}
+
 /**
  * Deterministic version of initializeState.
  * Uses the seed from config to produce identical tile arrangements.
@@ -933,69 +1140,21 @@ export function initializeStateSeeded(config: StudioGameConfig): StudioGameState
     selectableItems,
     launchers,
     activeLauncherCount = 2,
-    mismatchDepth = 0,
     seed = 42,
   } = config;
+  const blockingOffset = resolveBlockingOffset(config);
 
   const rng = mulberry32(seed);
-
-  // Sort items by order to maintain designer intent
-  const sortedItems = [...selectableItems].sort((a, b) => a.order - b.order);
-
-  // Attach designerLayer to each tile so it survives sequence rearrangement
-  const allTiles: StudioTile[] = sortedItems.map((item) => ({
-    id: seededTileId(rng),
-    colorType: item.colorType,
-    variant: item.variant,
-    fruitType: COLOR_TYPE_TO_FRUIT[item.colorType] || 'apple',
-    designerLayer: item.layer,
-  }));
-
-  const sortedLauncherConfigs = [...launchers].sort((a, b) => a.order - b.order);
-
-  let layerA: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
-  let layerB: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
-  let layerC: StudioTile[] = [];
-
-  // Designer layers are used only at depth=0. When mismatchDepth > 0,
-  // the deterministic builder overrides layer assignments to create difficulty.
-  const hasDesignerLayers = allTiles.some((t) => t.designerLayer !== undefined);
-
-  if (hasDesignerLayers && mismatchDepth === 0) {
-    // Depth=0: honor designer layer assignments exactly
-    let aIdx = 0, bIdx = 0;
-    for (const tile of allTiles) {
-      const layer = tile.designerLayer || 'A';
-      if (layer === 'A' && aIdx < maxSelectableItems) {
-        layerA[aIdx++] = tile;
-      } else if (layer === 'B' && bIdx < maxSelectableItems) {
-        layerB[bIdx++] = tile;
-      } else {
-        layerC.push(tile);
-      }
-    }
-  } else {
-    // Deterministic: build sequence, verify, degrade swapCount if needed
-    const maxSwap = getDeterministicMaxSwap(allTiles, sortedLauncherConfigs, activeLauncherCount);
-    const targetSwapCount = Math.round(mismatchDepth * maxSwap);
-    let found = false;
-
-    for (let sc = targetSwapCount; sc >= 0 && !found; sc--) {
-      const depth = maxSwap > 0 ? sc / maxSwap : 0;
-      const sequence = buildDeterministicSequence(allTiles, sortedLauncherConfigs, activeLauncherCount, depth);
-      const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
-      if (verifySolvabilitySeeded(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
-        layerA = layers.a; layerB = layers.b; layerC = layers.c; found = true;
-      }
-    }
-
-    // Fallback: depth=0 should always be solvable, but just in case
-    if (!found) {
-      const sequence = buildDeterministicSequence(allTiles, sortedLauncherConfigs, activeLauncherCount, 0);
-      const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
-      layerA = layers.a; layerB = layers.b; layerC = layers.c;
-    }
-  }
+  const { layerA, layerB, layerC, sortedLauncherConfigs } = buildDerivedLayers(
+    selectableItems,
+    launchers,
+    activeLauncherCount,
+    maxSelectableItems,
+    waitingStandSlots,
+    blockingOffset,
+    () => seededTileId(rng),
+    verifySolvabilitySeeded,
+  );
 
   const allLaunchers: StudioLauncherState[] = sortedLauncherConfigs.map((l) => ({
     id: seededLauncherId(rng),
@@ -1042,74 +1201,18 @@ export function initializeState(config: StudioGameConfig): StudioGameState {
     selectableItems,
     launchers,
     activeLauncherCount = 2,
-    mismatchDepth = 0,
   } = config;
-
-  // Sort items by order to maintain designer intent
-  const sortedItems = [...selectableItems].sort((a, b) => a.order - b.order);
-
-  // Attach designerLayer to each tile so it survives sequence rearrangement
-  const allTiles: StudioTile[] = sortedItems.map((item) => ({
-    id: tileId(),
-    colorType: item.colorType,
-    variant: item.variant,
-    fruitType: COLOR_TYPE_TO_FRUIT[item.colorType] || 'apple',
-    designerLayer: item.layer,
-  }));
-
-
-  // Sort launcher configs by activation order
-  const sortedLauncherConfigs = [...launchers].sort(
-    (a, b) => a.order - b.order,
+  const blockingOffset = resolveBlockingOffset(config);
+  const { layerA, layerB, layerC, sortedLauncherConfigs } = buildDerivedLayers(
+    selectableItems,
+    launchers,
+    activeLauncherCount,
+    maxSelectableItems,
+    waitingStandSlots,
+    blockingOffset,
+    tileId,
+    verifySolvability,
   );
-
-  // ------------------------------------------------------------------
-  // Build tile sequence — solvable vs challenging based on mismatchDepth
-  // ------------------------------------------------------------------
-
-  let layerA: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
-  let layerB: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
-  let layerC: StudioTile[] = [];
-
-  // Designer layers are used only at depth=0. When mismatchDepth > 0,
-  // the deterministic builder overrides layer assignments to create difficulty.
-  const hasDesignerLayers = allTiles.some((t) => t.designerLayer !== undefined);
-
-  if (hasDesignerLayers && mismatchDepth === 0) {
-    // Depth=0: honor designer layer assignments exactly
-    let aIdx = 0, bIdx = 0;
-    for (const tile of allTiles) {
-      const layer = tile.designerLayer || 'A';
-      if (layer === 'A' && aIdx < maxSelectableItems) {
-        layerA[aIdx++] = tile;
-      } else if (layer === 'B' && bIdx < maxSelectableItems) {
-        layerB[bIdx++] = tile;
-      } else {
-        layerC.push(tile);
-      }
-    }
-  } else {
-    // Deterministic: build sequence, verify, degrade swapCount if needed
-    const maxSwap = getDeterministicMaxSwap(allTiles, sortedLauncherConfigs, activeLauncherCount);
-    const targetSwapCount = Math.round(mismatchDepth * maxSwap);
-    let found = false;
-
-    for (let sc = targetSwapCount; sc >= 0 && !found; sc--) {
-      const depth = maxSwap > 0 ? sc / maxSwap : 0;
-      const sequence = buildDeterministicSequence(allTiles, sortedLauncherConfigs, activeLauncherCount, depth);
-      const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
-      if (verifySolvability(layers.a, layers.b, layers.c, sortedLauncherConfigs, activeLauncherCount, waitingStandSlots)) {
-        layerA = layers.a; layerB = layers.b; layerC = layers.c; found = true;
-      }
-    }
-
-    // Fallback: depth=0 should always be solvable, but just in case
-    if (!found) {
-      const sequence = buildDeterministicSequence(allTiles, sortedLauncherConfigs, activeLauncherCount, 0);
-      const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
-      layerA = layers.a; layerB = layers.b; layerC = layers.c;
-    }
-  }
 
   // Create launcher state objects
   const allLaunchers: StudioLauncherState[] = sortedLauncherConfigs.map(

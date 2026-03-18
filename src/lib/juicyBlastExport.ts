@@ -664,6 +664,11 @@ export function importFromFullPixelArtFormat(data: FullPixelArtFormat): FullPixe
 export interface StudioExportLevel {
   LevelId: string;
   MaxSelectableItems: number;
+  BlockingOffset?: number;
+  MismatchDepth?: number;
+  Seed?: number;
+  WaitingStandSlots?: number;
+  ActiveLauncherCount?: number;
   Artwork: {
     Width: number;
     Height: number;
@@ -702,6 +707,7 @@ export interface StudioExportData {
   maxSelectableItems: number;
   /** Recipe fields for deterministic reconstruction */
   seed?: number;
+  blockingOffset?: number;
   mismatchDepth?: number;
   waitingStandSlots?: number;
   activeLauncherCount?: number;
@@ -756,6 +762,11 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
   return {
     LevelId: data.levelId,
     MaxSelectableItems: data.maxSelectableItems,
+    BlockingOffset: data.blockingOffset,
+    MismatchDepth: data.mismatchDepth,
+    Seed: data.seed,
+    WaitingStandSlots: data.waitingStandSlots,
+    ActiveLauncherCount: data.activeLauncherCount,
     Artwork: {
       Width: data.width,
       Height: data.height,

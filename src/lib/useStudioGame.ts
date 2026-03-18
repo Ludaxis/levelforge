@@ -18,7 +18,11 @@ export type {
 } from './studioGameLogic';
 
 export {
+  MAX_BLOCKING_OFFSET,
+  blockingOffsetToDepth,
+  resolveBlockingOffset,
   calculateStudioDifficulty,
+  findMaxSolvableBlockingOffset,
   findMaxSolvableDepth,
   mulberry32,
   seededShuffle,
@@ -48,7 +52,7 @@ export function useStudioGame(config: StudioGameConfig | null) {
 
   const configKey = useMemo(() => {
     if (!config) return '';
-    return `${config.pixelArt.length}-${config.selectableItems.length}-${config.maxSelectableItems}-${config.launchers.length}`;
+    return `${config.pixelArt.length}-${config.selectableItems.length}-${config.maxSelectableItems}-${config.launchers.length}-${config.activeLauncherCount ?? 2}-${config.blockingOffset ?? config.mismatchDepth ?? 0}-${config.seed ?? 'random'}`;
   }, [config]);
 
   const pickTile = useCallback(

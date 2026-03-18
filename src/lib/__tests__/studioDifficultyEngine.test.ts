@@ -66,6 +66,7 @@ function makeTestConfig(overrides?: Partial<StudioGameConfig>): StudioGameConfig
     selectableItems,
     launchers,
     activeLauncherCount: 2,
+    blockingOffset: 0,
     mismatchDepth: 0,
     ...overrides,
   };
@@ -111,6 +112,7 @@ function makeMediumTestConfig(): StudioGameConfig {
     selectableItems,
     launchers,
     activeLauncherCount: 2,
+    blockingOffset: 0,
     mismatchDepth: 0,
   };
 }
@@ -223,7 +225,7 @@ describe('Seeded tile builders', () => {
 
 describe('Full determinism', () => {
   it('initializeStateSeeded produces identical state with same seed', () => {
-    const config = makeTestConfig({ seed: 42, mismatchDepth: 0.3 });
+    const config = makeTestConfig({ seed: 42, blockingOffset: 3 });
 
     const state1 = initializeStateSeeded(config);
     const state2 = initializeStateSeeded(config);
@@ -292,7 +294,7 @@ describe('Difficulty targeting', () => {
     // Should be at least hard tier (50+) even if it can't reach 80
     expect(result.achievedScore).toBeGreaterThanOrEqual(50);
     // Recipe should have maxed out levers
-    expect(result.recipe.mismatchDepth).toBeGreaterThanOrEqual(0.5);
+    expect(result.recipe.blockingOffset).toBeGreaterThanOrEqual(5);
   });
 
   it('achieves correct tier for each target', () => {
@@ -317,8 +319,8 @@ describe('Difficulty targeting', () => {
     for (const target of [10, 30, 50, 70, 90]) {
       const result = targetDifficulty(config, target, { seed: 42 });
       const r = result.recipe;
-      expect(r.mismatchDepth).toBeGreaterThanOrEqual(0);
-      expect(r.mismatchDepth).toBeLessThanOrEqual(1);
+      expect(r.blockingOffset).toBeGreaterThanOrEqual(0);
+      expect(r.blockingOffset).toBeLessThanOrEqual(10);
       expect(r.maxSelectableItems).toBeGreaterThanOrEqual(1);
       expect(r.maxSelectableItems).toBeLessThanOrEqual(20);
       expect(r.activeLauncherCount).toBeGreaterThanOrEqual(1);
@@ -351,6 +353,7 @@ describe('Monte Carlo simulation', () => {
     const config = makeMediumTestConfig();
 
     const easyRecipe: DifficultyRecipe = {
+      blockingOffset: 0,
       mismatchDepth: 0,
       maxSelectableItems: 10,
       activeLauncherCount: 2,
@@ -358,6 +361,7 @@ describe('Monte Carlo simulation', () => {
     };
 
     const hardRecipe: DifficultyRecipe = {
+      blockingOffset: 8,
       mismatchDepth: 0.8,
       maxSelectableItems: 6,
       activeLauncherCount: 1,
@@ -373,6 +377,7 @@ describe('Monte Carlo simulation', () => {
   it('returns valid statistics', () => {
     const config = makeTestConfig();
     const recipe: DifficultyRecipe = {
+      blockingOffset: 0,
       mismatchDepth: 0,
       maxSelectableItems: 6,
       activeLauncherCount: 2,
@@ -395,6 +400,7 @@ describe('Monte Carlo simulation', () => {
   it('simulation is deterministic with same seed', () => {
     const config = makeTestConfig();
     const recipe: DifficultyRecipe = {
+      blockingOffset: 2,
       mismatchDepth: 0.2,
       maxSelectableItems: 8,
       activeLauncherCount: 2,
@@ -540,51 +546,40 @@ describe('buildDeterministicSequence', () => {
   it('same inputs = same output (deterministic, no RNG)', () => {
     const tiles = makeTiles({ 0: 3, 1: 3 });
 
-    const seq1 = buildDeterministicSequence([...tiles], launchers2, 2, 0.5);
-    const seq2 = buildDeterministicSequence([...tiles], launchers2, 2, 0.5);
+    const seq1 = buildDeterministicSequence([...tiles], launchers2, 2, 5);
+    const seq2 = buildDeterministicSequence([...tiles], launchers2, 2, 5);
 
     expect(seq1.map((t) => t.id)).toEqual(seq2.map((t) => t.id));
   });
 
-  it('depth=0 places first launcher tiles first (easy)', () => {
+  it('blocking=0 keeps the active group inside the Layer A + B window', () => {
     const tiles = makeTiles({ 0: 3, 1: 3, 2: 3, 3: 3 });
 
-    const seq = buildDeterministicSequence(tiles, launchers4, 2, 0);
+    const seq = buildDeterministicSequence(tiles, launchers4, 2, 0, 3);
 
-    // With activeLauncherCount=2 and depth=0: first round-batches (launchers 0,1) come first
-    // First 6 tiles should be from colorTypes 0 and 1
     const first6Colors = seq.slice(0, 6).map((t) => t.colorType);
     for (const ct of first6Colors) {
       expect([0, 1]).toContain(ct);
     }
   });
 
-  it('depth=1 reverses round-batches (hard — last launcher tiles first)', () => {
+  it('higher blocking pushes the active completion later and adds blockers up front', () => {
     const tiles = makeTiles({ 0: 3, 1: 3, 2: 3, 3: 3 });
 
-    const seq = buildDeterministicSequence(tiles, launchers4, 2, 1);
+    const easy = buildDeterministicSequence([...tiles], launchers4, 2, 0, 3);
+    const hard = buildDeterministicSequence([...tiles], launchers4, 2, 4, 3);
 
-    // 4 launchers, active=2 → 2 groups × 3 rounds = 6 round-batches
-    // depth=1 → swapCount = round(1.0 × floor(6/2)) = 3 → fully reversed
-    // First tiles should be from launchers 2,3 (last group)
-    const first6Colors = seq.slice(0, 6).map((t) => t.colorType);
-    for (const ct of first6Colors) {
-      expect([2, 3]).toContain(ct);
-    }
+    const easyLastActiveIndex = Math.max(...easy.map((tile, index) => ([0, 1].includes(tile.colorType) ? index : -1)));
+    const hardLastActiveIndex = Math.max(...hard.map((tile, index) => ([0, 1].includes(tile.colorType) ? index : -1)));
+
+    expect(hardLastActiveIndex).toBeGreaterThan(easyLastActiveIndex);
+    expect(hard.slice(0, 6).some((tile) => [2, 3].includes(tile.colorType))).toBe(true);
   });
 
-  it('round-batches give finer granularity than group-batches', () => {
+  it('exposes the full blocking offset range for targeting and UI', () => {
     const tiles = makeTiles({ 0: 3, 1: 3 });
-
-    // 2 launchers, active=2 → 1 group × 3 rounds = 3 round-batches
-    // maxSwap = floor(3/2) = 1 → CAN change difficulty (unlike group-based which had 0)
     const maxSwap = getDeterministicMaxSwap(tiles, launchers2, 2);
-    expect(maxSwap).toBe(1);
-
-    // depth=0 and depth=1 should produce different sequences
-    const seq0 = buildDeterministicSequence([...tiles], launchers2, 2, 0);
-    const seq1 = buildDeterministicSequence([...tiles], launchers2, 2, 1);
-    expect(seq0.map((t) => t.id)).not.toEqual(seq1.map((t) => t.id));
+    expect(maxSwap).toBe(10);
   });
 
   it('interleaves round-robin within each round-batch', () => {
@@ -614,7 +609,7 @@ describe('buildDeterministicSequence', () => {
     expect(seq.filter((t) => t.colorType === 1).length).toBe(1);
   });
 
-  it('leftover tiles (no matching launcher) go to end', () => {
+  it('leftover non-launcher tiles are preserved and can fill blocker gaps', () => {
     const tiles = makeTiles({ 0: 3, 1: 3, 5: 2 }); // colorType 5 has no launcher
     const launchers = [
       { colorType: 0, order: 0 },
@@ -624,9 +619,7 @@ describe('buildDeterministicSequence', () => {
     const seq = buildDeterministicSequence(tiles, launchers, 2, 0);
 
     expect(seq.length).toBe(8);
-    // Last 2 tiles should be colorType 5 (leftover)
-    expect(seq[6].colorType).toBe(5);
-    expect(seq[7].colorType).toBe(5);
+    expect(seq.filter((tile) => tile.colorType === 5)).toHaveLength(2);
   });
 
   it('preserves original order within each color group (no shuffle)', () => {
@@ -676,8 +669,8 @@ describe('State shape', () => {
 // ============================================================================
 
 describe('Solvability with deterministic builder', () => {
-  it('depth=0 is always solvable', () => {
-    const config = makeTestConfig({ seed: 42, mismatchDepth: 0 });
+  it('blocking=0 is always solvable', () => {
+    const config = makeTestConfig({ seed: 42, blockingOffset: 0 });
     const state = initializeStateSeeded(config);
 
     // Should have valid layer arrangement
@@ -686,8 +679,8 @@ describe('Solvability with deterministic builder', () => {
     expect(state.isWon).toBe(false);
   });
 
-  it('depth=1 degrades gracefully if unsolvable', () => {
-    const config = makeTestConfig({ seed: 42, mismatchDepth: 1.0 });
+  it('high blocking degrades gracefully if unsolvable', () => {
+    const config = makeTestConfig({ seed: 42, blockingOffset: 10 });
     const state = initializeStateSeeded(config);
 
     // Should still produce valid state even if depth had to degrade
@@ -695,8 +688,8 @@ describe('Solvability with deterministic builder', () => {
     expect(state.isLost).toBe(false);
   });
 
-  it('identical config + depth always produces identical state', () => {
-    const config = makeTestConfig({ seed: 42, mismatchDepth: 0.5 });
+  it('identical config + blocking always produces identical state', () => {
+    const config = makeTestConfig({ seed: 42, blockingOffset: 5 });
 
     const state1 = initializeStateSeeded(config);
     const state2 = initializeStateSeeded(config);

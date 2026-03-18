@@ -15,7 +15,6 @@ import {
 } from '@/components/ui/dialog';
 import {
   PixelCell,
-  FruitMatchLevel,
   DesignedFruitMatchLevel,
 } from '@/types/fruitMatch';
 import {
@@ -28,7 +27,8 @@ import {
   StudioDifficultyResult,
   calculateStudioDifficulty,
   StudioGameConfig,
-  findMaxSolvableDepth,
+  initializeState,
+  findMaxSolvableBlockingOffset,
 } from '@/lib/useStudioGame';
 import {
   targetDifficulty,
@@ -72,6 +72,7 @@ import { LauncherSection } from './designer/LauncherSection';
 import { GamePreviewCanvas } from './designer/GamePreviewCanvas';
 import { ItemPoolSection } from './designer/ItemPoolSection';
 import { DifficultyAnalysis } from './designer/DifficultyAnalysis';
+import { StudioArrangementPreview } from './StudioArrangementPreview';
 
 // ============================================================================
 // Main Component: LevelDesignerV2
@@ -113,11 +114,16 @@ export function LevelDesignerV2({
   const [waitingStandSlots, setWaitingStandSlots] = useState(5);
   const [activeLauncherCount, setActiveLauncherCount] = useState(2);
   const [sinkWidth, setSinkWidth] = useState(6);
-  const [mismatchDepth, setMismatchDepth] = useState(0);
+  const [blockingOffset, setBlockingOffset] = useState(0);
   const [seed, setSeed] = useState<number | undefined>(undefined);
   const [simulationResult, setSimulationResult] = useState<StudioSimulationResult | null>(null);
   const [isTargeting, setIsTargeting] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [parameterLocks, setParameterLocks] = useState({
+    blocking: false,
+    surfaceSize: false,
+    activeLaunchers: false,
+  });
 
   // Play mode
   const [playMode, setPlayMode] = useState(false);
@@ -195,9 +201,9 @@ export function LevelDesignerV2({
       launcherCount: launchers.length,
       maxSelectableItems,
       totalTiles,
-      mismatchDepth,
+      blockingOffset,
     };
-  }, [pixelArray, launchers, groups.length, selectableItems, maxSelectableItems, mismatchDepth]);
+  }, [pixelArray, launchers, groups.length, selectableItems, maxSelectableItems, blockingOffset]);
 
   // Studio difficulty result
   const difficultyResult = useMemo((): StudioDifficultyResult | null => {
@@ -210,22 +216,6 @@ export function LevelDesignerV2({
     if (pixelCellArray.length === 0 || sinkStacks.length === 0) return null;
     return calculateLevelMetrics(pixelCellArray, sinkStacks, waitingStandSlots, studioDifficultyParams ?? undefined);
   }, [pixelCellArray, sinkStacks, waitingStandSlots, studioDifficultyParams]);
-
-  // Preview level for difficulty
-  const previewLevel = useMemo((): FruitMatchLevel | null => {
-    if (pixelCellArray.length < 4 || sinkStacks.length === 0) return null;
-    return {
-      id: 'studio-preview',
-      name: 'Preview',
-      pixelArt: pixelCellArray,
-      pixelArtWidth: artWidth,
-      pixelArtHeight: artHeight,
-      sinkWidth,
-      sinkStacks,
-      waitingStandSlots,
-      difficulty: metrics?.difficulty || 'medium',
-    };
-  }, [pixelCellArray, artWidth, artHeight, sinkWidth, sinkStacks, waitingStandSlots, metrics]);
 
   // Sort items by order, preserving designer-assigned layers
   const itemsWithLayers = useMemo((): StudioSelectableItem[] => {
@@ -279,11 +269,19 @@ export function LevelDesignerV2({
           order: l.order,
         })),
       activeLauncherCount,
-      mismatchDepth,
+      blockingOffset,
       colorTypeToHex,
       seed,
     };
-  }, [pixelCellArray, artWidth, artHeight, maxSelectableItems, waitingStandSlots, itemsWithLayers, launchers, activeLauncherCount, mismatchDepth, colorTypeToHex, seed]);
+  }, [pixelCellArray, artWidth, artHeight, maxSelectableItems, waitingStandSlots, itemsWithLayers, launchers, activeLauncherCount, blockingOffset, colorTypeToHex, seed]);
+
+  const arrangementPreviewState = useMemo(() => {
+    if (!studioGameConfig) return null;
+    return initializeState({
+      ...studioGameConfig,
+      seed: studioGameConfig.seed ?? 42,
+    });
+  }, [studioGameConfig]);
 
   // ============================================================================
   // JSON Import
@@ -381,6 +379,10 @@ export function LevelDesignerV2({
             }
           }
           setSelectableItems(newItems);
+          setBlockingOffset(0);
+          setWaitingStandSlots(5);
+          setActiveLauncherCount(2);
+          setSeed(undefined);
 
           // Extract level number from filename
           const match = file.name.match(/level[_-]?(\d+)/i);
@@ -457,6 +459,24 @@ export function LevelDesignerV2({
             ? Math.min(rawData.MaxSelectableItems, 20)
             : maxSelectableItems;
           setMaxSelectableItems(importedMaxItems);
+          setBlockingOffset(
+            typeof rawData.BlockingOffset === 'number'
+              ? Math.max(0, Math.min(10, Math.round(rawData.BlockingOffset)))
+              : typeof rawData.MismatchDepth === 'number'
+                ? Math.max(0, Math.min(10, Math.round(rawData.MismatchDepth * 10)))
+                : 0,
+          );
+          setWaitingStandSlots(
+            typeof rawData.WaitingStandSlots === 'number'
+              ? Math.max(3, Math.min(7, Math.round(rawData.WaitingStandSlots)))
+              : 5,
+          );
+          setActiveLauncherCount(
+            typeof rawData.ActiveLauncherCount === 'number'
+              ? Math.max(1, Math.min(3, Math.round(rawData.ActiveLauncherCount)))
+              : 2,
+          );
+          setSeed(typeof rawData.Seed === 'number' ? rawData.Seed : undefined);
 
           // Build selectable items — use Layer field if present, otherwise compute from position
           const hasLayerField = result.selectableItems.some((si) => si.Layer !== undefined && si.Layer !== null);
@@ -497,6 +517,24 @@ export function LevelDesignerV2({
           setArtHeight(height);
           setPalette(data.Palette || []);
           setMaxSelectableItems(Math.min(data.MaxSelectableItems || 10, 20));
+          setBlockingOffset(
+            typeof data.BlockingOffset === 'number'
+              ? Math.max(0, Math.min(10, Math.round(data.BlockingOffset)))
+              : typeof data.MismatchDepth === 'number'
+                ? Math.max(0, Math.min(10, Math.round(data.MismatchDepth * 10)))
+                : 0,
+          );
+          setWaitingStandSlots(
+            typeof data.WaitingStandSlots === 'number'
+              ? Math.max(3, Math.min(7, Math.round(data.WaitingStandSlots)))
+              : 5,
+          );
+          setActiveLauncherCount(
+            typeof data.ActiveLauncherCount === 'number'
+              ? Math.max(1, Math.min(3, Math.round(data.ActiveLauncherCount)))
+              : 2,
+          );
+          setSeed(typeof data.Seed === 'number' ? data.Seed : undefined);
 
           const map = new Map<string, StudioPixelCell>();
           const groupMap = new Map<number, StudioGroup>();
@@ -851,41 +889,46 @@ export function LevelDesignerV2({
   // Difficulty adjustments
   // ============================================================================
 
-  const handleEasier = useCallback(() => {
-    if (!difficultyResult) return;
-    const mixing = difficultyResult.breakdown.find(c => c.id === 'layerMixing');
-    const surface = difficultyResult.breakdown.find(c => c.id === 'surfaceSize');
-    const mixContrib = (mixing?.score ?? 0) * 0.40;
-    const surfContrib = (surface?.score ?? 0) * 0.25;
+  const maxActiveLaunchers = useMemo(() => Math.min(3, Math.max(1, launchers.length || 1)), [launchers.length]);
 
-    if (mixContrib >= surfContrib && mismatchDepth > 0) {
-      setMismatchDepth((v) => Math.max(0, +(v - 0.15).toFixed(2)));
-    } else if (maxSelectableItems < 20) {
-      setMaxSelectableItems((v) => Math.min(20, v + 1));
-    } else if (mismatchDepth > 0) {
-      setMismatchDepth((v) => Math.max(0, +(v - 0.15).toFixed(2)));
+  const handleToggleParameterLock = useCallback((key: 'blocking' | 'surfaceSize' | 'activeLaunchers') => {
+    setParameterLocks((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  }, []);
+
+  const handleEasier = useCallback(() => {
+    if (!parameterLocks.blocking && blockingOffset > 0) {
+      setBlockingOffset((value) => Math.max(0, value - 1));
+      return;
     }
-  }, [difficultyResult, mismatchDepth, maxSelectableItems]);
+    if (!parameterLocks.surfaceSize && maxSelectableItems < 20) {
+      setMaxSelectableItems((v) => Math.min(20, v + 1));
+      return;
+    }
+    if (!parameterLocks.activeLaunchers && activeLauncherCount < maxActiveLaunchers) {
+      setActiveLauncherCount((value) => Math.min(maxActiveLaunchers, value + 1));
+    }
+  }, [parameterLocks, blockingOffset, maxSelectableItems, activeLauncherCount, maxActiveLaunchers]);
 
   const handleHarder = useCallback(() => {
-    if (!difficultyResult || !studioGameConfig) return;
-    const mixing = difficultyResult.breakdown.find(c => c.id === 'layerMixing');
-    const surface = difficultyResult.breakdown.find(c => c.id === 'surfaceSize');
-    const mixRoom = (1 - (mixing?.score ?? 0)) * 0.40;
-    const surfRoom = (1 - (surface?.score ?? 0)) * 0.25;
-
-    if (mixRoom >= surfRoom && mismatchDepth < 1) {
-      const maxDepth = findMaxSolvableDepth(studioGameConfig);
-      const target = +(mismatchDepth + 0.15).toFixed(2);
-      setMismatchDepth(Math.min(target, maxDepth));
-    } else if (maxSelectableItems > 1) {
-      setMaxSelectableItems((v) => Math.max(1, v - 1));
-    } else if (mismatchDepth < 1) {
-      const maxDepth = findMaxSolvableDepth(studioGameConfig);
-      const target = +(mismatchDepth + 0.15).toFixed(2);
-      setMismatchDepth(Math.min(target, maxDepth));
+    if (!studioGameConfig) return;
+    if (!parameterLocks.blocking && blockingOffset < 10) {
+      const maxOffset = findMaxSolvableBlockingOffset(studioGameConfig);
+      if (blockingOffset < maxOffset) {
+        setBlockingOffset((value) => Math.min(maxOffset, value + 1));
+        return;
+      }
     }
-  }, [difficultyResult, studioGameConfig, mismatchDepth, maxSelectableItems]);
+    if (!parameterLocks.surfaceSize && maxSelectableItems > 1) {
+      setMaxSelectableItems((v) => Math.max(1, v - 1));
+      return;
+    }
+    if (!parameterLocks.activeLaunchers && activeLauncherCount > 1) {
+      setActiveLauncherCount((value) => Math.max(1, value - 1));
+    }
+  }, [studioGameConfig, parameterLocks, blockingOffset, maxSelectableItems, activeLauncherCount]);
 
   const handleAutoTarget = useCallback((targetScore: number) => {
     if (!studioGameConfig) return;
@@ -896,7 +939,7 @@ export function LevelDesignerV2({
         const result = targetDifficulty(studioGameConfig, targetScore, {
           seed: seed ?? Math.floor(Math.random() * 2147483647),
         });
-        setMismatchDepth(result.recipe.mismatchDepth);
+        setBlockingOffset(result.recipe.blockingOffset);
         setMaxSelectableItems(result.recipe.maxSelectableItems);
         setActiveLauncherCount(result.recipe.activeLauncherCount);
         if (result.recipe.seed && seed === undefined) {
@@ -914,7 +957,8 @@ export function LevelDesignerV2({
     setTimeout(() => {
       try {
         const recipe: DifficultyRecipe = {
-          mismatchDepth,
+          blockingOffset,
+          mismatchDepth: blockingOffset / 10,
           maxSelectableItems,
           activeLauncherCount,
           seed: seed ?? Math.floor(Math.random() * 2147483647),
@@ -925,7 +969,7 @@ export function LevelDesignerV2({
         setIsSimulating(false);
       }
     }, 10);
-  }, [studioGameConfig, mismatchDepth, maxSelectableItems, activeLauncherCount, seed]);
+  }, [studioGameConfig, blockingOffset, maxSelectableItems, activeLauncherCount, seed]);
 
   // ============================================================================
   // Export JSON
@@ -973,7 +1017,8 @@ export function LevelDesignerV2({
       unlockStageData: [{ requiredCompletedGroups: groups.map((g) => g.id) }],
       maxSelectableItems,
       seed,
-      mismatchDepth,
+      blockingOffset,
+      mismatchDepth: blockingOffset / 10,
       waitingStandSlots,
       activeLauncherCount,
     };
@@ -986,7 +1031,7 @@ export function LevelDesignerV2({
     a.download = `${fileName.trim() || levelId}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [palette, levelId, levelNumber, fileName, difficultyResult, artWidth, artHeight, pixelArray, itemsWithLayers, launchers, groups, maxSelectableItems, seed, mismatchDepth, waitingStandSlots, activeLauncherCount]);
+  }, [palette, levelId, levelNumber, fileName, difficultyResult, artWidth, artHeight, pixelArray, itemsWithLayers, launchers, groups, maxSelectableItems, seed, blockingOffset, waitingStandSlots, activeLauncherCount]);
 
   const handleExportJSON = useCallback(() => {
     if (existingLevelIds.includes(levelId) && !editingLevel) {
@@ -1017,6 +1062,26 @@ export function LevelDesignerV2({
       waitingStandSlots,
       metrics,
       createdAt: editingLevel?.createdAt || Date.now(),
+      studioSelectableItems: itemsWithLayers.map((item) => ({
+        colorType: item.colorType,
+        variant: item.variant,
+        layer: item.layer,
+        order: item.order,
+      })),
+      studioLaunchers: [...launchers]
+        .sort((a, b) => a.order - b.order)
+        .map((launcher) => ({
+          colorType: launcher.colorType,
+          pixelCount: launcher.pixelCount,
+          group: launcher.group,
+          order: launcher.order,
+          isLocked: launcher.isLocked,
+        })),
+      studioMaxSelectableItems: maxSelectableItems,
+      studioBlockingOffset: blockingOffset,
+      studioWaitingStandSlots: waitingStandSlots,
+      studioActiveLauncherCount: activeLauncherCount,
+      studioSeed: seed,
     };
 
     onAddToCollection(designedLevel);
@@ -1029,6 +1094,12 @@ export function LevelDesignerV2({
     sinkWidth,
     sinkStacks,
     waitingStandSlots,
+    itemsWithLayers,
+    launchers,
+    maxSelectableItems,
+    blockingOffset,
+    activeLauncherCount,
+    seed,
     levelId,
     levelNumber,
     editingLevel,
@@ -1070,6 +1141,10 @@ export function LevelDesignerV2({
     setArtHeight(editingLevel.pixelArtHeight);
     setSinkWidth(editingLevel.sinkWidth);
     setSelectedGroupId(null);
+    setBlockingOffset(editingLevel.studioBlockingOffset ?? 0);
+    setWaitingStandSlots(editingLevel.studioWaitingStandSlots ?? editingLevel.waitingStandSlots ?? 5);
+    setActiveLauncherCount(editingLevel.studioActiveLauncherCount ?? 2);
+    setSeed(editingLevel.studioSeed);
 
     // Build pixel map
     const map = new Map<string, StudioPixelCell>();
@@ -1111,49 +1186,99 @@ export function LevelDesignerV2({
     });
     setGroups(Array.from(groupMap.values()).sort((a, b) => a.id - b.id));
 
-    // Regenerate launchers from groups
-    const newLaunchers: StudioLauncher[] = [];
-    let order = 0;
-    const sortedGroups = Array.from(groupMap.values()).sort((a, b) => a.id - b.id);
-    for (const group of sortedGroups) {
-      const colorTypes = Object.keys(group.pixelsByColor).map(Number).sort((a, b) => a - b);
-      for (const ct of colorTypes) {
-        newLaunchers.push({
+    if (editingLevel.studioLaunchers && editingLevel.studioLaunchers.length > 0) {
+      setLaunchers(
+        editingLevel.studioLaunchers.map((launcher, idx) => ({
           id: uid('launcher'),
-          colorType: ct,
-          pixelCount: group.pixelsByColor[ct],
-          group: group.id,
-          isLocked: order >= 2,
-          order: order++,
-        });
-      }
-    }
-    setLaunchers(newLaunchers);
-
-    // Regenerate selectable items (3 per launcher, max selectable capped at 10)
-    const totalTiles = newLaunchers.length * 3;
-    const newMaxItems = Math.min(Math.max(6, Math.ceil(totalTiles / 2)), 10);
-    setMaxSelectableItems(newMaxItems);
-
-    const newItems: StudioSelectableItem[] = [];
-    let itemOrder = 0;
-    for (const launcher of newLaunchers) {
-      for (let i = 0; i < 3; i++) {
-        const layer: 'A' | 'B' | 'C' = itemOrder < newMaxItems
-          ? 'A'
-          : itemOrder < 2 * newMaxItems
-            ? 'B'
-            : 'C';
-        newItems.push({
-          id: uid('item'),
           colorType: launcher.colorType,
-          variant: 0,
-          layer,
-          order: itemOrder++,
-        });
+          pixelCount: launcher.pixelCount,
+          group: launcher.group,
+          isLocked: launcher.isLocked ?? idx >= 2,
+          order: launcher.order ?? idx,
+        })),
+      );
+    } else {
+      const newLaunchers: StudioLauncher[] = [];
+      let order = 0;
+      const sortedGroups = Array.from(groupMap.values()).sort((a, b) => a.id - b.id);
+      for (const group of sortedGroups) {
+        const colorTypes = Object.keys(group.pixelsByColor).map(Number).sort((a, b) => a - b);
+        for (const ct of colorTypes) {
+          newLaunchers.push({
+            id: uid('launcher'),
+            colorType: ct,
+            pixelCount: group.pixelsByColor[ct],
+            group: group.id,
+            isLocked: order >= 2,
+            order: order++,
+          });
+        }
       }
+      setLaunchers(newLaunchers);
     }
-    setSelectableItems(newItems);
+
+    if (editingLevel.studioSelectableItems && editingLevel.studioSelectableItems.length > 0) {
+      setSelectableItems(
+        editingLevel.studioSelectableItems.map((item, idx) => ({
+          id: uid('item'),
+          colorType: item.colorType,
+          variant: item.variant,
+          layer: item.layer,
+          order: item.order ?? idx,
+        })),
+      );
+      setMaxSelectableItems(editingLevel.studioMaxSelectableItems ?? 10);
+    } else {
+      const fallbackLaunchers = editingLevel.studioLaunchers && editingLevel.studioLaunchers.length > 0
+        ? editingLevel.studioLaunchers
+        : (() => {
+            const generated: Array<{
+              colorType: number;
+              pixelCount: number;
+              group: number;
+              order: number;
+              isLocked: boolean;
+            }> = [];
+            let order = 0;
+            for (const group of Array.from(groupMap.values()).sort((a, b) => a.id - b.id)) {
+              const colorTypes = Object.keys(group.pixelsByColor).map(Number).sort((a, b) => a - b);
+              for (const ct of colorTypes) {
+                generated.push({
+                  colorType: ct,
+                  pixelCount: group.pixelsByColor[ct],
+                  group: group.id,
+                  order,
+                  isLocked: order >= 2,
+                });
+                order++;
+              }
+            }
+            return generated;
+          })();
+      const totalTiles = fallbackLaunchers.length * 3;
+      const newMaxItems = Math.min(Math.max(6, Math.ceil(totalTiles / 2)), 10);
+      setMaxSelectableItems(newMaxItems);
+
+      const newItems: StudioSelectableItem[] = [];
+      let itemOrder = 0;
+      for (const launcher of fallbackLaunchers) {
+        for (let i = 0; i < 3; i++) {
+          const layer: 'A' | 'B' | 'C' = itemOrder < newMaxItems
+            ? 'A'
+            : itemOrder < 2 * newMaxItems
+              ? 'B'
+              : 'C';
+          newItems.push({
+            id: uid('item'),
+            colorType: launcher.colorType,
+            variant: 0,
+            layer,
+            order: itemOrder++,
+          });
+        }
+      }
+      setSelectableItems(newItems);
+    }
   }, [editingLevel]);
 
   // ============================================================================
@@ -1272,8 +1397,30 @@ export function LevelDesignerV2({
               )}
             </CardTitle>
           </CardHeader>
-          <CardContent className="flex justify-center">
-            <GamePreviewCanvas pixels={pixels} width={artWidth} height={artHeight} />
+          <CardContent>
+            <div className="flex justify-center">
+              <GamePreviewCanvas pixels={pixels} width={artWidth} height={artHeight} />
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 6b. Arrangement Preview */}
+      {hasData && arrangementPreviewState && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              Arrangement Preview
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <StudioArrangementPreview
+              previewState={arrangementPreviewState}
+              colorTypeToHex={colorTypeToHex}
+              waitingStandSlots={waitingStandSlots}
+              blockingOffset={blockingOffset}
+              maxSelectableItems={maxSelectableItems}
+            />
           </CardContent>
         </Card>
       )}
@@ -1298,18 +1445,21 @@ export function LevelDesignerV2({
           difficultyResult={difficultyResult}
           difficultyParams={studioDifficultyParams}
           maxSelectableItems={maxSelectableItems}
-          mismatchDepth={mismatchDepth}
+          blockingOffset={blockingOffset}
           waitingStandSlots={waitingStandSlots}
           activeLauncherCount={activeLauncherCount}
+          maxActiveLaunchers={maxActiveLaunchers}
           seed={seed}
+          parameterLocks={parameterLocks}
           simulationResult={simulationResult}
           isTargeting={isTargeting}
           isSimulating={isSimulating}
           onMaxSelectableChange={setMaxSelectableItems}
-          onMismatchDepthChange={setMismatchDepth}
+          onBlockingOffsetChange={setBlockingOffset}
           onWaitingStandSlotsChange={setWaitingStandSlots}
           onActiveLauncherCountChange={setActiveLauncherCount}
           onSeedChange={setSeed}
+          onToggleParameterLock={handleToggleParameterLock}
           onEasier={handleEasier}
           onHarder={handleHarder}
           onAutoTarget={handleAutoTarget}
