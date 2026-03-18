@@ -280,6 +280,57 @@ export function LevelDesignerV2({
     return buildPreviewState(studioGameConfig);
   }, [studioGameConfig]);
 
+  // Sync Item Pool layer assignments from the arrangement preview.
+  // When blocking/surface changes, tiles move between A/B/C in the preview —
+  // the Item Pool should reflect the derived arrangement.
+  useEffect(() => {
+    if (!arrangementPreviewState) return;
+    const { layerA, layerB, layerC } = arrangementPreviewState;
+
+    // Build a map from (colorType, variant, occurrence) → derived layer
+    // We match by colorType+variant in order to handle multiple tiles of same color
+    const derivedLayers = new Map<string, 'A' | 'B' | 'C'>();
+    const counters = new Map<string, number>();
+    const key = (ct: number, v: number, n: number) => `${ct}-${v}-${n}`;
+    const incCounter = (ct: number, v: number) => {
+      const k = `${ct}-${v}`;
+      const n = (counters.get(k) || 0);
+      counters.set(k, n + 1);
+      return n;
+    };
+
+    for (const tile of layerA) {
+      if (!tile) continue;
+      derivedLayers.set(key(tile.colorType, tile.variant, incCounter(tile.colorType, tile.variant)), 'A');
+    }
+    for (const tile of layerB) {
+      if (!tile) continue;
+      derivedLayers.set(key(tile.colorType, tile.variant, incCounter(tile.colorType, tile.variant)), 'B');
+    }
+    for (const tile of layerC) {
+      derivedLayers.set(key(tile.colorType, tile.variant, incCounter(tile.colorType, tile.variant)), 'C');
+    }
+
+    // Apply to selectableItems
+    const itemCounters = new Map<string, number>();
+    setSelectableItems((prev) => {
+      const sorted = [...prev].sort((a, b) => a.order - b.order);
+      let changed = false;
+      const updated = sorted.map((item) => {
+        const k = `${item.colorType}-${item.variant}`;
+        const n = (itemCounters.get(k) || 0);
+        itemCounters.set(k, n + 1);
+        const newLayer = derivedLayers.get(key(item.colorType, item.variant, n));
+        if (newLayer && newLayer !== item.layer) {
+          changed = true;
+          return { ...item, layer: newLayer };
+        }
+        return item;
+      });
+      return changed ? updated : prev;
+    });
+  }, [arrangementPreviewState]);
+
   // ============================================================================
   // JSON Import
   // ============================================================================
