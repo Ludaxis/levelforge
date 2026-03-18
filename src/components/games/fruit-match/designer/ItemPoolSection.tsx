@@ -17,6 +17,7 @@ import { StudioSelectableItem, ColorSwatch } from './types';
 export function ItemPoolSection({
   items,
   maxSelectableItems,
+  displayOrder,
   onMaxChange,
   onAddItem,
   onDeleteItem,
@@ -26,6 +27,7 @@ export function ItemPoolSection({
 }: {
   items: StudioSelectableItem[];
   maxSelectableItems: number;
+  displayOrder?: Map<string, number>;
   onMaxChange: (v: number) => void;
   onAddItem: (colorType: number, variant: number) => void;
   onDeleteItem: (id: string) => void;
@@ -38,7 +40,17 @@ export function ItemPoolSection({
   const [addColorType, setAddColorType] = useState(0);
   const [addVariant, setAddVariant] = useState(0);
 
-  const sorted = useMemo(() => [...items].sort((a, b) => a.order - b.order), [items]);
+  // Sort by arrangement display order if available, otherwise by authored order
+  const sorted = useMemo(() => {
+    if (displayOrder && displayOrder.size > 0) {
+      return [...items].sort((a, b) => {
+        const oa = displayOrder.get(a.id) ?? a.order;
+        const ob = displayOrder.get(b.id) ?? b.order;
+        return oa - ob;
+      });
+    }
+    return [...items].sort((a, b) => a.order - b.order);
+  }, [items, displayOrder]);
 
   // Split into layers
   const layerA = sorted.filter((i) => i.layer === 'A');

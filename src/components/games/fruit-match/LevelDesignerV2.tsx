@@ -321,6 +321,33 @@ export function LevelDesignerV2({
     });
   }, [arrangementPreviewState]);
 
+  // Compute display order for Item Pool from the arrangement sequence.
+  // This makes the Item Pool show items in the same order as the arrangement
+  // without changing the source `order` field (which would cause infinite loops).
+  const itemDisplayOrder = useMemo(() => {
+    if (!arrangementPreviewState) return undefined;
+    const { layerA, layerB, layerC } = arrangementPreviewState;
+    const map = new Map<string, number>(); // item.id → display position
+    let pos = 0;
+
+    // Build flat sequence in arrangement order
+    const allTiles = [
+      ...layerA.filter((t): t is NonNullable<typeof t> => t !== null),
+      ...layerB.filter((t): t is NonNullable<typeof t> => t !== null),
+      ...layerC,
+    ];
+
+    // Map preview tile index back to item IDs
+    const sorted = [...selectableItems].sort((a, b) => a.order - b.order);
+    for (const tile of allTiles) {
+      const origIdx = parseInt(tile.id.replace('preview-', ''), 10);
+      if (!isNaN(origIdx) && origIdx < sorted.length) {
+        map.set(sorted[origIdx].id, pos++);
+      }
+    }
+    return map;
+  }, [arrangementPreviewState, selectableItems]);
+
   // ============================================================================
   // JSON Import
   // ============================================================================
@@ -1492,6 +1519,7 @@ export function LevelDesignerV2({
         <ItemPoolSection
           items={itemsWithLayers}
           maxSelectableItems={maxSelectableItems}
+          displayOrder={itemDisplayOrder}
           onMaxChange={setMaxSelectableItems}
           onAddItem={handleAddItem}
           onDeleteItem={handleDeleteItem}
