@@ -814,6 +814,8 @@ export function buildDeterministicSequence(
   const activeGroup = sorted.slice(0, activeLauncherCount);
   const activeColorTypes = new Set(activeGroup.map((l) => l.colorType));
 
+  let launcherSlot = 0; // incrementing offset so each launcher gets its own target
+
   for (const launcher of activeGroup) {
     const ct = launcher.colorType;
 
@@ -822,7 +824,7 @@ export function buildDeterministicSequence(
     for (let i = 0; i < sequence.length; i++) {
       if (sequence[i].colorType === ct) positions.push(i);
     }
-    if (positions.length < 3) continue;
+    if (positions.length < 3) { launcherSlot++; continue; }
 
     const thirdPos = positions[2];
 
@@ -859,15 +861,20 @@ export function buildDeterministicSequence(
 
     } else if (blockingOffset === 1) {
       // ── Blocking 1: 3rd tile → B behind non-active A item ──
-      // Search B positions where A item above is NOT active-color
+      // Search B positions (from end) where A item above is NOT active-color
+      // Each launcher gets a different B slot
+      let found = 0;
       let target = -1;
       for (let b = 2 * N - 1; b >= N; b--) {
         if (b >= sequence.length) continue;
         const aAbove = b - N;
         if (!activeColorTypes.has(sequence[aAbove].colorType) &&
             !activeColorTypes.has(sequence[b].colorType)) {
-          target = b;
-          break;
+          if (found === launcherSlot) {
+            target = b;
+            break;
+          }
+          found++;
         }
       }
 
@@ -876,17 +883,18 @@ export function buildDeterministicSequence(
       }
 
     } else {
-      // ── Blocking 2-7: 3rd tile → C(blocking-1) ──
-      const cTarget = Math.min(2 * N + (blockingOffset - 2), sequence.length - 1);
+      // ── Blocking 2-7: 3rd tile → C(blocking-1 + launcherSlot) ──
+      // Each launcher gets its own C position: L1→C(blocking-1), L2→C(blocking), etc.
+      const cTarget = Math.min(2 * N + (blockingOffset - 2) + launcherSlot, sequence.length - 1);
 
-      // Find a non-active tile at or near cTarget to swap with
       let target = -1;
       if (thirdPos === cTarget) {
-        continue; // already there
+        launcherSlot++;
+        continue;
       } else if (!activeColorTypes.has(sequence[cTarget]?.colorType ?? -1)) {
         target = cTarget;
       } else {
-        // Search nearby for non-active tile
+        // Search backward for non-active tile near target
         for (let j = cTarget; j > Math.max(thirdPos, 2 * N - 1); j--) {
           if (!activeColorTypes.has(sequence[j].colorType)) {
             target = j;
@@ -916,6 +924,8 @@ export function buildDeterministicSequence(
         [sequence[i], sequence[swapIdx]] = [sequence[swapIdx], sequence[i]];
       }
     }
+
+    launcherSlot++;
   }
 
   return sequence;
