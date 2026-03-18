@@ -589,6 +589,85 @@ function verifySolvability(
 }
 
 // ============================================================================
+// Par Moves — minimum moves for optimal (greedy) play
+// ============================================================================
+
+/**
+ * Compute par moves for a level configuration.
+ * Runs the greedy solvability checker and counts its moves.
+ * Returns the minimum number of picks an optimal player needs.
+ * Used by the DDA system as `move.skill_index = par_moves / actual_moves`.
+ */
+export function computeParMoves(config: StudioGameConfig): number | null {
+  const state = initializeStateSeeded({ ...config, seed: config.seed ?? 42 });
+  const sorted = [...config.launchers].sort((a, b) => a.order - b.order);
+  const activeLauncherCount = config.activeLauncherCount ?? 2;
+
+  const simA = state.layerA.map((t) => (t ? { ...t } : null));
+  const simB = state.layerB.map((t) => (t ? { ...t } : null));
+  const simC = state.layerC.map((t) => ({ ...t }));
+
+  interface SimLauncher { colorType: number; collected: number }
+  const active: SimLauncher[] = sorted.slice(0, activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0 }));
+  const queue: SimLauncher[] = sorted.slice(activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0 }));
+  const stand: number[] = [];
+  let fired = 0;
+  let moves = 0;
+  const totalLaunchers = sorted.length;
+  const maxIter = simA.length * 4 + simC.length + 200;
+
+  for (let iter = 0; iter < maxIter; iter++) {
+    if (fired >= totalLaunchers) return moves;
+    const available: { idx: number; tile: StudioTile }[] = [];
+    for (let i = 0; i < simA.length; i++) { if (simA[i]) available.push({ idx: i, tile: simA[i]! }); }
+    if (available.length === 0) break;
+
+    let bestIdx = -1, bestScore = -Infinity;
+    for (const { idx, tile } of available) {
+      const launcher = active.find((l) => l.colorType === tile.colorType && l.collected < 3);
+      const score = launcher ? (launcher.collected === 2 ? 200 : 100) : (stand.length < (config.waitingStandSlots ?? 5) ? 0 : -1000);
+      if (score > bestScore) { bestScore = score; bestIdx = idx; }
+    }
+    if (bestIdx === -1) break;
+    if (bestScore <= -1000) {
+      const match = available.find(({ tile }) => active.some((l) => l.colorType === tile.colorType && l.collected < 3));
+      if (match) bestIdx = match.idx; else return null; // unsolvable
+    }
+
+    const tile = simA[bestIdx]!;
+    simA[bestIdx] = null;
+    moves++;
+
+    if (simB[bestIdx]) { simA[bestIdx] = simB[bestIdx]; simB[bestIdx] = null; if (simC.length > 0) simB[bestIdx] = simC.shift()!; }
+
+    const matchLauncher = active.find((l) => l.colorType === tile.colorType && l.collected < 3);
+    if (matchLauncher) {
+      matchLauncher.collected++;
+      if (matchLauncher.collected >= 3) {
+        fired++; active.splice(active.indexOf(matchLauncher), 1);
+        if (queue.length > 0) active.push(queue.shift()!);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const l of active) {
+            if (l.collected >= 3) continue;
+            const indices: number[] = [];
+            for (let i = 0; i < stand.length && indices.length < 3 - l.collected; i++) { if (stand[i] === l.colorType) indices.push(i); }
+            if (indices.length > 0) { l.collected += indices.length; for (let j = indices.length - 1; j >= 0; j--) stand.splice(indices[j], 1); changed = true; }
+          }
+          const nowFiring = active.filter((l) => l.collected >= 3);
+          for (const l of nowFiring) { fired++; active.splice(active.indexOf(l), 1); if (queue.length > 0) active.push(queue.shift()!); changed = true; }
+        }
+      }
+    } else {
+      stand.push(tile.colorType);
+    }
+  }
+
+  return fired >= totalLaunchers ? moves : null;
+}
+
+// ============================================================================
 // Find maximum solvable tile burial depth
 // ============================================================================
 
@@ -701,15 +780,24 @@ function seededLauncherId(rng: () => number): string {
 /**
  * Build a deterministic sequence from the canonical Item Pool order.
  *
- * blocking=0: returns the canonical order unchanged.
- * blocking>0: pushes the "unlock tile" (3rd matching tile) for each active
- *   blender deeper into the sequence by swapping it with a non-matching tile.
- *   The unlock distance target is: maxSelectableItems * 2 + blockingOffset.
- *   Only swaps with tiles whose color does NOT match any active blender,
- *   so every displaced tile is a real blocker.
+ * Preserves authored order — Surface Size changes just move the A/B/C
+ * cut point on the same sequence.
  *
- * This preserves the authored order as much as possible — Surface Size
- * changes just move the A/B/C cut point on the same sequence.
+ * Blocking rules (L1, L2 = active launchers, each needs 3 items):
+ *
+ *   blocking=0: canonical order unchanged. All items stay where authored.
+ *
+ *   blocking=1: Push 1-2 unlock tiles from Layer A into Layer B.
+ *     The swap targets must be non-active-color tiles (real blockers).
+ *
+ *   blocking=2: Push BOTH launchers' unlock tiles (3rd match) into Layer C.
+ *     L1's unlock tile → C1 (position 2*N + 0).
+ *     L2's unlock tile → C2 (position 2*N + 1).
+ *     Neither launcher can be completed from A+B alone.
+ *
+ *   blocking=3..7: Same as 2 but unlock tiles move deeper into C.
+ *     L1's unlock tile → C(blocking-1), L2's → C(blocking).
+ *     e.g. blocking=6: L1 → C5, L2 → C6.
  */
 export function buildDeterministicSequence(
   allTiles: StudioTile[],
@@ -721,39 +809,59 @@ export function buildDeterministicSequence(
   const blockingOffset =
     blockingValue > 1 ? clampBlockingOffset(blockingValue) : clampBlockingOffset(Math.round(blockingValue * MAX_BLOCKING_OFFSET));
 
-  // Start from a copy of the canonical order
   const sequence = [...allTiles];
-
   if (blockingOffset === 0 || sequence.length === 0) return sequence;
 
   const sorted = [...launcherConfigs].sort((a, b) => a.order - b.order);
-  const unlockDistance = maxSelectableItems * 2 + blockingOffset;
+  const N = maxSelectableItems; // Layer A size = Layer B size
 
   // Process one launcher group at a time
   for (let groupStart = 0; groupStart < sorted.length; groupStart += activeLauncherCount) {
     const activeGroup = sorted.slice(groupStart, groupStart + activeLauncherCount);
     const activeColorTypes = new Set(activeGroup.map((l) => l.colorType));
 
-    // For each active blender, find positions of its 3 matching tiles in current sequence
-    for (const launcher of activeGroup) {
-      const matchPositions: number[] = [];
-      for (let i = 0; i < sequence.length && matchPositions.length < 3; i++) {
+    // Find the 3rd matching tile (unlock tile) for each active launcher
+    const unlockTiles: { launcherIdx: number; pos: number }[] = [];
+    for (let li = 0; li < activeGroup.length; li++) {
+      const launcher = activeGroup[li];
+      let count = 0;
+      for (let i = 0; i < sequence.length; i++) {
         if (sequence[i].colorType === launcher.colorType) {
-          matchPositions.push(i);
+          count++;
+          if (count === 3) {
+            unlockTiles.push({ launcherIdx: li, pos: i });
+            break;
+          }
         }
       }
+    }
 
-      if (matchPositions.length < 3) continue;
+    if (unlockTiles.length === 0) continue;
 
-      // The "unlock tile" is the 3rd match — push it toward unlockDistance
-      const unlockPos = matchPositions[2];
-      const targetPos = Math.min(unlockDistance - 1, sequence.length - 1);
+    // Sort by position descending so earlier swaps don't shift later positions
+    unlockTiles.sort((a, b) => b.pos - a.pos);
+
+    for (let ui = 0; ui < unlockTiles.length; ui++) {
+      const { pos: unlockPos } = unlockTiles[ui];
+
+      // Compute target position based on blocking level
+      let targetPos: number;
+      if (blockingOffset === 1) {
+        // Blocking 1: push into Layer B (somewhere in N..2N-1)
+        // Target the end of Layer B
+        targetPos = Math.min(2 * N - 1, sequence.length - 1);
+      } else {
+        // Blocking 2-7: push into Layer C
+        // L1 → C(blocking-1), L2 → C(blocking), etc.
+        // C starts at position 2*N, so C(k) = 2*N + k - 1
+        const cPosition = (blockingOffset - 1) + ui; // first launcher gets blocking-1, second gets blocking
+        targetPos = Math.min(2 * N + cPosition, sequence.length - 1);
+      }
 
       if (unlockPos >= targetPos) continue; // already deep enough
 
-      // Find the best swap target: a non-active-color tile at or near targetPos
+      // Find swap target: non-active-color tile at or near targetPos
       let swapIdx = -1;
-      // Search backward from targetPos for a non-active-color tile
       for (let j = targetPos; j > unlockPos; j--) {
         if (!activeColorTypes.has(sequence[j].colorType)) {
           swapIdx = j;
@@ -761,9 +869,8 @@ export function buildDeterministicSequence(
         }
       }
 
-      if (swapIdx === -1) continue; // no valid swap target — cap hardness
+      if (swapIdx === -1) continue; // no valid swap — cap hardness
 
-      // Swap the unlock tile with the blocker
       [sequence[unlockPos], sequence[swapIdx]] = [sequence[swapIdx], sequence[unlockPos]];
     }
   }

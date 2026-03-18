@@ -22,6 +22,7 @@ export {
   blockingOffsetToDepth,
   resolveBlockingOffset,
   calculateStudioDifficulty,
+  computeParMoves,
   findMaxSolvableBlockingOffset,
   findMaxSolvableDepth,
   mulberry32,
