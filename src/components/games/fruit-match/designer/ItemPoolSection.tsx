@@ -23,6 +23,7 @@ export function ItemPoolSection({
   onDeleteItem,
   onReorder,
   onChangeLayer,
+  onChangeVariant,
   colorTypeToHex,
 }: {
   items: StudioSelectableItem[];
@@ -33,6 +34,7 @@ export function ItemPoolSection({
   onDeleteItem: (id: string) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
   onChangeLayer: (id: string, layer: 'A' | 'B' | 'C') => void;
+  onChangeVariant: (id: string, variant: number) => void;
   colorTypeToHex?: Record<number, string>;
 }) {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
@@ -61,7 +63,7 @@ export function ItemPoolSection({
 
   const renderItem = (item: StudioSelectableItem, globalIdx: number, layerNum: number) => {
     const fruit = COLOR_TYPE_TO_FRUIT[item.colorType];
-    const variantName = fruit ? VARIANT_NAMES[fruit]?.[item.variant] || `V${item.variant}` : `V${item.variant}`;
+    const variantNames = fruit ? VARIANT_NAMES[fruit] : undefined;
     return (
       <div
         key={item.id}
@@ -89,7 +91,17 @@ export function ItemPoolSection({
         <span className="w-4 text-[10px] text-muted-foreground text-center font-mono shrink-0">{layerNum}</span>
         <GripVertical className="h-3 w-3 text-muted-foreground cursor-grab shrink-0" />
         <ColorSwatch colorType={item.colorType} size={16} hex={colorTypeToHex?.[item.colorType]} />
-        <span className="truncate flex-1">{variantName}</span>
+        <select
+          value={item.variant}
+          onChange={(e) => onChangeVariant(item.id, Number(e.target.value))}
+          className="h-5 text-[10px] bg-background border rounded px-0.5 flex-1 min-w-0 truncate"
+        >
+          {[0, 1, 2].map((v) => (
+            <option key={v} value={v}>
+              {variantNames?.[v] || `V${v}`}
+            </option>
+          ))}
+        </select>
         <select
           value={item.layer}
           onChange={(e) => onChangeLayer(item.id, e.target.value as 'A' | 'B' | 'C')}

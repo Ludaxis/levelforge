@@ -992,6 +992,12 @@ export function LevelDesignerV2({
     setPinnedItemIds((prev) => new Set(prev).add(id));
   }, []);
 
+  const handleChangeVariant = useCallback((id: string, variant: number) => {
+    setSelectableItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, variant } : item)),
+    );
+  }, []);
+
   const handleReorderItem = useCallback((fromIndex: number, toIndex: number) => {
     setSelectableItems((prev) => {
       const sorted = [...prev].sort((a, b) => a.order - b.order);
@@ -1618,6 +1624,7 @@ export function LevelDesignerV2({
           onDeleteItem={handleDeleteItem}
           onReorder={handleReorderItem}
           onChangeLayer={handleChangeLayer}
+          onChangeVariant={handleChangeVariant}
           colorTypeToHex={colorTypeToHex}
         />
       )}
