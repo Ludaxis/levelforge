@@ -11,8 +11,8 @@ import { GridCoord } from '@/lib/squareGrid';
 export interface ReferenceCell {
   direction: number;      // 0=empty, 1=N, 2=E, 3=S, 4=W, 5=N_S, 6=E_W
   colorHex: string;       // 8-char hex with alpha (e.g., "#06B6D4FF")
-  mechanic?: number;      // 0=normal, 1=gate (neighbor-based), 2=timed gate, 3=mirror, 4=iced
-  mechanicExtras?: string;// Optional extras (e.g., timed gate unlock moves, ice count)
+  mechanic?: number;      // 0=normal, 1=iced, 2=gate, 3=mirror
+  mechanicExtras?: string;// Optional extras (e.g., gate unlock moves, ice count)
 }
 
 export interface ReferenceFormat {
@@ -69,23 +69,21 @@ function convertColorToHex6(color: string): string {
 
 /**
  * Convert a SquareBlock to ReferenceCell format
- * Mechanic codes: 0=normal, 1=gate (neighbor-based), 2=timed gate, 3=mirror, 4=iced
+ * Mechanic codes: 0=normal, 1=iced, 2=gate, 3=mirror
  */
 function blockToReferenceCell(block: SquareBlock): ReferenceCell {
   let mechanic = 0;
   let mechanicExtras = '';
 
   if (block.iceCount !== undefined && block.iceCount > 0) {
-    // Iced block: mechanic 4
-    mechanic = 4;
+    // Iced block: mechanic 1
+    mechanic = 1;
     mechanicExtras = String(block.iceCount);
   } else if (block.locked) {
-    // Gate block: mechanic 1 (neighbor-based) or 2 (timed)
+    // Gate block: mechanic 2 (both neighbor-based and timed)
+    mechanic = 2;
     if (block.unlockAfterMoves !== undefined && block.unlockAfterMoves > 0) {
-      mechanic = 2; // Timed gate
       mechanicExtras = String(block.unlockAfterMoves);
-    } else {
-      mechanic = 1; // Neighbor-based gate
     }
   } else if (block.mirror) {
     // Mirror block: mechanic 3
@@ -245,24 +243,24 @@ export function importFromReferenceFormat(data: ReferenceFormat): ExportableLeve
     // Handle both string and number values for mechanicExtras (dev exports as number)
     const mechanicExtras = cell.mechanicExtras != null ? String(cell.mechanicExtras) : '';
 
-    // Mechanic codes: 0=normal, 1=gate (neighbor-based), 2=timed gate, 3=mirror, 4=iced
+    // Mechanic codes: 0=normal, 1=iced, 2=gate, 3=mirror
     // Mirror: mechanic 3 OR extras contains "M"
     const hasMirror = mechanic === 3 || mechanicExtras.includes('M');
     const extrasWithoutMirror = mechanicExtras.replace(/,?M/g, '').trim();
 
-    // Gate: mechanic 1 (neighbor-based) or 2 (timed)
-    const isGate = mechanic === 1 || mechanic === 2;
+    // Gate: mechanic 2 (neighbor-based if no extras, timed if extras has a number)
+    const isGate = mechanic === 2;
 
     // Parse mechanic-specific properties
-    // Timed gate (mechanic 2): extras contains unlock moves count
+    // Timed gate (mechanic 2 with extras): extras contains unlock moves count
     const unlockAfterMoves =
       mechanic === 2 && extrasWithoutMirror !== '' && !Number.isNaN(Number(extrasWithoutMirror))
         ? Number(extrasWithoutMirror)
         : undefined;
 
-    // Iced blocks (mechanic 4): extras contains ice count
+    // Iced blocks (mechanic 1): extras contains ice count
     const iceCount =
-      mechanic === 4 && extrasWithoutMirror !== '' && !Number.isNaN(Number(extrasWithoutMirror))
+      mechanic === 1 && extrasWithoutMirror !== '' && !Number.isNaN(Number(extrasWithoutMirror))
         ? Number(extrasWithoutMirror)
         : undefined;
 

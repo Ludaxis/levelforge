@@ -157,26 +157,43 @@ describe('Mechanic Encoding', () => {
     });
   });
 
-  describe('Neighbor gate blocks (mechanic 1)', () => {
-    it('should encode locked block as mechanic 1', () => {
-      const blocks = [createTestBlock(0, 0, 'N', { locked: true })];
+  describe('Iced blocks (mechanic 1)', () => {
+    it('should encode iced block as mechanic 1', () => {
+      const blocks = [createTestBlock(0, 0, 'N', { iceCount: 3 })];
       const exported = exportToReferenceFormat({ rows: 1, cols: 1, blocks });
       expect(exported.cells[0].mechanic).toBe(1);
+      expect(exported.cells[0].mechanicExtras).toBe('3');
     });
 
-    it('should import mechanic 1 as locked', () => {
+    it('should import mechanic 1 with ice count', () => {
       const refFormat: ReferenceFormat = {
         rows: 1,
         cols: 1,
-        cells: [{ direction: 1, colorHex: '#FF0000', mechanic: 1 }],
+        cells: [{ direction: 1, colorHex: '#FF0000', mechanic: 1, mechanicExtras: '5' }],
+      };
+      const imported = importFromReferenceFormat(refFormat);
+      expect(imported.blocks[0].iceCount).toBe(5);
+    });
+  });
+
+  describe('Gate blocks (mechanic 2)', () => {
+    it('should encode locked block as mechanic 2', () => {
+      const blocks = [createTestBlock(0, 0, 'N', { locked: true })];
+      const exported = exportToReferenceFormat({ rows: 1, cols: 1, blocks });
+      expect(exported.cells[0].mechanic).toBe(2);
+    });
+
+    it('should import mechanic 2 as locked', () => {
+      const refFormat: ReferenceFormat = {
+        rows: 1,
+        cols: 1,
+        cells: [{ direction: 1, colorHex: '#FF0000', mechanic: 2 }],
       };
       const imported = importFromReferenceFormat(refFormat);
       expect(imported.blocks[0].locked).toBe(true);
     });
-  });
 
-  describe('Timed gate blocks (mechanic 2)', () => {
-    it('should encode timed gate with unlock moves', () => {
+    it('should encode timed gate with unlock moves as mechanic 2 with extras', () => {
       const blocks = [createTestBlock(0, 0, 'N', { locked: true, unlockAfterMoves: 5 })];
       const exported = exportToReferenceFormat({ rows: 1, cols: 1, blocks });
       expect(exported.cells[0].mechanic).toBe(2);
@@ -213,31 +230,12 @@ describe('Mechanic Encoding', () => {
     });
   });
 
-  describe('Iced blocks (mechanic 4)', () => {
-    it('should encode iced block as mechanic 4', () => {
-      const blocks = [createTestBlock(0, 0, 'N', { iceCount: 3 })];
-      const exported = exportToReferenceFormat({ rows: 1, cols: 1, blocks });
-      expect(exported.cells[0].mechanic).toBe(4);
-      expect(exported.cells[0].mechanicExtras).toBe('3');
-    });
-
-    it('should import mechanic 4 with ice count', () => {
-      const refFormat: ReferenceFormat = {
-        rows: 1,
-        cols: 1,
-        cells: [{ direction: 1, colorHex: '#FF0000', mechanic: 4, mechanicExtras: '5' }],
-      };
-      const imported = importFromReferenceFormat(refFormat);
-      expect(imported.blocks[0].iceCount).toBe(5);
-    });
-  });
-
   describe('mechanicExtras as number (dev export format)', () => {
-    it('should handle mechanicExtras as number', () => {
+    it('should handle mechanicExtras as number for iced blocks', () => {
       const refFormat: ReferenceFormat = {
         rows: 1,
         cols: 1,
-        cells: [{ direction: 1, colorHex: '#FF0000', mechanic: 4, mechanicExtras: 7 as any }],
+        cells: [{ direction: 1, colorHex: '#FF0000', mechanic: 1, mechanicExtras: 7 as any }],
       };
       const imported = importFromReferenceFormat(refFormat);
       expect(imported.blocks[0].iceCount).toBe(7);
