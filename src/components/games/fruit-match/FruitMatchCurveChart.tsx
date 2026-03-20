@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import {
   ComposedChart,
   ScatterChart,
@@ -19,7 +19,10 @@ import {
 } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { TrendingUp, Info } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Slider } from '@/components/ui/slider';
+import { TrendingUp, Info, Settings2, RotateCcw, Save } from 'lucide-react';
 import {
   DesignedFruitMatchLevel,
   DifficultyTier,
@@ -132,11 +135,159 @@ const SAWTOOTH_CYCLE = [
 // Component
 // ============================================================================
 
+const STORAGE_KEY = 'fruit-match-sawtooth-config';
+
+function loadSavedConfig(): SawtoothConfig {
+  if (typeof window === 'undefined') return DEFAULT_SAWTOOTH_CONFIG;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_SAWTOOTH_CONFIG;
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_SAWTOOTH_CONFIG, ...parsed };
+  } catch {
+    return DEFAULT_SAWTOOTH_CONFIG;
+  }
+}
+
+const TIER_OPTIONS: DifficultyTier[] = ['trivial', 'easy', 'medium', 'hard', 'expert', 'nightmare'];
+
+function SawtoothConfigEditor({
+  config,
+  onChange,
+  onReset,
+}: {
+  config: SawtoothConfig;
+  onChange: (config: SawtoothConfig) => void;
+  onReset: () => void;
+}) {
+  const updatePattern = (index: number, tier: DifficultyTier) => {
+    const newPattern = [...config.expectedPattern];
+    newPattern[index] = tier;
+    onChange({ ...config, expectedPattern: newPattern });
+  };
+
+  return (
+    <div className="space-y-4 p-3 bg-muted/30 rounded-lg border border-border">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium">Sawtooth Configuration</span>
+        <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={onReset}>
+          <RotateCcw className="h-3 w-3 mr-1" />
+          Reset to Default
+        </Button>
+      </div>
+
+      {/* Pattern editor — 10 positions */}
+      <div className="space-y-1.5">
+        <span className="text-[10px] text-muted-foreground">Cycle Pattern (10 positions)</span>
+        <div className="grid grid-cols-5 gap-1.5">
+          {config.expectedPattern.map((tier, i) => (
+            <div key={i} className="space-y-0.5">
+              <span className="text-[9px] text-muted-foreground text-center block">P{i + 1}</span>
+              <select
+                value={tier}
+                onChange={(e) => updatePattern(i, e.target.value as DifficultyTier)}
+                className="w-full h-6 text-[10px] bg-background border rounded px-0.5"
+              >
+                {TIER_OPTIONS.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Numeric settings */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <span className="text-[10px] text-muted-foreground">Total Levels</span>
+          <Input
+            type="number"
+            min={10}
+            max={500}
+            value={config.totalLevels}
+            onChange={(e) => onChange({ ...config, totalLevels: Math.max(10, Number(e.target.value) || 100) })}
+            className="h-7 text-xs"
+          />
+        </div>
+        <div className="space-y-1">
+          <span className="text-[10px] text-muted-foreground">Skill Growth Rate</span>
+          <Input
+            type="number"
+            min={0}
+            max={1}
+            step={0.01}
+            value={config.skillGrowthRate}
+            onChange={(e) => onChange({ ...config, skillGrowthRate: Math.max(0, Math.min(1, Number(e.target.value) || 0.1)) })}
+            className="h-7 text-xs"
+          />
+        </div>
+        <div className="space-y-1">
+          <span className="text-[10px] text-muted-foreground">Baseline Increase / Cycle</span>
+          <Input
+            type="number"
+            min={0}
+            max={5}
+            step={0.1}
+            value={config.baselineIncrease}
+            onChange={(e) => onChange({ ...config, baselineIncrease: Math.max(0, Number(e.target.value) || 0.3) })}
+            className="h-7 text-xs"
+          />
+        </div>
+      </div>
+
+      {/* Tier score boundaries */}
+      <div className="space-y-1.5">
+        <span className="text-[10px] text-muted-foreground">Tier Score Boundaries</span>
+        <div className="grid grid-cols-5 gap-1.5">
+          {(['trivialMax', 'easyMax', 'mediumMax', 'hardMax', 'expertMax'] as const).map((key) => (
+            <div key={key} className="space-y-0.5">
+              <span className="text-[9px] text-muted-foreground text-center block">
+                {key.replace('Max', '')}
+              </span>
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={config[key]}
+                onChange={(e) => onChange({ ...config, [key]: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })}
+                className="h-6 text-[10px] px-1 text-center"
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function FruitMatchCurveChart({
   levels,
   onLevelClick,
-  config = DEFAULT_SAWTOOTH_CONFIG,
+  config: externalConfig,
 }: FruitMatchCurveChartProps) {
+  // Load saved config from localStorage, with external override
+  const [savedConfig, setSavedConfig] = useState<SawtoothConfig>(DEFAULT_SAWTOOTH_CONFIG);
+  const [showSettings, setShowSettings] = useState(false);
+
+  useEffect(() => {
+    setSavedConfig(loadSavedConfig());
+  }, []);
+
+  const config = externalConfig ?? savedConfig;
+
+  const handleConfigChange = useCallback((newConfig: SawtoothConfig) => {
+    setSavedConfig(newConfig);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(newConfig));
+    } catch { /* ignore quota errors */ }
+  }, []);
+
+  const handleReset = useCallback(() => {
+    setSavedConfig(DEFAULT_SAWTOOTH_CONFIG);
+    localStorage.removeItem(STORAGE_KEY);
+  }, []);
+
   const maxLevels = config.totalLevels;
 
   // Helper to get tier from score using config
@@ -281,15 +432,37 @@ export function FruitMatchCurveChart({
     <div className="space-y-4">
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5" />
-            Difficulty Curve Analysis
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5" />
+              Difficulty Curve Analysis
+            </CardTitle>
+            {!externalConfig && (
+              <Button
+                variant={showSettings ? 'secondary' : 'ghost'}
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setShowSettings(!showSettings)}
+              >
+                <Settings2 className="h-3.5 w-3.5 mr-1" />
+                Settings
+              </Button>
+            )}
+          </div>
           <CardDescription>
             Compare your designed levels against the ideal sawtooth pattern
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {showSettings && !externalConfig && (
+            <div className="mb-4">
+              <SawtoothConfigEditor
+                config={config}
+                onChange={handleConfigChange}
+                onReset={handleReset}
+              />
+            </div>
+          )}
           <div className="h-[350px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart
