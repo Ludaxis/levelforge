@@ -46,6 +46,8 @@ export interface ReferenceArtwork {
 export interface ReferenceSelectableItem {
   ColorType: number;
   Layer: number;
+  Variant?: number;
+  Order?: number;
 }
 
 export interface ReferenceRequirement {
@@ -669,6 +671,7 @@ export interface StudioExportLevel {
   Seed?: number;
   WaitingStandSlots?: number;
   ActiveLauncherCount?: number;
+  MoveLimit?: number;
   Artwork: {
     Width: number;
     Height: number;
@@ -680,7 +683,7 @@ export interface StudioExportLevel {
     }[];
   };
   Requirements: { ColorType: number; Value: number; Group: number }[];
-  SelectableItems: { ColorType: number; Variant: number; Layer: number }[];
+  SelectableItems: { ColorType: number; Variant: number; Layer: number; Order?: number }[];
   Launchers: { ColorType: number; Value: number; Group: number; Order: number; IsLocked: boolean }[];
 }
 
@@ -700,7 +703,13 @@ export interface StudioExportData {
     colorHex: string;
     group: number;
   }[];
-  selectableItems: { colorType: number; variant: number; layer: 'A' | 'B' | 'C'; order: number }[];
+  selectableItems: {
+    colorType: number;
+    variant: number;
+    layer: 'A' | 'B' | 'C';
+    order: number;
+    displayOrder?: number;
+  }[];
   requirements: { colorType: number; value: number; group: number }[];
   launchers: { colorType: number; pixelCount: number; group: number; order: number; isLocked: boolean }[];
   unlockStageData: { requiredCompletedGroups: number[] }[];
@@ -711,6 +720,7 @@ export interface StudioExportData {
   mismatchDepth?: number;
   waitingStandSlots?: number;
   activeLauncherCount?: number;
+  moveLimit?: number;
 }
 
 /**
@@ -732,6 +742,11 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
   const layerToNumber: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2 };
   const selectableItems = data.selectableItems
     .sort((a, b) => {
+      const displayA = a.displayOrder;
+      const displayB = b.displayOrder;
+      if (typeof displayA === 'number' || typeof displayB === 'number') {
+        return (displayA ?? Number.MAX_SAFE_INTEGER) - (displayB ?? Number.MAX_SAFE_INTEGER);
+      }
       const layerA = layerToNumber[a.layer] ?? 0;
       const layerB = layerToNumber[b.layer] ?? 0;
       if (layerA !== layerB) return layerA - layerB;
@@ -741,6 +756,7 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
       ColorType: item.colorType,
       Variant: item.variant,
       Layer: layerToNumber[item.layer] ?? 0,
+      Order: item.order,
     }));
 
   const requirements = data.requirements.map((r) => ({
@@ -767,6 +783,7 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
     Seed: data.seed,
     WaitingStandSlots: data.waitingStandSlots,
     ActiveLauncherCount: data.activeLauncherCount,
+    MoveLimit: data.moveLimit,
     Artwork: {
       Width: data.width,
       Height: data.height,

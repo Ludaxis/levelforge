@@ -20,7 +20,10 @@ import {
   StudioGameConfig,
   StudioTile,
   StudioLauncherState,
+  computeParMoves,
+  resolveBlockingOffset,
 } from '@/lib/useStudioGame';
+import { simulateStudioGame, StudioSimulationResult } from '@/lib/studioDifficultyEngine';
 import { ArrowLeft, RotateCcw, Trophy, XCircle, Lock } from 'lucide-react';
 
 // ============================================================================
@@ -689,6 +692,19 @@ export function StudioGameBoard({ config, onBack }: StudioGameBoardProps) {
   const { state, reset, pickTile, progress, configKey } = useStudioGame(config);
   const colorTypeToHex = config.colorTypeToHex;
 
+  const parMoves = useMemo(() => computeParMoves(config), [config]);
+
+  // Run Monte Carlo simulation on mount to get min/avg/max moves
+  const simResult = useMemo((): StudioSimulationResult | null => {
+    const blockingOffset = resolveBlockingOffset(config);
+    return simulateStudioGame(config, {
+      blockingOffset,
+      maxSelectableItems: config.maxSelectableItems,
+      activeLauncherCount: config.activeLauncherCount ?? 2,
+      seed: config.seed ?? 42,
+    }, 200);
+  }, [config]);
+
   // Animation callbacks (no blocking — user can keep picking during animations)
   const onAnimationStart = useCallback(() => {}, []);
   const onAnimationEnd = useCallback(() => {}, []);
@@ -704,6 +720,10 @@ export function StudioGameBoard({ config, onBack }: StudioGameBoardProps) {
     [pickTile],
   );
 
+  const designerMoveLimit = config.moveLimit;
+  const movesLeft = designerMoveLimit ? designerMoveLimit - (state?.moveCount ?? 0) : undefined;
+  const outOfMoves = movesLeft !== undefined && movesLeft <= 0;
+
   if (!state) {
     return (
       <div className="flex items-center justify-center p-8 text-muted-foreground">
@@ -712,7 +732,7 @@ export function StudioGameBoard({ config, onBack }: StudioGameBoardProps) {
     );
   }
 
-  const gameOver = state.isWon || state.isLost;
+  const gameOver = state.isWon || state.isLost || outOfMoves;
 
   return (
     <div className="space-y-3">
@@ -757,11 +777,36 @@ export function StudioGameBoard({ config, onBack }: StudioGameBoardProps) {
               {progress.filled}/{progress.total} pixels
             </span>
             <div className="flex gap-3 text-xs text-muted-foreground">
-              <span>Moves: {state.moveCount}</span>
+              <span>Moves: {state.moveCount}{designerMoveLimit ? `/${designerMoveLimit}` : parMoves !== null ? `/${parMoves}` : ''}</span>
+              {designerMoveLimit ? (
+                <span className={movesLeft! > 5 ? 'text-green-400' : movesLeft! > 2 ? 'text-yellow-400' : 'text-red-400'}>
+                  {movesLeft} left
+                </span>
+              ) : parMoves !== null ? (
+                <span className={state.moveCount <= parMoves ? 'text-green-400' : state.moveCount <= parMoves * 1.5 ? 'text-yellow-400' : 'text-red-400'}>
+                  {state.moveCount <= parMoves ? 'On par' : `+${state.moveCount - parMoves}`}
+                </span>
+              ) : null}
               <span>Fired: {state.matchCount}</span>
             </div>
           </div>
           <Progress value={progress.percent} className="h-2" />
+          {/* Move range from simulation */}
+          {(parMoves !== null || simResult) && (
+            <div className="flex items-center gap-3 text-[10px] text-muted-foreground pt-1 border-t border-border">
+              {parMoves !== null && (
+                <span>Par: <span className="font-mono text-foreground">{parMoves}</span></span>
+              )}
+              {simResult && simResult.minMoves > 0 && (
+                <>
+                  <span>Min: <span className="font-mono text-foreground">{simResult.minMoves}</span></span>
+                  <span>Avg: <span className="font-mono text-foreground">{Math.round(simResult.avgMoves)}</span></span>
+                  <span>Max: <span className="font-mono text-foreground">{simResult.maxMoves}</span></span>
+                  <span>Win: <span className="font-mono text-foreground">{Math.round(simResult.winRate * 100)}%</span></span>
+                </>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -864,13 +909,25 @@ export function StudioGameBoard({ config, onBack }: StudioGameBoardProps) {
                 <div className="text-sm text-muted-foreground">
                   Completed in {state.moveCount} moves with {state.matchCount} launcher fires
                 </div>
+                {parMoves !== null && (
+                  <div className="text-xs text-muted-foreground">
+                    Par: {parMoves} moves
+                    {state.moveCount <= parMoves
+                      ? ' — Perfect play!'
+                      : ` — ${state.moveCount - parMoves} moves over par`}
+                  </div>
+                )}
               </>
             ) : (
               <>
                 <XCircle className="h-10 w-10 text-red-400" />
-                <div className="text-lg font-bold text-red-400">Game Over</div>
+                <div className="text-lg font-bold text-red-400">
+                  {outOfMoves && !state.isLost ? 'Out of Moves!' : 'Game Over'}
+                </div>
                 <div className="text-sm text-muted-foreground">
-                  Waiting stand is full with no matching launchers
+                  {outOfMoves && !state.isLost
+                    ? `Used all ${designerMoveLimit} moves — ${progress.total - progress.filled} pixels remaining`
+                    : 'Waiting stand is full with no matching launchers'}
                 </div>
               </>
             )}

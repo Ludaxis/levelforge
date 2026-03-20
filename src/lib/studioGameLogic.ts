@@ -240,6 +240,8 @@ export interface StudioGameConfig {
   colorTypeToHex?: Record<number, string>;
   /** Optional seed for deterministic tile arrangement */
   seed?: number;
+  /** Designer-specified move limit (0 or undefined = unlimited) */
+  moveLimit?: number;
 }
 
 export interface StudioGameState {
@@ -905,28 +907,51 @@ export function buildDeterministicSequence(
       }
     }
 
-    // Enforce max 2 of this color in A+B — only for blocking 2+.
-    // Blocking 0-1 only move the specific 3rd tile; extra tiles from later
-    // launcher groups stay in their canonical positions.
-    if (blockingOffset >= 2) {
-      const enfEnd = Math.min(2 * N, sequence.length);
-      const pushSearchEnd = Math.min(2 * N + blockingOffset + activeLauncherCount, sequence.length);
-      let count = 0;
-      for (let i = 0; i < enfEnd; i++) {
-        if (sequence[i].colorType !== ct) continue;
-        count++;
-        if (count <= 2) continue;
+    launcherSlot++;
+  }
+
+  // ── Combined enforcement: cap active-color tiles in A+B ──────────────
+  // Runs AFTER all per-launcher 3rd-tile positioning, so no single color
+  // hogs all the available C swap slots.  Round-robin ensures fairness.
+  //
+  // Cap scales with blockingOffset:
+  //   blocking 0-1: no enforcement (only the 3rd tile is repositioned above)
+  //   blocking 2-4: max 2 in A+B (mild — at least one triplet reachable)
+  //   blocking 5-7: max 1 in A+B (hard — player must dig into C)
+  //   blocking 8-10: max 0 in A+B (nightmare — all active tiles buried in C)
+  // The solvability fallback (caller steps offset down) prevents unsolvable states.
+  if (blockingOffset >= 2) {
+    const maxInAB = blockingOffset <= 4 ? 2 : blockingOffset <= 7 ? 1 : 0;
+    const enfEnd = Math.min(2 * N, sequence.length);
+    const pushSearchEnd = Math.min(2 * N + blockingOffset + activeLauncherCount, sequence.length);
+
+    // Round-robin: each pass pushes at most 1 excess tile per active color,
+    // so limited C swap slots are shared fairly across colors.
+    let moved = true;
+    while (moved) {
+      moved = false;
+      for (const ct of activeColorTypes) {
+        // Count this color in A+B and find the first excess position
+        let count = 0;
+        let excessIdx = -1;
+        for (let i = 0; i < enfEnd; i++) {
+          if (sequence[i].colorType !== ct) continue;
+          count++;
+          if (count > maxInAB) { excessIdx = i; break; }
+        }
+        if (excessIdx === -1) continue; // within cap
+
+        // Find a non-active tile beyond A+B to swap with
         let swapIdx = -1;
-        for (let j = pushSearchEnd - 1; j > i; j--) {
+        for (let j = pushSearchEnd - 1; j > excessIdx; j--) {
           if (!activeColorTypes.has(sequence[j].colorType)) { swapIdx = j; break; }
         }
         if (swapIdx !== -1) {
-          [sequence[i], sequence[swapIdx]] = [sequence[swapIdx], sequence[i]];
+          [sequence[excessIdx], sequence[swapIdx]] = [sequence[swapIdx], sequence[excessIdx]];
+          moved = true;
         }
       }
     }
-
-    launcherSlot++;
   }
 
   return sequence;

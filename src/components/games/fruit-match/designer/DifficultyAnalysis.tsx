@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -20,8 +20,9 @@ import {
   Lock,
   LockOpen,
 } from 'lucide-react';
-import { StudioDifficultyResult, StudioDifficultyParams, DifficultyComponent } from '@/lib/useStudioGame';
+import { StudioDifficultyResult, StudioDifficultyParams, DifficultyComponent, StudioGameConfig } from '@/lib/useStudioGame';
 import { StudioSimulationResult } from '@/lib/studioDifficultyEngine';
+import { computeParMoves } from '@/lib/useStudioGame';
 import { DIFFICULTY_COLORS } from './types';
 
 function clamp01(v: number): number {
@@ -257,6 +258,7 @@ function FormulaBreakdown({ params, score }: { params: StudioDifficultyParams; s
 export function DifficultyAnalysis({
   difficultyResult,
   difficultyParams,
+  studioGameConfig,
   maxSelectableItems,
   blockingOffset,
   waitingStandSlots,
@@ -272,6 +274,8 @@ export function DifficultyAnalysis({
   onWaitingStandSlotsChange,
   onActiveLauncherCountChange,
   onSeedChange,
+  moveLimit,
+  onMoveLimitChange,
   onToggleParameterLock,
   onEasier,
   onHarder,
@@ -280,6 +284,7 @@ export function DifficultyAnalysis({
 }: {
   difficultyResult: StudioDifficultyResult | null;
   difficultyParams: StudioDifficultyParams | null;
+  studioGameConfig: StudioGameConfig | null;
   maxSelectableItems: number;
   blockingOffset: number;
   waitingStandSlots: number;
@@ -295,6 +300,8 @@ export function DifficultyAnalysis({
   onWaitingStandSlotsChange: (v: number) => void;
   onActiveLauncherCountChange: (v: number) => void;
   onSeedChange: (v: number | undefined) => void;
+  moveLimit: number | undefined;
+  onMoveLimitChange: (v: number | undefined) => void;
   onToggleParameterLock: (key: ParameterLockKey) => void;
   onEasier: () => void;
   onHarder: () => void;
@@ -306,6 +313,11 @@ export function DifficultyAnalysis({
   const unlockDistance = maxSelectableItems * 2 + blockingOffset;
 
   const [isExpanded, setIsExpanded] = useState(false);
+
+  const parMoves = useMemo(() => {
+    if (!studioGameConfig) return null;
+    return computeParMoves(studioGameConfig);
+  }, [studioGameConfig]);
 
   if (!difficultyResult) {
     return null;
@@ -329,6 +341,16 @@ export function DifficultyAnalysis({
             {score} ({tier})
           </Badge>
           <span className="text-[10px] text-muted-foreground">Unlock {unlockDistance}</span>
+          {parMoves !== null && (
+            <span className="text-[10px] text-muted-foreground">
+              Par {parMoves}
+            </span>
+          )}
+          {moveLimit !== undefined && (
+            <span className="text-[10px] text-muted-foreground">
+              Limit {moveLimit}
+            </span>
+          )}
           <div className="ml-auto flex items-center gap-1">
             <Button variant="outline" size="sm" onClick={onEasier} className="h-6 px-2 text-[10px]">
               <TrendingDown className="h-3 w-3 mr-0.5" />
@@ -405,25 +427,36 @@ export function DifficultyAnalysis({
           </div>
 
           {/* Simulation Results */}
-          {simulationResult && (
+          {/* Move Stats (par + simulation) */}
+          {(parMoves !== null || simulationResult) && (
             <div className="p-2 bg-muted/30 rounded-lg space-y-1">
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Win Rate</span>
-                <span className="font-mono">{Math.round(simulationResult.winRate * 100)}% ({Math.round(simulationResult.confidenceInterval[0] * 100)}-{Math.round(simulationResult.confidenceInterval[1] * 100)}%)</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Avg Moves</span>
-                <span className="font-mono">{Math.round(simulationResult.avgMoves)}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Peak Stand</span>
-                <span className="font-mono">{simulationResult.peakStandUsage}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Near-Loss Rate</span>
-                <span className="font-mono">{Math.round(simulationResult.nearLossRate * 100)}%</span>
-              </div>
-              <div className="text-[10px] text-muted-foreground text-right">{simulationResult.runs} runs</div>
+              {parMoves !== null && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">Par (Best Possible)</span>
+                  <span className="font-mono font-medium">{parMoves} moves</span>
+                </div>
+              )}
+              {simulationResult && (
+                <>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Win Rate</span>
+                    <span className="font-mono">{Math.round(simulationResult.winRate * 100)}% ({Math.round(simulationResult.confidenceInterval[0] * 100)}-{Math.round(simulationResult.confidenceInterval[1] * 100)}%)</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Moves (min / avg / max)</span>
+                    <span className="font-mono">{simulationResult.minMoves} / {Math.round(simulationResult.avgMoves)} / {simulationResult.maxMoves}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Peak Stand</span>
+                    <span className="font-mono">{simulationResult.peakStandUsage}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Near-Loss Rate</span>
+                    <span className="font-mono">{Math.round(simulationResult.nearLossRate * 100)}%</span>
+                  </div>
+                  <div className="text-[10px] text-muted-foreground text-right">{simulationResult.runs} runs</div>
+                </>
+              )}
             </div>
           )}
 
@@ -445,6 +478,32 @@ export function DifficultyAnalysis({
 
           {/* Extra controls */}
           <div className="space-y-2 pt-1 border-t border-border">
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Move Limit</span>
+                <span className="font-mono">{moveLimit ?? 'none'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  value={moveLimit ?? ''}
+                  onChange={(e) => { const val = e.target.value; onMoveLimitChange(val === '' ? undefined : Math.max(1, Number(val) || 1)); }}
+                  placeholder="Unlimited"
+                  className="h-7 text-xs flex-1"
+                />
+                {parMoves !== null && (
+                  <Button variant="outline" size="sm" className="h-7 text-[10px] px-2" onClick={() => onMoveLimitChange(parMoves)} title="Set to par">
+                    Par ({parMoves})
+                  </Button>
+                )}
+                {moveLimit !== undefined && (
+                  <Button variant="ghost" size="sm" className="h-7 text-[10px] px-2" onClick={() => onMoveLimitChange(undefined)}>
+                    Clear
+                  </Button>
+                )}
+              </div>
+            </div>
             <div className="space-y-1">
               <SliderHeading label="Backup Slots" value={`${waitingStandSlots} (fixed)`} />
               <Slider value={[waitingStandSlots]} min={3} max={7} step={1} disabled onValueChange={([v]) => onWaitingStandSlotsChange(v)} />

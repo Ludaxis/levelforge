@@ -38,6 +38,8 @@ export interface DifficultyRecipe {
 export interface StudioSimulationResult {
   winRate: number;             // 0-1
   avgMoves: number;
+  minMoves: number;            // fewest moves in any winning run
+  maxMoves: number;            // most moves in any winning run
   peakStandUsage: number;
   nearLossRate: number;        // fraction of wins where stand was >= slots-1
   confidenceInterval: [number, number]; // Wilson 95% CI
@@ -199,7 +201,9 @@ export function simulateStudioGame(
   const rng = mulberry32(recipe.seed ^ 0xCAFEBABE); // Different stream from tile gen
 
   let wins = 0;
-  let totalMoves = 0;
+  let totalWinMoves = 0;
+  let minWinMoves = Infinity;
+  let maxWinMoves = 0;
   let maxPeakStand = 0;
   let nearLosses = 0;
 
@@ -208,19 +212,23 @@ export function simulateStudioGame(
     if (result.won) {
       wins++;
       if (result.nearLoss) nearLosses++;
+      totalWinMoves += result.moves;
+      minWinMoves = Math.min(minWinMoves, result.moves);
+      maxWinMoves = Math.max(maxWinMoves, result.moves);
     }
-    totalMoves += result.moves;
     maxPeakStand = Math.max(maxPeakStand, result.peakStand);
   }
 
   const winRate = wins / runs;
-  const avgMoves = totalMoves / runs;
+  const avgMoves = wins > 0 ? totalWinMoves / wins : 0;
   const nearLossRate = wins > 0 ? nearLosses / wins : 0;
   const ci = wilsonCI(wins, runs);
 
   return {
     winRate,
     avgMoves,
+    minMoves: wins > 0 ? minWinMoves : 0,
+    maxMoves: maxWinMoves,
     peakStandUsage: maxPeakStand,
     nearLossRate,
     confidenceInterval: ci,

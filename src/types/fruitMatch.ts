@@ -267,6 +267,7 @@ export interface DesignedFruitMatchLevel {
   studioWaitingStandSlots?: number;
   studioActiveLauncherCount?: number;
   studioSeed?: number;
+  studioMoveLimit?: number;
 }
 
 // ============================================================================

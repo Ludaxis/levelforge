@@ -29,6 +29,8 @@ import {
   StudioGameConfig,
   buildPreviewState,
   findMaxSolvableBlockingOffset,
+  computeParMoves,
+  resolveBlockingOffset,
 } from '@/lib/useStudioGame';
 import {
   targetDifficulty,
@@ -109,6 +111,9 @@ export function LevelDesignerV2({
   // Item Pool
   const [selectableItems, setSelectableItems] = useState<StudioSelectableItem[]>([]);
   const [maxSelectableItems, setMaxSelectableItems] = useState(10);
+  // Track items the designer explicitly pinned to a layer (dropdown override).
+  // The sync effect skips these so the user's choice isn't overwritten.
+  const [pinnedItemIds, setPinnedItemIds] = useState<Set<string>>(new Set());
 
   // Difficulty
   const [waitingStandSlots, setWaitingStandSlots] = useState(5);
@@ -116,6 +121,7 @@ export function LevelDesignerV2({
   const [sinkWidth, setSinkWidth] = useState(6);
   const [blockingOffset, setBlockingOffset] = useState(0);
   const [seed, setSeed] = useState<number | undefined>(undefined);
+  const [moveLimit, setMoveLimit] = useState<number | undefined>(undefined);
   const [simulationResult, setSimulationResult] = useState<StudioSimulationResult | null>(null);
   const [isTargeting, setIsTargeting] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
@@ -272,13 +278,47 @@ export function LevelDesignerV2({
       blockingOffset,
       colorTypeToHex,
       seed,
+      moveLimit,
     };
-  }, [pixelCellArray, artWidth, artHeight, maxSelectableItems, waitingStandSlots, itemsWithLayers, launchers, activeLauncherCount, blockingOffset, colorTypeToHex, seed]);
+  }, [pixelCellArray, artWidth, artHeight, maxSelectableItems, waitingStandSlots, itemsWithLayers, launchers, activeLauncherCount, blockingOffset, colorTypeToHex, seed, moveLimit]);
 
   const arrangementPreviewState = useMemo(() => {
     if (!studioGameConfig) return null;
     return buildPreviewState(studioGameConfig);
   }, [studioGameConfig]);
+
+  // Par moves (greedy solver — minimum moves for perfect play)
+  const parMoves = useMemo(() => {
+    if (!studioGameConfig) return null;
+    return computeParMoves(studioGameConfig);
+  }, [studioGameConfig]);
+
+  // Live simulation — deferred to avoid blocking render.
+  // Runs after a short debounce when config changes.
+  const [liveSimResult, setLiveSimResult] = useState<StudioSimulationResult | null>(null);
+  const liveSimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!studioGameConfig || launchers.length === 0) {
+      setLiveSimResult(null);
+      return;
+    }
+    // Debounce: wait 300ms after last config change before running simulation
+    if (liveSimTimerRef.current) clearTimeout(liveSimTimerRef.current);
+    liveSimTimerRef.current = setTimeout(() => {
+      const bo = resolveBlockingOffset(studioGameConfig);
+      const result = simulateStudioGame(studioGameConfig, {
+        blockingOffset: bo,
+        maxSelectableItems: studioGameConfig.maxSelectableItems,
+        activeLauncherCount: studioGameConfig.activeLauncherCount ?? 2,
+        seed: studioGameConfig.seed ?? 42,
+      }, 100);
+      setLiveSimResult(result);
+    }, 300);
+    return () => {
+      if (liveSimTimerRef.current) clearTimeout(liveSimTimerRef.current);
+    };
+  }, [studioGameConfig, launchers.length]);
 
   // Sync Item Pool layer assignments from the arrangement preview.
   // Only syncs the LAYER field (A/B/C), not the order — changing order
@@ -310,6 +350,8 @@ export function LevelDesignerV2({
       const sorted = [...prev].sort((a, b) => a.order - b.order);
       let changed = false;
       const updated = sorted.map((item, idx) => {
+        // Skip items the designer explicitly pinned — their layer is intentional
+        if (pinnedItemIds.has(item.id)) return item;
         const newLayer = idxToLayer.get(idx);
         if (newLayer && newLayer !== item.layer) {
           changed = true;
@@ -319,7 +361,7 @@ export function LevelDesignerV2({
       });
       return changed ? updated : prev;
     });
-  }, [arrangementPreviewState]);
+  }, [arrangementPreviewState, pinnedItemIds]);
 
   // Compute display order for Item Pool from the arrangement sequence.
   // This makes the Item Pool show items in the same order as the arrangement
@@ -448,6 +490,8 @@ export function LevelDesignerV2({
           setWaitingStandSlots(5);
           setActiveLauncherCount(2);
           setSeed(undefined);
+          setMoveLimit(undefined);
+          setPinnedItemIds(new Set());
 
           // Extract level number from filename
           const match = file.name.match(/level[_-]?(\d+)/i);
@@ -542,21 +586,29 @@ export function LevelDesignerV2({
               : 2,
           );
           setSeed(typeof rawData.Seed === 'number' ? rawData.Seed : undefined);
+          setMoveLimit(typeof rawData.MoveLimit === 'number' ? rawData.MoveLimit : undefined);
+          setPinnedItemIds(new Set());
 
           // Build selectable items — use Layer field if present, otherwise compute from position
           const hasLayerField = result.selectableItems.some((si) => si.Layer !== undefined && si.Layer !== null);
-          const newItems: StudioSelectableItem[] = result.selectableItems.map((si, idx) => {
-            const layer: 'A' | 'B' | 'C' = hasLayerField
-              ? (si.Layer === 1 ? 'B' : si.Layer === 2 ? 'C' : 'A')
-              : (idx < importedMaxItems ? 'A' : idx < 2 * importedMaxItems ? 'B' : 'C');
-            return {
-              id: uid('item'),
-              colorType: si.ColorType,
-              variant: (si as unknown as Record<string, unknown>).Variant as number ?? 0,
-              layer,
-              order: idx,
-            };
-          });
+          const newItems: StudioSelectableItem[] = result.selectableItems
+            .map((si, idx) => {
+              const layer: 'A' | 'B' | 'C' = hasLayerField
+                ? (si.Layer === 1 ? 'B' : si.Layer === 2 ? 'C' : 'A')
+                : (idx < importedMaxItems ? 'A' : idx < 2 * importedMaxItems ? 'B' : 'C');
+              const importedOrder = typeof si.Order === 'number'
+                ? Math.max(0, Math.round(si.Order))
+                : idx;
+              return {
+                id: uid('item'),
+                colorType: si.ColorType,
+                variant: (si as unknown as Record<string, unknown>).Variant as number ?? 0,
+                layer,
+                order: importedOrder,
+              };
+            })
+            .sort((a, b) => a.order - b.order)
+            .map((item, idx) => ({ ...item, order: idx }));
           setSelectableItems(newItems);
 
           // Build palette from color data
@@ -600,6 +652,8 @@ export function LevelDesignerV2({
               : 2,
           );
           setSeed(typeof data.Seed === 'number' ? data.Seed : undefined);
+          setMoveLimit(typeof data.MoveLimit === 'number' ? data.MoveLimit : undefined);
+          setPinnedItemIds(new Set());
 
           const map = new Map<string, StudioPixelCell>();
           const groupMap = new Map<number, StudioGroup>();
@@ -664,13 +718,16 @@ export function LevelDesignerV2({
           const layerNames: Record<number, 'A' | 'B' | 'C'> = { 0: 'A', 1: 'B', 2: 'C' };
           const si = data.SelectableItems || [];
           setSelectableItems(
-            si.map((item: { ColorType: number; Variant: number; Layer: number }, idx: number) => ({
-              id: uid('item'),
-              colorType: item.ColorType,
-              variant: item.Variant ?? 0,
-              layer: layerNames[item.Layer] || 'A',
-              order: idx,
-            })),
+            si
+              .map((item: { ColorType: number; Variant: number; Layer: number; Order?: number }, idx: number) => ({
+                id: uid('item'),
+                colorType: item.ColorType,
+                variant: item.Variant ?? 0,
+                layer: layerNames[item.Layer] || 'A',
+                order: typeof item.Order === 'number' ? Math.max(0, Math.round(item.Order)) : idx,
+              }))
+              .sort((a: StudioSelectableItem, b: StudioSelectableItem) => a.order - b.order)
+              .map((item: StudioSelectableItem, idx: number) => ({ ...item, order: idx })),
           );
 
           // Parse LevelId (e.g. "Level1_1") for position + variant
@@ -931,6 +988,8 @@ export function LevelDesignerV2({
     setSelectableItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, layer } : item)),
     );
+    // Mark this item as explicitly pinned so the sync effect doesn't overwrite it
+    setPinnedItemIds((prev) => new Set(prev).add(id));
   }, []);
 
   const handleReorderItem = useCallback((fromIndex: number, toIndex: number) => {
@@ -1062,6 +1121,7 @@ export function LevelDesignerV2({
         variant: item.variant,
         layer: item.layer,
         order: item.order,
+        displayOrder: itemDisplayOrder?.get(item.id),
       })),
       requirements: launchers
         .sort((a, b) => a.order - b.order)
@@ -1086,6 +1146,7 @@ export function LevelDesignerV2({
       mismatchDepth: blockingOffset / 10,
       waitingStandSlots,
       activeLauncherCount,
+      moveLimit,
     };
 
     const result = exportStudioLevel(exportData);
@@ -1096,7 +1157,7 @@ export function LevelDesignerV2({
     a.download = `${fileName.trim() || levelId}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [palette, levelId, levelNumber, fileName, difficultyResult, artWidth, artHeight, pixelArray, itemsWithLayers, launchers, groups, maxSelectableItems, seed, blockingOffset, waitingStandSlots, activeLauncherCount]);
+  }, [palette, levelId, levelNumber, fileName, difficultyResult, artWidth, artHeight, pixelArray, itemsWithLayers, itemDisplayOrder, launchers, groups, maxSelectableItems, seed, blockingOffset, waitingStandSlots, activeLauncherCount]);
 
   const handleExportJSON = useCallback(() => {
     if (existingLevelIds.includes(levelId) && !editingLevel) {
@@ -1147,6 +1208,7 @@ export function LevelDesignerV2({
       studioWaitingStandSlots: waitingStandSlots,
       studioActiveLauncherCount: activeLauncherCount,
       studioSeed: seed,
+      studioMoveLimit: moveLimit,
     };
 
     onAddToCollection(designedLevel);
@@ -1165,6 +1227,7 @@ export function LevelDesignerV2({
     blockingOffset,
     activeLauncherCount,
     seed,
+    moveLimit,
     levelId,
     levelNumber,
     editingLevel,
@@ -1210,6 +1273,8 @@ export function LevelDesignerV2({
     setWaitingStandSlots(editingLevel.studioWaitingStandSlots ?? editingLevel.waitingStandSlots ?? 5);
     setActiveLauncherCount(editingLevel.studioActiveLauncherCount ?? 2);
     setSeed(editingLevel.studioSeed);
+    setMoveLimit(editingLevel.studioMoveLimit);
+    setPinnedItemIds(new Set());
 
     // Build pixel map
     const map = new Map<string, StudioPixelCell>();
@@ -1482,6 +1547,7 @@ export function LevelDesignerV2({
             <DifficultyAnalysis
               difficultyResult={difficultyResult}
               difficultyParams={studioDifficultyParams}
+              studioGameConfig={studioGameConfig}
               maxSelectableItems={maxSelectableItems}
               blockingOffset={blockingOffset}
               waitingStandSlots={waitingStandSlots}
@@ -1497,12 +1563,39 @@ export function LevelDesignerV2({
               onWaitingStandSlotsChange={setWaitingStandSlots}
               onActiveLauncherCountChange={setActiveLauncherCount}
               onSeedChange={setSeed}
+              moveLimit={moveLimit}
+              onMoveLimitChange={setMoveLimit}
               onToggleParameterLock={handleToggleParameterLock}
               onEasier={handleEasier}
               onHarder={handleHarder}
               onAutoTarget={handleAutoTarget}
               onSimulate={handleSimulate}
             />
+            {/* Move Stats */}
+            {(parMoves !== null || liveSimResult) && (
+              <div className="flex items-center gap-3 text-[11px] text-muted-foreground px-1 py-1.5 bg-muted/20 rounded-md">
+                {parMoves !== null && (
+                  <span>Par: <span className="font-mono text-foreground font-medium">{parMoves}</span></span>
+                )}
+                {liveSimResult && liveSimResult.minMoves > 0 && (
+                  <>
+                    <span className="text-border">|</span>
+                    <span>Min: <span className="font-mono text-foreground">{liveSimResult.minMoves}</span></span>
+                    <span>Avg: <span className="font-mono text-foreground">{Math.round(liveSimResult.avgMoves)}</span></span>
+                    <span>Max: <span className="font-mono text-foreground">{liveSimResult.maxMoves}</span></span>
+                    <span className="text-border">|</span>
+                    <span>Win: <span className="font-mono text-foreground">{Math.round(liveSimResult.winRate * 100)}%</span></span>
+                  </>
+                )}
+                {moveLimit !== undefined && (
+                  <>
+                    <span className="text-border">|</span>
+                    <span>Limit: <span className="font-mono text-foreground font-medium">{moveLimit}</span></span>
+                  </>
+                )}
+              </div>
+            )}
+
             <StudioArrangementPreview
               previewState={arrangementPreviewState}
               colorTypeToHex={colorTypeToHex}
