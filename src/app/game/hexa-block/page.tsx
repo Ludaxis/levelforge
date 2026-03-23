@@ -161,16 +161,16 @@ function HexaBlockPageContent() {
   };
 
   // Handle adding/updating level in collection
-  const handleAddToCollection = (level: DesignedLevel) => {
+  const handleAddToCollection = (level: DesignedLevel, collectionId?: string) => {
     if (editingLevel) {
-      // Update existing level
-      setLevels(levels.map(l => l.id === level.id ? level : l));
+      // Update existing level - use functional update to avoid stale closure
+      setLevels(prev => prev.map(l => l.id === level.id ? level : l));
       setEditingLevel(null);
     } else {
       // Add new level
       addLevel(level);
       // Auto-increment level number
-      setLevelNumber(levels.length + 2);
+      setLevelNumber(prev => prev + 1);
     }
   };
 
