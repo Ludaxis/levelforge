@@ -128,8 +128,8 @@ function FruitMatchPageContent() {
           </TabsTrigger>
         </TabsList>
 
-        {/* Design Tab (Studio) */}
-        <TabsContent value="design" className="h-[calc(100vh-200px)]">
+        {/* Design Tab (Studio) — forceMount keeps state alive across tab switches */}
+        <TabsContent value="design" forceMount className={`h-[calc(100vh-200px)] ${activeTab !== 'design' ? 'hidden' : ''}`}>
           <ErrorBoundary>
           <LevelDesignerV2
             onPlayLevel={() => {}}

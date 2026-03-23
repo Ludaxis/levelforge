@@ -500,8 +500,123 @@ export function LevelDesignerV2({
           if (match && onLevelNumberChange) {
             onLevelNumberChange(parseInt(match[1], 10));
           }
+        } else if (data.Palette && data.Artwork && data.SelectableItems) {
+          // Studio merged format (re-import from our own export — has Palette)
+          // This must be checked BEFORE isReferenceFormat because both have Artwork+SelectableItems
+          const studioData = data as Record<string, unknown>;
+          const height = (studioData.Artwork as { Height: number }).Height;
+          setArtWidth((studioData.Artwork as { Width: number }).Width);
+          setArtHeight(height);
+          setPalette((studioData.Palette as string[]) || []);
+          setMaxSelectableItems(Math.min((studioData.MaxSelectableItems as number) || 10, 20));
+          setBlockingOffset(
+            typeof studioData.BlockingOffset === 'number'
+              ? Math.max(0, Math.min(10, Math.round(studioData.BlockingOffset)))
+              : typeof studioData.MismatchDepth === 'number'
+                ? Math.max(0, Math.min(10, Math.round((studioData.MismatchDepth as number) * 10)))
+                : 0,
+          );
+          setWaitingStandSlots(
+            typeof studioData.WaitingStandSlots === 'number'
+              ? Math.max(3, Math.min(7, Math.round(studioData.WaitingStandSlots)))
+              : 5,
+          );
+          setActiveLauncherCount(
+            typeof studioData.ActiveLauncherCount === 'number'
+              ? Math.max(1, Math.min(3, Math.round(studioData.ActiveLauncherCount)))
+              : 2,
+          );
+          setSeed(typeof studioData.Seed === 'number' ? studioData.Seed : undefined);
+          setMoveLimit(typeof studioData.MoveLimit === 'number' ? studioData.MoveLimit : undefined);
+          setPinnedItemIds(new Set());
+
+          const map = new Map<string, StudioPixelCell>();
+          const groupMap = new Map<number, StudioGroup>();
+          const artworkData = studioData.Artwork as { PixelData: { Position: { x: number; y: number }; ColorType: number; ColorGroup?: number; Group: number; ColorHex: string }[] };
+
+          for (const pixel of artworkData.PixelData) {
+            const flippedRow = (height - 1) - pixel.Position.y;
+            const fruitType = COLOR_TYPE_TO_FRUIT[pixel.ColorType] || 'apple';
+            const sp: StudioPixelCell = {
+              row: flippedRow,
+              col: pixel.Position.x,
+              colorType: pixel.ColorType,
+              colorGroup: pixel.ColorGroup ?? pixel.ColorType,
+              colorHex: pixel.ColorHex,
+              group: pixel.Group,
+              fruitType,
+            };
+            map.set(`${flippedRow},${pixel.Position.x}`, sp);
+
+            const existing = groupMap.get(pixel.Group);
+            if (existing) {
+              existing.pixelsByColor[pixel.ColorType] = (existing.pixelsByColor[pixel.ColorType] || 0) + 1;
+              existing.totalPixels++;
+            } else {
+              groupMap.set(pixel.Group, {
+                id: pixel.Group,
+                name: `Group ${pixel.Group}`,
+                pixelsByColor: { [pixel.ColorType]: 1 },
+                totalPixels: 1,
+              });
+            }
+          }
+          setPixels(map);
+          setGroups(Array.from(groupMap.values()).sort((a, b) => a.id - b.id));
+
+          // Launchers — prefer Launchers array (preserves order+splits), fall back to Requirements
+          const rawLaunchers = studioData.Launchers as { ColorType: number; Value: number; Group: number; Order: number; IsLocked: boolean }[] | undefined;
+          if (rawLaunchers && Array.isArray(rawLaunchers)) {
+            setLaunchers(
+              rawLaunchers.map((l, idx) => ({
+                id: uid('launcher'),
+                colorType: l.ColorType,
+                pixelCount: l.Value,
+                group: l.Group,
+                isLocked: l.IsLocked ?? idx >= 2,
+                order: l.Order ?? idx,
+              })),
+            );
+          } else {
+            const reqs = (studioData.Requirements as { ColorType: number; Value: number; Group: number }[]) || [];
+            setLaunchers(
+              reqs.map((r, idx) => ({
+                id: uid('launcher'),
+                colorType: r.ColorType,
+                pixelCount: r.Value,
+                group: r.Group,
+                isLocked: idx >= 2,
+                order: idx,
+              })),
+            );
+          }
+
+          // Items from SelectableItems — preserves layer, variant, and order
+          const layerNames: Record<number, 'A' | 'B' | 'C'> = { 0: 'A', 1: 'B', 2: 'C' };
+          const si = (studioData.SelectableItems as { ColorType: number; Variant: number; Layer: number; Order?: number }[]) || [];
+          setSelectableItems(
+            si
+              .map((item, idx) => ({
+                id: uid('item'),
+                colorType: item.ColorType,
+                variant: item.Variant ?? 0,
+                layer: layerNames[item.Layer] || 'A',
+                order: typeof item.Order === 'number' ? Math.max(0, Math.round(item.Order)) : idx,
+              }))
+              .sort((a, b) => a.order - b.order)
+              .map((item, idx) => ({ ...item, order: idx })),
+          );
+
+          // Parse LevelId
+          const studioLevelIdMatch = (studioData.LevelId as string)?.match(/^Level(\d+)_(\d+)$/);
+          if (studioLevelIdMatch) {
+            if (onLevelNumberChange) onLevelNumberChange(parseInt(studioLevelIdMatch[1], 10));
+            setLevelVariant(parseInt(studioLevelIdMatch[2], 10));
+          } else if (onLevelNumberChange && studioData.LevelIndex) {
+            onLevelNumberChange(studioData.LevelIndex as number);
+          }
         } else if (isReferenceFormat(data)) {
-          // Reference level format (has SelectableItems)
+          // Reference level format (no Palette — older format or external tool)
           const result = importFromReferenceFormat(data);
           setArtWidth(result.pixelArtWidth);
           setArtHeight(result.pixelArtHeight);
@@ -628,117 +743,6 @@ export function LevelDesignerV2({
             if (match && onLevelNumberChange) {
               onLevelNumberChange(parseInt(match[1], 10));
             }
-          }
-        } else if (data.Palette && data.Artwork && data.SelectableItems) {
-          // Studio merged format (re-import)
-          const height = data.Artwork.Height;
-          setArtWidth(data.Artwork.Width);
-          setArtHeight(height);
-          setPalette(data.Palette || []);
-          setMaxSelectableItems(Math.min(data.MaxSelectableItems || 10, 20));
-          setBlockingOffset(
-            typeof data.BlockingOffset === 'number'
-              ? Math.max(0, Math.min(10, Math.round(data.BlockingOffset)))
-              : typeof data.MismatchDepth === 'number'
-                ? Math.max(0, Math.min(10, Math.round(data.MismatchDepth * 10)))
-                : 0,
-          );
-          setWaitingStandSlots(
-            typeof data.WaitingStandSlots === 'number'
-              ? Math.max(3, Math.min(7, Math.round(data.WaitingStandSlots)))
-              : 5,
-          );
-          setActiveLauncherCount(
-            typeof data.ActiveLauncherCount === 'number'
-              ? Math.max(1, Math.min(3, Math.round(data.ActiveLauncherCount)))
-              : 2,
-          );
-          setSeed(typeof data.Seed === 'number' ? data.Seed : undefined);
-          setMoveLimit(typeof data.MoveLimit === 'number' ? data.MoveLimit : undefined);
-          setPinnedItemIds(new Set());
-
-          const map = new Map<string, StudioPixelCell>();
-          const groupMap = new Map<number, StudioGroup>();
-
-          for (const pixel of data.Artwork.PixelData) {
-            const flippedRow = (height - 1) - pixel.Position.y;
-            const fruitType = COLOR_TYPE_TO_FRUIT[pixel.ColorType] || 'apple';
-            const sp: StudioPixelCell = {
-              row: flippedRow,
-              col: pixel.Position.x,
-              colorType: pixel.ColorType,
-              colorGroup: pixel.ColorGroup ?? pixel.ColorType,
-              colorHex: pixel.ColorHex,
-              group: pixel.Group,
-              fruitType,
-            };
-            map.set(`${flippedRow},${pixel.Position.x}`, sp);
-
-            const existing = groupMap.get(pixel.Group);
-            if (existing) {
-              existing.pixelsByColor[pixel.ColorType] = (existing.pixelsByColor[pixel.ColorType] || 0) + 1;
-              existing.totalPixels++;
-            } else {
-              groupMap.set(pixel.Group, {
-                id: pixel.Group,
-                name: `Group ${pixel.Group}`,
-                pixelsByColor: { [pixel.ColorType]: 1 },
-                totalPixels: 1,
-              });
-            }
-          }
-          setPixels(map);
-          setGroups(Array.from(groupMap.values()).sort((a, b) => a.id - b.id));
-
-          // Launchers — prefer Launchers array (preserves splits), fall back to Requirements
-          if (data.Launchers && Array.isArray(data.Launchers)) {
-            setLaunchers(
-              data.Launchers.map((l: { ColorType: number; Value: number; Group: number; Order: number; IsLocked: boolean }, idx: number) => ({
-                id: uid('launcher'),
-                colorType: l.ColorType,
-                pixelCount: l.Value,
-                group: l.Group,
-                isLocked: l.IsLocked ?? idx >= 2,
-                order: l.Order ?? idx,
-              })),
-            );
-          } else {
-            const reqs = data.Requirements || [];
-            setLaunchers(
-              reqs.map((r: { ColorType: number; Value: number; Group: number }, idx: number) => ({
-                id: uid('launcher'),
-                colorType: r.ColorType,
-                pixelCount: r.Value,
-                group: r.Group,
-                isLocked: idx >= 2,
-                order: idx,
-              })),
-            );
-          }
-
-          // Items from SelectableItems
-          const layerNames: Record<number, 'A' | 'B' | 'C'> = { 0: 'A', 1: 'B', 2: 'C' };
-          const si = data.SelectableItems || [];
-          setSelectableItems(
-            si
-              .map((item: { ColorType: number; Variant: number; Layer: number; Order?: number }, idx: number) => ({
-                id: uid('item'),
-                colorType: item.ColorType,
-                variant: item.Variant ?? 0,
-                layer: layerNames[item.Layer] || 'A',
-                order: typeof item.Order === 'number' ? Math.max(0, Math.round(item.Order)) : idx,
-              }))
-              .sort((a: StudioSelectableItem, b: StudioSelectableItem) => a.order - b.order)
-              .map((item: StudioSelectableItem, idx: number) => ({ ...item, order: idx })),
-          );
-
-          // Parse LevelId (e.g. "Level1_1") for position + variant
-          const studioLevelIdMatch = data.LevelId?.match(/^Level(\d+)_(\d+)$/);
-          if (studioLevelIdMatch) {
-            if (onLevelNumberChange) onLevelNumberChange(parseInt(studioLevelIdMatch[1], 10));
-            setLevelVariant(parseInt(studioLevelIdMatch[2], 10));
-          } else if (onLevelNumberChange && data.LevelIndex) {
-            onLevelNumberChange(data.LevelIndex);
           }
         } else {
           alert('Unsupported JSON format. Expected full pixel art, reference, or studio format.');

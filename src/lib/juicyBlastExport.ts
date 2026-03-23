@@ -672,6 +672,8 @@ export interface StudioExportLevel {
   WaitingStandSlots?: number;
   ActiveLauncherCount?: number;
   MoveLimit?: number;
+  /** Palette enables full round-trip re-import via the studio format path. */
+  Palette?: string[];
   Artwork: {
     Width: number;
     Height: number;
@@ -784,6 +786,7 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
     WaitingStandSlots: data.waitingStandSlots,
     ActiveLauncherCount: data.activeLauncherCount,
     MoveLimit: data.moveLimit,
+    Palette: data.palette,
     Artwork: {
       Width: data.width,
       Height: data.height,
