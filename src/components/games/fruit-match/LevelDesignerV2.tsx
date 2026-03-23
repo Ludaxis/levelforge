@@ -85,7 +85,7 @@ export function LevelDesignerV2({
   onAddToCollection,
   levelNumber = 1,
   onLevelNumberChange,
-  maxLevelNumber = 100,
+  maxLevelNumber = 10000,
   editingLevel,
   existingLevelIds = [],
 }: LevelDesignerV2Props) {
@@ -200,6 +200,7 @@ export function LevelDesignerV2({
     const uniqueColors = new Set(pixelArray.map((p) => p.colorType)).size;
     const groupCount = groups.length;
     const totalTiles = selectableItems.length;
+    const uniqueVariants = new Set(selectableItems.map((s) => `${s.colorType}:${s.variant}`)).size;
     return {
       totalPixels: pixelArray.length,
       uniqueColors,
@@ -208,6 +209,7 @@ export function LevelDesignerV2({
       maxSelectableItems,
       totalTiles,
       blockingOffset,
+      uniqueVariants,
     };
   }, [pixelArray, launchers, groups.length, selectableItems, maxSelectableItems, blockingOffset]);
 

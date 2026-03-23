@@ -136,7 +136,7 @@ function FruitMatchPageContent() {
             onAddToCollection={handleAddToCollection}
             levelNumber={levelNumber}
             onLevelNumberChange={setLevelNumber}
-            maxLevelNumber={100}
+            maxLevelNumber={10000}
             editingLevel={editingLevel}
             existingLevelIds={levels.map((l) => l.name)}
           />

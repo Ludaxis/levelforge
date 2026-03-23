@@ -13,6 +13,9 @@ export interface StudioDifficultyParams {
   maxSelectableItems: number;
   totalTiles: number;
   blockingOffset?: number; // 0-10: how many blocker items extend the unlock window
+  /** Total unique (colorType, variant) pairs in the item pool.
+   *  When omitted, variant complexity is assumed to be 0 (1 variant per color). */
+  uniqueVariants?: number;
   /** @deprecated Legacy field preserved for compatibility with older saved levels/tests. */
   mismatchDepth?: number;
 }
@@ -68,6 +71,7 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
     launcherCount,
     maxSelectableItems,
     totalTiles,
+    uniqueVariants,
   } = params;
   const blockingOffset = resolveBlockingOffset(params);
 
@@ -76,31 +80,41 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
   // 0 = no extra blockers beyond A+B, 10 = maximum burial into Layer C.
   const blockingFactor = blockingOffsetToDepth(blockingOffset);
 
-  // ── 2. Color Variety (0.10) ─────────────────────────────────────────
+  // ── 2. Color Variety (0.08) ───────────────────────────────────────
   // More distinct fruit colors = harder to spot matching triplets
   const colorVariety = clamp01((uniqueColors - 2) / 5);
 
-  // ── 3. Surface Size (0.25) ──────────────────────────────────────────
+  // ── 3. Surface Size (0.22) ──────────────────────────────────────────
   // How many items are visible on Layer A? Fewer = fewer choices per move
   const surfaceSize = clamp01(1 - (maxSelectableItems - 1) / 19);
 
-  // ── 4. Hidden Ratio (0.15) ──────────────────────────────────────────
+  // ── 4. Hidden Ratio (0.13) ──────────────────────────────────────────
   // What fraction of items sit below the surface (Layer B + C)?
   // More hidden items = less information to plan with
   const hiddenRatio = totalTiles > 0
     ? clamp01((totalTiles - maxSelectableItems) / totalTiles)
     : 0;
 
-  // ── 5. Launcher Sequence (0.10) ─────────────────────────────────────
+  // ── 5. Launcher Sequence (0.09) ─────────────────────────────────────
   // Total launchers the player must complete
   const launcherSequence = clamp01((launcherCount - 4) / 12);
 
+  // ── 6. Variant Complexity (0.08) ────────────────────────────────────
+  // How many different variants per color are used?
+  // 1 variant/color = 0 (match by color only), 3 variants/color = 1 (must
+  // distinguish between e.g. Blueberry, Fig, and Grape within the blue color).
+  const avgVariantsPerColor = (uniqueVariants != null && uniqueColors > 0)
+    ? uniqueVariants / uniqueColors
+    : 1;
+  const variantComplexity = clamp01((avgVariantsPerColor - 1) / 2);
+
   const raw =
     blockingFactor * 0.40 +
-    colorVariety * 0.10 +
-    surfaceSize * 0.25 +
-    hiddenRatio * 0.15 +
-    launcherSequence * 0.10;
+    colorVariety * 0.08 +
+    surfaceSize * 0.22 +
+    hiddenRatio * 0.13 +
+    launcherSequence * 0.09 +
+    variantComplexity * 0.08;
 
   const score = Math.round(raw * 100);
 
@@ -122,6 +136,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
   function impactOf(v: number): 'easy' | 'medium' | 'hard' {
     return v < 0.3 ? 'easy' : v < 0.6 ? 'medium' : 'hard';
   }
+
+  const usedVariants = uniqueVariants ?? uniqueColors;
 
   const breakdown: DifficultyComponent[] = [
     {
@@ -145,8 +161,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Surface Size',
       description: 'Number of fruits visible on top (Layer A) — how many choices the player has per move',
       score: surfaceSize,
-      weight: 0.25,
-      contribution: surfaceSize * 0.25,
+      weight: 0.22,
+      contribution: surfaceSize * 0.22,
       explanation: maxSelectableItems >= 10
         ? `${maxSelectableItems} fruits on surface — player has many options to choose from.`
         : maxSelectableItems >= 6
@@ -159,8 +175,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Hidden Items',
       description: 'Fruits below the surface: Layer B (dimmed, visible as hint) and Layer C (fully hidden)',
       score: hiddenRatio,
-      weight: 0.15,
-      contribution: hiddenRatio * 0.15,
+      weight: 0.13,
+      contribution: hiddenRatio * 0.13,
       explanation: layerCCount === 0
         ? `${layerBCount} fruits in Layer B (visible as hints), 0 in Layer C. Player can see everything and plan ahead.`
         : layerCCount <= 5
@@ -173,8 +189,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Color Quantity',
       description: 'Number of distinct fruit colors in the level',
       score: colorVariety,
-      weight: 0.10,
-      contribution: colorVariety * 0.10,
+      weight: 0.08,
+      contribution: colorVariety * 0.08,
       explanation: uniqueColors <= 3
         ? `${uniqueColors} colors — easy to spot matching triplets at a glance.`
         : uniqueColors <= 5
@@ -187,14 +203,28 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Blender Count',
       description: 'Total blenders to complete — determines level length and sustained concentration',
       score: launcherSequence,
-      weight: 0.10,
-      contribution: launcherSequence * 0.10,
+      weight: 0.09,
+      contribution: launcherSequence * 0.09,
       explanation: launcherCount <= 6
         ? `${launcherCount} blenders — short level, quick completion.`
         : launcherCount <= 12
         ? `${launcherCount} blenders — medium length. Requires sustained focus.`
         : `${launcherCount} blenders — long level. Player must maintain concentration over many rounds.`,
       impact: impactOf(launcherSequence),
+    },
+    {
+      id: 'variantComplexity',
+      name: 'Variant Complexity',
+      description: 'How many visual variants per color are used. More variants means the player must distinguish between similar-looking fruits of the same color (e.g. Blueberry vs Fig vs Grape).',
+      score: variantComplexity,
+      weight: 0.08,
+      contribution: variantComplexity * 0.08,
+      explanation: avgVariantsPerColor <= 1
+        ? `${usedVariants} variant${usedVariants === 1 ? '' : 's'} across ${uniqueColors} colors (1 per color) — matching by color alone is enough.`
+        : avgVariantsPerColor <= 2
+        ? `${usedVariants} variants across ${uniqueColors} colors (~${avgVariantsPerColor.toFixed(1)} per color) — player must sometimes distinguish between variants of the same color.`
+        : `${usedVariants} variants across ${uniqueColors} colors (~${avgVariantsPerColor.toFixed(1)} per color) — maximum variant confusion. Every color has multiple look-alikes.`,
+      impact: impactOf(variantComplexity),
     },
   ];
 

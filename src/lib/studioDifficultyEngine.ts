@@ -301,6 +301,7 @@ function initialRecipeFromTarget(targetScore: number, seed: number): DifficultyR
 /** Compute the difficulty score for a given recipe against a config. */
 function computeRecipeScore(config: StudioGameConfig, recipe: DifficultyRecipe): number {
   const uniqueColors = new Set(config.selectableItems.map((s) => s.colorType)).size;
+  const uniqueVariants = new Set(config.selectableItems.map((s) => `${s.colorType}:${s.variant}`)).size;
   return calculateStudioDifficulty({
     totalPixels: config.pixelArt.length,
     uniqueColors,
@@ -310,6 +311,7 @@ function computeRecipeScore(config: StudioGameConfig, recipe: DifficultyRecipe):
     totalTiles: config.selectableItems.length,
     blockingOffset: recipe.blockingOffset,
     mismatchDepth: recipe.mismatchDepth,
+    uniqueVariants,
   }).score;
 }
 
