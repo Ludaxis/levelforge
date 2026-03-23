@@ -88,6 +88,8 @@ interface FruitMatchCurveChartProps {
 
 type FlowZone = 'flow' | 'boredom' | 'frustration';
 
+type TargetMatch = 'on-target' | 'too-easy' | 'too-hard';
+
 interface ChartDataPoint {
   level: number;
   difficulty: number | null;       // actual designed difficulty (0-100)
@@ -96,7 +98,8 @@ interface ChartDataPoint {
   actualTier?: DifficultyTier;
   actualLevel?: DesignedFruitMatchLevel;
   isOnboarding: boolean;
-  flowZone?: FlowZone;
+  targetMatch?: TargetMatch;       // actual vs expected sawtooth (for main chart)
+  flowZone?: FlowZone;            // actual vs skill (for scatter plot only)
 }
 
 // ============================================================================
@@ -140,6 +143,15 @@ function scoreToTier(score: number): DifficultyTier {
   return 'nightmare';
 }
 
+/** Compare actual difficulty vs expected sawtooth — for main chart tooltip/dots. */
+function getTargetMatch(actual: number, expected: number): TargetMatch {
+  const diff = actual - expected;
+  if (diff > 10) return 'too-hard';
+  if (diff < -10) return 'too-easy';
+  return 'on-target';
+}
+
+/** Compare difficulty vs skill — for flow state scatter plot only. */
 function getFlowZone(difficulty: number, skill: number): FlowZone {
   const diff = difficulty - skill;
   if (diff > 15) return 'frustration';
@@ -408,9 +420,10 @@ export function FruitMatchCurveChart({
       const difficulty = actualLevel ? actualLevel.metrics.difficultyScore : null;
       const actualTier = difficulty !== null ? scoreToTier(difficulty) : undefined;
       const skillLevel = 10 + (levelNum - 1) * config.skillGrowthRate;
+      const targetMatch = difficulty !== null ? getTargetMatch(difficulty, expected) : undefined;
       const flowZone = difficulty !== null ? getFlowZone(difficulty, skillLevel) : undefined;
 
-      data.push({ level: levelNum, difficulty, expected, skillLevel, actualTier, actualLevel, isOnboarding, flowZone });
+      data.push({ level: levelNum, difficulty, expected, skillLevel, actualTier, actualLevel, isOnboarding, targetMatch, flowZone });
     }
 
     // Ensure all designed levels in range are included even when sampling
@@ -428,6 +441,7 @@ export function FruitMatchCurveChart({
             actualTier: scoreToTier(level.metrics.difficultyScore),
             actualLevel: level,
             isOnboarding,
+            targetMatch: getTargetMatch(level.metrics.difficultyScore, expected),
             flowZone: getFlowZone(level.metrics.difficultyScore, skillLevel),
           });
         }
@@ -481,11 +495,11 @@ export function FruitMatchCurveChart({
               Actual: <span className="font-mono">{d.difficulty}/100</span>
               <Badge className={`ml-1 scale-90 ${TIER_COLORS[d.actualTier!]}`}>{d.actualTier}</Badge>
             </p>
-            {d.flowZone && (
-              <p className="text-xs mt-1 font-medium" style={{ color: FLOW_ZONE_COLORS[d.flowZone] }}>
-                {d.flowZone === 'flow' && 'In Flow'}
-                {d.flowZone === 'boredom' && 'Too Easy'}
-                {d.flowZone === 'frustration' && 'Too Hard'}
+            {d.targetMatch && (
+              <p className="text-xs mt-1 font-medium" style={{ color: d.targetMatch === 'on-target' ? '#22c55e' : d.targetMatch === 'too-easy' ? '#06b6d4' : '#f97316' }}>
+                {d.targetMatch === 'on-target' && 'On Target'}
+                {d.targetMatch === 'too-easy' && 'Below Expected'}
+                {d.targetMatch === 'too-hard' && 'Above Expected'}
               </p>
             )}
           </>
@@ -601,16 +615,22 @@ export function FruitMatchCurveChart({
                 <Line type="monotone" dataKey="difficulty" stroke="#ffffff"
                   strokeWidth={2} dot={false} connectNulls name="Actual" />
 
-                {/* Dots for designed levels */}
+                {/* Dots for designed levels — fill = tier color, stroke = target match */}
                 <Scatter dataKey="difficulty" name="Levels">
-                  {chartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`}
-                      fill={entry.actualTier ? TIER_DOT_COLORS[entry.actualTier] : 'transparent'}
-                      stroke={entry.actualLevel ? '#ffffff' : 'transparent'}
-                      strokeWidth={entry.actualLevel ? 2 : 0}
-                      r={entry.actualLevel ? 5 : 0}
-                      cursor={entry.actualLevel ? 'pointer' : 'default'} />
-                  ))}
+                  {chartData.map((entry, index) => {
+                    const matchColor = entry.targetMatch === 'on-target' ? '#22c55e'
+                      : entry.targetMatch === 'too-easy' ? '#06b6d4'
+                      : entry.targetMatch === 'too-hard' ? '#f97316'
+                      : 'transparent';
+                    return (
+                      <Cell key={`cell-${index}`}
+                        fill={entry.actualTier ? TIER_DOT_COLORS[entry.actualTier] : 'transparent'}
+                        stroke={entry.actualLevel ? matchColor : 'transparent'}
+                        strokeWidth={entry.actualLevel ? 2.5 : 0}
+                        r={entry.actualLevel ? 5 : 0}
+                        cursor={entry.actualLevel ? 'pointer' : 'default'} />
+                    );
+                  })}
                 </Scatter>
               </ComposedChart>
             </ResponsiveContainer>
