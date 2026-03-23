@@ -18,11 +18,17 @@ import {
 import { pixelKey, migrateFruitType } from '@/lib/fruitMatchUtils';
 import {
   exportToReferenceFormat,
+  exportStudioLevel,
   importFromReferenceFormat,
   isReferenceFormat,
+  isStudioExportFormat,
+  importFromStudioExportFormat,
   ReferenceLevel,
+  StudioExportLevel,
   DIFFICULTY_TO_NUMBER,
   NUMBER_TO_DIFFICULTY,
+  COLOR_TYPE_TO_HEX,
+  FRUIT_TO_COLOR_TYPE,
 } from '@/lib/juicyBlastExport';
 import { useSyncedLevelCollection } from '@/lib/storage/useSyncedLevelCollection';
 import { SyncState } from '@/lib/storage/types';
@@ -363,9 +369,52 @@ export function FruitMatchLevelCollection({
     });
   };
 
+  // Export level in the best available format (studio if data exists, otherwise reference)
+  const levelToExportFormat = (level: DesignedFruitMatchLevel): ReferenceLevel | StudioExportLevel => {
+    if (level.studioSelectableItems && level.studioLaunchers) {
+      const height = level.pixelArtHeight;
+      return exportStudioLevel({
+        palette: [],
+        levelId: level.name,
+        levelIndex: level.levelNumber,
+        difficulty: level.metrics.difficulty,
+        graphicId: `graphic_${level.pixelArtWidth}x${level.pixelArtHeight}`,
+        width: level.pixelArtWidth,
+        height: level.pixelArtHeight,
+        pixels: level.pixelArt.map((cell) => {
+          const ct = cell.colorType ?? FRUIT_TO_COLOR_TYPE[cell.fruitType] ?? 0;
+          return {
+            row: cell.row,
+            col: cell.col,
+            colorType: ct,
+            colorGroup: cell.groupId ?? 0,
+            colorHex: cell.colorHex ?? COLOR_TYPE_TO_HEX[ct] ?? '000000',
+            group: cell.groupId ?? 0,
+          };
+        }),
+        selectableItems: level.studioSelectableItems,
+        requirements: level.studioLaunchers.map((l) => ({
+          colorType: l.colorType,
+          value: l.pixelCount,
+          group: l.group,
+        })),
+        launchers: level.studioLaunchers,
+        unlockStageData: [{ requiredCompletedGroups: Array.from(new Set(level.pixelArt.map(p => p.groupId ?? 0))) }],
+        maxSelectableItems: level.studioMaxSelectableItems ?? 15,
+        seed: level.studioSeed,
+        blockingOffset: level.studioBlockingOffset,
+        mismatchDepth: level.studioBlockingOffset != null ? level.studioBlockingOffset / 10 : undefined,
+        waitingStandSlots: level.studioWaitingStandSlots,
+        activeLauncherCount: level.studioActiveLauncherCount,
+        moveLimit: level.studioMoveLimit,
+      });
+    }
+    return levelToReferenceFormat(level);
+  };
+
   // Export single level as JSON (reference format)
   const handleExportLevel = (level: DesignedFruitMatchLevel) => {
-    const referenceLevel = levelToReferenceFormat(level);
+    const referenceLevel = levelToExportFormat(level);
     const dataStr = JSON.stringify(referenceLevel, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -376,9 +425,9 @@ export function FruitMatchLevelCollection({
     URL.revokeObjectURL(url);
   };
 
-  // Export all levels as single JSON file (array of reference format)
+  // Export all levels as single JSON file
   const handleExportAll = () => {
-    const referenceLevels = levels.map(levelToReferenceFormat);
+    const referenceLevels = levels.map(levelToExportFormat);
     const dataStr = JSON.stringify(referenceLevels, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -389,11 +438,11 @@ export function FruitMatchLevelCollection({
     URL.revokeObjectURL(url);
   };
 
-  // Export all levels as separate JSON files (reference format)
+  // Export all levels as separate JSON files
   const handleExportAllSeparate = async () => {
     for (let i = 0; i < levels.length; i++) {
       const level = levels[i];
-      const referenceLevel = levelToReferenceFormat(level);
+      const referenceLevel = levelToExportFormat(level);
       const dataStr = JSON.stringify(referenceLevel, null, 2);
       const blob = new Blob([dataStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -464,6 +513,66 @@ export function FruitMatchLevelCollection({
     };
   };
 
+  const studioToDesignedLevel = (studio: StudioExportLevel, levelNumber: number): DesignedFruitMatchLevel => {
+    const imported = importFromStudioExportFormat(studio);
+
+    const totalPixels = imported.pixelArt.length;
+    const fruitDistribution: Record<FruitType, number> = {
+      blueberry: 0, orange: 0, strawberry: 0, dragonfruit: 0, banana: 0,
+      apple: 0, plum: 0, pear: 0, blackberry: 0,
+    };
+    for (const cell of imported.pixelArt) {
+      fruitDistribution[cell.fruitType]++;
+    }
+
+    const uniqueFruitTypes = Object.values(fruitDistribution).filter(v => v > 0).length;
+    const waitingStandSlots = imported.waitingStandSlots ?? 7;
+    const totalTilesInSink = totalPixels * 3;
+
+    // Estimate difficulty from blockingOffset
+    const blockingOffset = imported.blockingOffset ?? 0;
+    const difficulty: DifficultyTier = blockingOffset <= 1 ? 'trivial' :
+      blockingOffset <= 3 ? 'easy' :
+      blockingOffset <= 5 ? 'medium' :
+      blockingOffset <= 7 ? 'hard' :
+      blockingOffset <= 9 ? 'expert' : 'nightmare';
+
+    return {
+      id: `level-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      name: `Level ${levelNumber}`,
+      levelNumber,
+      pixelArt: imported.pixelArt,
+      pixelArtWidth: imported.pixelArtWidth,
+      pixelArtHeight: imported.pixelArtHeight,
+      sinkWidth: 6,
+      sinkStacks: [],
+      waitingStandSlots,
+      metrics: {
+        totalPixels,
+        uniqueFruitTypes,
+        fruitDistribution,
+        totalTilesInSink,
+        waitingStandSlots,
+        estimatedMatches: totalPixels,
+        difficultyScore: difficulty === 'trivial' ? 15 :
+                        difficulty === 'easy' ? 30 :
+                        difficulty === 'medium' ? 45 :
+                        difficulty === 'hard' ? 60 :
+                        difficulty === 'expert' ? 75 : 90,
+        difficulty,
+      },
+      createdAt: Date.now(),
+      studioSelectableItems: imported.selectableItems,
+      studioLaunchers: imported.launchers,
+      studioMaxSelectableItems: imported.maxSelectableItems,
+      studioBlockingOffset: imported.blockingOffset,
+      studioWaitingStandSlots: imported.waitingStandSlots,
+      studioActiveLauncherCount: imported.activeLauncherCount,
+      studioSeed: imported.seed,
+      studioMoveLimit: imported.moveLimit,
+    };
+  };
+
   // Import collection from JSON (supports multiple file selection and reference format)
   const handleImport = () => {
     const input = document.createElement('input');
@@ -482,6 +591,14 @@ export function FruitMatchLevelCollection({
         try {
           const content = await file.text();
           const imported = JSON.parse(content);
+
+          // Check studio format BEFORE reference format (studio is a superset)
+          if (isStudioExportFormat(imported)) {
+            const match = file.name.match(/level[_-]?(\d+)/i);
+            const levelNumber = match ? parseInt(match[1], 10) : currentLevelNumber++;
+            newLevels.push(studioToDesignedLevel(imported, levelNumber));
+            continue;
+          }
 
           // Check if it's reference format (single level)
           if (isReferenceFormat(imported)) {
@@ -502,8 +619,10 @@ export function FruitMatchLevelCollection({
           // Handle array of levels
           if (Array.isArray(imported)) {
             for (const l of imported) {
-              // Check if array item is reference format
-              if (isReferenceFormat(l)) {
+              // Check studio format before reference format
+              if (isStudioExportFormat(l)) {
+                newLevels.push(studioToDesignedLevel(l, currentLevelNumber++));
+              } else if (isReferenceFormat(l)) {
                 newLevels.push(referenceToDesignedLevel(l, currentLevelNumber++));
               } else if (l.pixelArt) {
                 // Internal format

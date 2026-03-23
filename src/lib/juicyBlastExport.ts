@@ -248,6 +248,108 @@ export function isReferenceFormat(data: unknown): data is ReferenceLevel {
 }
 
 // ============================================================================
+// Check if JSON is studio export format (has Launchers + MaxSelectableItems)
+// ============================================================================
+
+export function isStudioExportFormat(data: unknown): data is StudioExportLevel {
+  if (!data || typeof data !== 'object') return false;
+  const obj = data as Record<string, unknown>;
+  return (
+    'Artwork' in obj &&
+    typeof obj.Artwork === 'object' &&
+    obj.Artwork !== null &&
+    'PixelData' in (obj.Artwork as Record<string, unknown>) &&
+    'SelectableItems' in obj &&
+    'Launchers' in obj &&
+    Array.isArray(obj.Launchers) &&
+    'MaxSelectableItems' in obj
+  );
+}
+
+// ============================================================================
+// Import from Studio Export Format
+// ============================================================================
+
+export function importFromStudioExportFormat(studio: StudioExportLevel): ImportedStudioLevel {
+  const height = studio.Artwork.Height;
+
+  const layerMap: Record<number, 'A' | 'B' | 'C'> = { 0: 'A', 1: 'B', 2: 'C' };
+
+  // Convert PixelData to our PixelCell format (flip y-axis)
+  const pixelArt: PixelCell[] = studio.Artwork.PixelData.map((pixel) => {
+    const flippedRow = (height - 1) - pixel.Position.y;
+    const fruitType = COLOR_TYPE_TO_FRUIT[pixel.ColorType] || 'apple';
+    return {
+      row: flippedRow,
+      col: pixel.Position.x,
+      fruitType,
+      filled: false,
+      groupId: pixel.Group,
+      colorType: pixel.ColorType,
+      colorHex: pixel.ColorHex,
+    };
+  });
+
+  const selectableItems = (studio.SelectableItems || []).map((item, i) => ({
+    colorType: item.ColorType,
+    variant: item.Variant ?? 0,
+    layer: layerMap[item.Layer] ?? 'A' as 'A' | 'B' | 'C',
+    order: item.Order ?? i,
+  }));
+
+  const launchers = (studio.Launchers || []).map((l) => ({
+    colorType: l.ColorType,
+    pixelCount: l.Value,
+    group: l.Group,
+    order: l.Order,
+    isLocked: l.IsLocked,
+  }));
+
+  return {
+    levelId: studio.LevelId,
+    pixelArtWidth: studio.Artwork.Width,
+    pixelArtHeight: studio.Artwork.Height,
+    pixelArt,
+    selectableItems,
+    launchers,
+    maxSelectableItems: studio.MaxSelectableItems,
+    blockingOffset: studio.BlockingOffset,
+    mismatchDepth: studio.MismatchDepth,
+    seed: studio.Seed,
+    waitingStandSlots: studio.WaitingStandSlots,
+    activeLauncherCount: studio.ActiveLauncherCount,
+    moveLimit: studio.MoveLimit,
+  };
+}
+
+export interface ImportedStudioLevel {
+  levelId: string;
+  pixelArtWidth: number;
+  pixelArtHeight: number;
+  pixelArt: PixelCell[];
+  selectableItems: {
+    colorType: number;
+    variant: number;
+    layer: 'A' | 'B' | 'C';
+    order: number;
+  }[];
+  launchers: {
+    colorType: number;
+    pixelCount: number;
+    group: number;
+    order: number;
+    isLocked: boolean;
+  }[];
+  maxSelectableItems: number;
+  blockingOffset?: number;
+  mismatchDepth?: number;
+  seed?: number;
+  waitingStandSlots?: number;
+  activeLauncherCount?: number;
+  moveLimit?: number;
+}
+
+// ============================================================================
 // Import from Reference Format
 // ============================================================================
 
