@@ -1291,7 +1291,7 @@ export function LevelDesignerV2({
     // Build pixel map
     const map = new Map<string, StudioPixelCell>();
     for (const cell of editingLevel.pixelArt) {
-      const colorType = FRUIT_TO_COLOR_TYPE[cell.fruitType];
+      const colorType = cell.colorType ?? FRUIT_TO_COLOR_TYPE[cell.fruitType];
       const colorHex = cell.colorHex ?? COLOR_TYPE_TO_HEX[colorType] ?? '888888';
       map.set(`${cell.row},${cell.col}`, {
         row: cell.row,

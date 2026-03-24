@@ -467,7 +467,7 @@ export function FruitMatchLevelCollection({
     const height = artwork.Height;
     const width = artwork.Width;
 
-    // Build pixel art
+    // Build pixel art — preserve colorHex and colorType for accurate round-trip
     const pixelArt: PixelCell[] = artwork.PixelData.map((pixel) => {
       const flippedRow = (height - 1) - pixel.Position.y;
       const fruitType = COLOR_TYPE_TO_FRUIT[pixel.ColorType] || 'apple';
@@ -477,6 +477,8 @@ export function FruitMatchLevelCollection({
         fruitType,
         filled: false,
         groupId: pixel.Group,
+        colorHex: pixel.ColorHex,
+        colorType: pixel.ColorType,
       };
     });
 
