@@ -17,11 +17,15 @@ import {
 import { pixelKey, migrateFruitType } from '@/lib/fruitMatchUtils';
 import {
   exportToReferenceFormat,
+  exportStudioLevel,
   importFromReferenceFormat,
   isReferenceFormat,
   ReferenceLevel,
+  StudioExportLevel,
   DIFFICULTY_TO_NUMBER,
   NUMBER_TO_DIFFICULTY,
+  FRUIT_TO_COLOR_TYPE,
+  COLOR_TYPE_TO_HEX,
 } from '@/lib/juicyBlastExport';
 import { useSyncedLevelCollection } from '@/lib/storage/useSyncedLevelCollection';
 import { SyncState } from '@/lib/storage/types';
@@ -289,8 +293,66 @@ export function FruitMatchLevelCollection({
     return counts;
   }, [levels, getTierFromScore]);
 
-  // Convert DesignedFruitMatchLevel to ReferenceLevel format
-  const levelToReferenceFormat = (level: DesignedFruitMatchLevel): ReferenceLevel => {
+  // Export a level to JSON — uses studio format when studio data exists, falls back to reference format
+  const levelToExportJSON = useCallback((level: DesignedFruitMatchLevel): object => {
+    // If the level has studio data (items, launchers with order/variant/layer), use studio format
+    if (level.studioSelectableItems && level.studioLaunchers) {
+      // Build palette from pixel art colors
+      const paletteSet = new Set<string>();
+      for (const cell of level.pixelArt) {
+        const ct = FRUIT_TO_COLOR_TYPE[cell.fruitType];
+        paletteSet.add(COLOR_TYPE_TO_HEX[ct] || '888888');
+      }
+
+      const layerToNumber: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2 };
+      return exportStudioLevel({
+        palette: Array.from(paletteSet),
+        levelId: level.name,
+        levelIndex: level.levelNumber,
+        difficulty: level.metrics.difficulty,
+        graphicId: `graphic_${level.pixelArtWidth}x${level.pixelArtHeight}`,
+        width: level.pixelArtWidth,
+        height: level.pixelArtHeight,
+        pixels: level.pixelArt.map((cell) => {
+          const ct = FRUIT_TO_COLOR_TYPE[cell.fruitType];
+          return {
+            row: cell.row,
+            col: cell.col,
+            colorType: ct,
+            colorGroup: ct,
+            colorHex: COLOR_TYPE_TO_HEX[ct] || '888888',
+            group: cell.groupId ?? 1,
+          };
+        }),
+        selectableItems: level.studioSelectableItems.map((si) => ({
+          colorType: si.colorType,
+          variant: si.variant,
+          layer: si.layer,
+          order: si.order,
+        })),
+        requirements: level.studioLaunchers.map((l) => ({
+          colorType: l.colorType,
+          value: l.pixelCount,
+          group: l.group,
+        })),
+        launchers: level.studioLaunchers.map((l) => ({
+          colorType: l.colorType,
+          pixelCount: l.pixelCount,
+          group: l.group,
+          order: l.order,
+          isLocked: l.isLocked,
+        })),
+        unlockStageData: [],
+        maxSelectableItems: level.studioMaxSelectableItems ?? 10,
+        blockingOffset: level.studioBlockingOffset,
+        waitingStandSlots: level.studioWaitingStandSlots,
+        activeLauncherCount: level.studioActiveLauncherCount,
+        seed: level.studioSeed,
+        moveLimit: level.studioMoveLimit,
+      });
+    }
+
+    // Fallback: legacy reference format for levels without studio data
     return exportToReferenceFormat({
       levelId: level.name,
       levelIndex: level.levelNumber,
@@ -301,13 +363,11 @@ export function FruitMatchLevelCollection({
       pixelArt: level.pixelArt,
       sinkTileCount: level.sinkStacks.reduce((sum, stack) => sum + stack.length, 0),
     });
-  };
+  }, []);
 
-  // Export single level as JSON (reference format)
   const handleExportLevel = (level: DesignedFruitMatchLevel) => {
-    const referenceLevel = levelToReferenceFormat(level);
-    const dataStr = JSON.stringify(referenceLevel, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
+    const exportData = levelToExportJSON(level);
+    const blob = new Blob([JSON.stringify(exportData, null, 4)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -316,11 +376,9 @@ export function FruitMatchLevelCollection({
     URL.revokeObjectURL(url);
   };
 
-  // Export all levels as single JSON file (array of reference format)
   const handleExportAll = () => {
-    const referenceLevels = levels.map(levelToReferenceFormat);
-    const dataStr = JSON.stringify(referenceLevels, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
+    const exportData = levels.map(levelToExportJSON);
+    const blob = new Blob([JSON.stringify(exportData, null, 4)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -329,20 +387,17 @@ export function FruitMatchLevelCollection({
     URL.revokeObjectURL(url);
   };
 
-  // Export all levels as separate JSON files (reference format)
   const handleExportAllSeparate = async () => {
     for (let i = 0; i < levels.length; i++) {
       const level = levels[i];
-      const referenceLevel = levelToReferenceFormat(level);
-      const dataStr = JSON.stringify(referenceLevel, null, 2);
-      const blob = new Blob([dataStr], { type: 'application/json' });
+      const exportData = levelToExportJSON(level);
+      const blob = new Blob([JSON.stringify(exportData, null, 4)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `level_${level.levelNumber}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      // Small delay between downloads to prevent browser from blocking
       if (i < levels.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
