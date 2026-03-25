@@ -491,16 +491,17 @@ function verifySolvability(
   interface SimLauncher {
     colorType: number;
     collected: number;
+    lockedVariant: number | undefined;
   }
 
   const active: SimLauncher[] = sorted
     .slice(0, activeLauncherCount)
-    .map((l) => ({ colorType: l.colorType, collected: 0 }));
+    .map((l) => ({ colorType: l.colorType, collected: 0, lockedVariant: undefined }));
   const queue: SimLauncher[] = sorted
     .slice(activeLauncherCount)
-    .map((l) => ({ colorType: l.colorType, collected: 0 }));
+    .map((l) => ({ colorType: l.colorType, collected: 0, lockedVariant: undefined }));
 
-  const stand: number[] = []; // colorTypes in stand
+  const stand: { colorType: number; variant: number }[] = [];
   let fired = 0;
   const totalLaunchers = sorted.length;
   const maxIter = layerA.length * 4 + layerC.length + 200;
@@ -520,9 +521,11 @@ function verifySolvability(
     let bestScore = -Infinity;
 
     for (const { idx, tile } of available) {
-      const launcher = active.find(
-        (l) => l.colorType === tile.colorType && l.collected < 3,
-      );
+      const launcher = active.find((l) => {
+        if (l.colorType !== tile.colorType || l.collected >= 3) return false;
+        if (l.lockedVariant !== undefined) return l.lockedVariant === tile.variant;
+        return true;
+      });
       let score: number;
       if (launcher) {
         // Prefer completing a launcher (causes fire + cascade)
@@ -543,9 +546,11 @@ function verifySolvability(
     // If all options overflow, try to find any matching tile
     if (bestScore <= -1000) {
       const match = available.find(({ tile }) =>
-        active.some(
-          (l) => l.colorType === tile.colorType && l.collected < 3,
-        ),
+        active.some((l) => {
+          if (l.colorType !== tile.colorType || l.collected >= 3) return false;
+          if (l.lockedVariant !== undefined) return l.lockedVariant === tile.variant;
+          return true;
+        }),
       );
       if (match) {
         bestIdx = match.idx;
@@ -567,13 +572,18 @@ function verifySolvability(
       }
     }
 
-    // Route tile to launcher or stand
-    const matchLauncher = active.find(
-      (l) => l.colorType === tile.colorType && l.collected < 3,
-    );
+    // Route tile to launcher or stand (variant-aware)
+    const matchLauncher = active.find((l) => {
+      if (l.colorType !== tile.colorType || l.collected >= 3) return false;
+      if (l.lockedVariant !== undefined) return l.lockedVariant === tile.variant;
+      return true;
+    });
 
     if (matchLauncher) {
       matchLauncher.collected++;
+      if (matchLauncher.lockedVariant === undefined) {
+        matchLauncher.lockedVariant = tile.variant;
+      }
 
       if (matchLauncher.collected >= 3) {
         fired++;
@@ -584,14 +594,37 @@ function verifySolvability(
         let changed = true;
         while (changed) {
           changed = false;
+          active.sort((a, b) => b.collected - a.collected);
 
           for (const l of active) {
             if (l.collected >= 3) continue;
             const need = 3 - l.collected;
             const indices: number[] = [];
-            for (let i = 0; i < stand.length && indices.length < need; i++) {
-              if (stand[i] === l.colorType) indices.push(i);
+
+            if (l.lockedVariant !== undefined) {
+              for (let i = 0; i < stand.length && indices.length < need; i++) {
+                if (stand[i].colorType === l.colorType && stand[i].variant === l.lockedVariant) {
+                  indices.push(i);
+                }
+              }
+            } else {
+              // Empty launcher: group by variant, only take if completable
+              const variantGroups = new Map<number, number[]>();
+              for (let i = 0; i < stand.length; i++) {
+                if (stand[i].colorType === l.colorType) {
+                  const v = stand[i].variant;
+                  if (!variantGroups.has(v)) variantGroups.set(v, []);
+                  variantGroups.get(v)!.push(i);
+                }
+              }
+              variantGroups.forEach((vIndices, variant) => {
+                if (indices.length === 0 && vIndices.length >= need) {
+                  indices.push(...vIndices.slice(0, need));
+                  l.lockedVariant = variant;
+                }
+              });
             }
+
             if (indices.length > 0) {
               l.collected += indices.length;
               for (let j = indices.length - 1; j >= 0; j--) {
@@ -613,7 +646,7 @@ function verifySolvability(
       }
     } else {
       if (stand.length >= waitingStandSlots) return false;
-      stand.push(tile.colorType);
+      stand.push({ colorType: tile.colorType, variant: tile.variant });
     }
   }
 
@@ -1101,7 +1134,7 @@ function distributeToLayersSeeded(
   return { a, b, c };
 }
 
-/** Greedy solvability check for seeded arrangements. */
+/** Greedy solvability check for seeded arrangements (variant-aware). */
 function verifySolvabilitySeeded(
   layerA: (StudioTile | null)[],
   layerB: (StudioTile | null)[],
@@ -1114,10 +1147,10 @@ function verifySolvabilitySeeded(
   const simB = layerB.map((t) => (t ? { ...t } : null));
   const simC = layerC.map((t) => ({ ...t }));
   const sorted = [...launcherConfigs].sort((a, b) => a.order - b.order);
-  interface SimLauncher { colorType: number; collected: number }
-  const active: SimLauncher[] = sorted.slice(0, activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0 }));
-  const queue: SimLauncher[] = sorted.slice(activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0 }));
-  const stand: number[] = [];
+  interface SimLauncher { colorType: number; collected: number; lockedVariant: number | undefined }
+  const active: SimLauncher[] = sorted.slice(0, activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0, lockedVariant: undefined }));
+  const queue: SimLauncher[] = sorted.slice(activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0, lockedVariant: undefined }));
+  const stand: { colorType: number; variant: number }[] = [];
   let fired = 0;
   const totalLaunchers = sorted.length;
   const maxIter = layerA.length * 4 + layerC.length + 200;
@@ -1128,31 +1161,65 @@ function verifySolvabilitySeeded(
     if (available.length === 0) break;
     let bestIdx = -1, bestScore = -Infinity;
     for (const { idx, tile } of available) {
-      const launcher = active.find((l) => l.colorType === tile.colorType && l.collected < 3);
+      const launcher = active.find((l) => {
+        if (l.colorType !== tile.colorType || l.collected >= 3) return false;
+        if (l.lockedVariant !== undefined) return l.lockedVariant === tile.variant;
+        return true;
+      });
       const score = launcher ? (launcher.collected === 2 ? 200 : 100) : (stand.length < waitingStandSlots ? 0 : -1000);
       if (score > bestScore) { bestScore = score; bestIdx = idx; }
     }
     if (bestIdx === -1) break;
     if (bestScore <= -1000) {
-      const match = available.find(({ tile }) => active.some((l) => l.colorType === tile.colorType && l.collected < 3));
+      const match = available.find(({ tile }) => active.some((l) => {
+        if (l.colorType !== tile.colorType || l.collected >= 3) return false;
+        if (l.lockedVariant !== undefined) return l.lockedVariant === tile.variant;
+        return true;
+      }));
       if (match) bestIdx = match.idx; else return false;
     }
     const tile = simA[bestIdx]!;
     simA[bestIdx] = null;
     if (simB[bestIdx]) { simA[bestIdx] = simB[bestIdx]; simB[bestIdx] = null; if (simC.length > 0) simB[bestIdx] = simC.shift()!; }
-    const matchLauncher = active.find((l) => l.colorType === tile.colorType && l.collected < 3);
+    const matchLauncher = active.find((l) => {
+      if (l.colorType !== tile.colorType || l.collected >= 3) return false;
+      if (l.lockedVariant !== undefined) return l.lockedVariant === tile.variant;
+      return true;
+    });
     if (matchLauncher) {
       matchLauncher.collected++;
+      if (matchLauncher.lockedVariant === undefined) matchLauncher.lockedVariant = tile.variant;
       if (matchLauncher.collected >= 3) {
         fired++; active.splice(active.indexOf(matchLauncher), 1);
         if (queue.length > 0) active.push(queue.shift()!);
         let changed = true;
         while (changed) {
           changed = false;
+          active.sort((a, b) => b.collected - a.collected);
           for (const l of active) {
             if (l.collected >= 3) continue;
+            const need = 3 - l.collected;
             const indices: number[] = [];
-            for (let i = 0; i < stand.length && indices.length < 3 - l.collected; i++) { if (stand[i] === l.colorType) indices.push(i); }
+            if (l.lockedVariant !== undefined) {
+              for (let i = 0; i < stand.length && indices.length < need; i++) {
+                if (stand[i].colorType === l.colorType && stand[i].variant === l.lockedVariant) indices.push(i);
+              }
+            } else {
+              const variantGroups = new Map<number, number[]>();
+              for (let i = 0; i < stand.length; i++) {
+                if (stand[i].colorType === l.colorType) {
+                  const v = stand[i].variant;
+                  if (!variantGroups.has(v)) variantGroups.set(v, []);
+                  variantGroups.get(v)!.push(i);
+                }
+              }
+              variantGroups.forEach((vIndices, variant) => {
+                if (indices.length === 0 && vIndices.length >= need) {
+                  indices.push(...vIndices.slice(0, need));
+                  l.lockedVariant = variant;
+                }
+              });
+            }
             if (indices.length > 0) { l.collected += indices.length; for (let j = indices.length - 1; j >= 0; j--) stand.splice(indices[j], 1); changed = true; }
           }
           const nowFiring = active.filter((l) => l.collected >= 3);
@@ -1161,7 +1228,7 @@ function verifySolvabilitySeeded(
       }
     } else {
       if (stand.length >= waitingStandSlots) return false;
-      stand.push(tile.colorType);
+      stand.push({ colorType: tile.colorType, variant: tile.variant });
     }
   }
   return fired >= totalLaunchers;
@@ -1510,20 +1577,46 @@ export function postFireCascade(
   while (changed) {
     changed = false;
 
+    // Launchers closer to firing get first dibs on stand items.
+    // This prevents a fresh launcher from stealing items that could
+    // complete one already in progress.
+    active.sort((a, b) => b.collected.length - a.collected.length);
+
     for (const launcher of active) {
       if (launcher.collected.length >= 3) continue;
 
       const canTake = 3 - launcher.collected.length;
       const matchingIndices: number[] = [];
 
-      // Variant-aware: if launcher has collected tiles, only match same variant
-      const requiredVariant = launcher.collected.length > 0 ? launcher.collected[0].variant : undefined;
-      for (let i = 0; i < stand.length && matchingIndices.length < canTake; i++) {
-        if (stand[i].colorType === launcher.colorType) {
-          if (requiredVariant === undefined || stand[i].variant === requiredVariant) {
-            matchingIndices.push(i);
+      if (launcher.collected.length > 0) {
+        // Variant-locked: only match same variant
+        const requiredVariant = launcher.collected[0].variant;
+        for (let i = 0; i < stand.length && matchingIndices.length < canTake; i++) {
+          if (stand[i].colorType === launcher.colorType) {
+            if (requiredVariant === undefined || stand[i].variant === requiredVariant) {
+              matchingIndices.push(i);
+            }
           }
         }
+      } else {
+        // Empty launcher: group stand items by variant and only auto-fill
+        // if a single variant has enough items to complete the launcher.
+        // This prevents premature variant-locking that can make levels
+        // unfinishable when items of different variants get split across
+        // launchers of the same colorType.
+        const variantGroups = new Map<number, number[]>();
+        for (let i = 0; i < stand.length; i++) {
+          if (stand[i].colorType === launcher.colorType) {
+            const v = stand[i].variant;
+            if (!variantGroups.has(v)) variantGroups.set(v, []);
+            variantGroups.get(v)!.push(i);
+          }
+        }
+        variantGroups.forEach((indices) => {
+          if (matchingIndices.length === 0 && indices.length >= canTake) {
+            matchingIndices.push(...indices.slice(0, canTake));
+          }
+        });
       }
 
       if (matchingIndices.length > 0) {
