@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { BaseLevel, SyncState, SyncedLevelCollection, SyncedLevelCollectionOptions } from './types';
+import { createIndexedDBProvider, migrateLocalStorageToIndexedDB } from './indexedDB';
 import { createLocalStorageProvider } from './localStorage';
 import { createSupabaseStorageProvider } from './supabase';
 
@@ -35,6 +36,9 @@ export function useSyncedLevelCollection<T extends BaseLevel>(
   });
 
   // Refs for providers (stable across renders)
+  // Primary local storage: IndexedDB (no 5 MB cap). Falls back to localStorage
+  // for environments where IndexedDB is unavailable.
+  const idbProvider = useRef(createIndexedDBProvider<T>(localStorageKey, migrate));
   const localProvider = useRef(createLocalStorageProvider<T>(localStorageKey, migrate));
   const supabaseProvider = useRef(createSupabaseStorageProvider<T>(gameType));
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -101,19 +105,21 @@ export function useSyncedLevelCollection<T extends BaseLevel>(
     }, syncDebounceMs);
   }, [syncToSupabase, syncDebounceMs]);
 
-  // Internal setLevels that also saves to localStorage and schedules sync
+  // Internal setLevels that saves to IndexedDB (primary) and schedules Supabase sync
   const setLevels = useCallback(
     (newLevels: T[] | ((prev: T[]) => T[])) => {
       setLevelsState((prev) => {
         const resolved = typeof newLevels === 'function' ? newLevels(prev) : newLevels;
 
-        // Save to localStorage synchronously
-        localProvider.current.saveLevels(resolved).catch((err) => {
-          console.error('[Storage] Failed to save to localStorage:', err);
+        // Save to IndexedDB (primary) — no 5 MB cap
+        idbProvider.current.saveLevels(resolved).catch((err) => {
+          console.error('[Storage] IndexedDB save failed, trying localStorage:', err);
+          localProvider.current.saveLevels(resolved).catch((lsErr) => {
+            console.error('[Storage] localStorage save also failed:', lsErr);
+          });
         });
 
         // Schedule Supabase sync
-        // We need to update the ref before scheduling
         levelsRef.current = resolved;
         scheduleSyncToSupabase();
 
@@ -123,13 +129,24 @@ export function useSyncedLevelCollection<T extends BaseLevel>(
     [scheduleSyncToSupabase]
   );
 
-  // Load from localStorage on mount
+  // Load from IndexedDB (primary) on mount, migrating from localStorage if needed
   useEffect(() => {
     let isMounted = true;
 
     async function loadData() {
-      // Load from localStorage first (instant)
-      const localLevels = await localProvider.current.loadLevels();
+      // 1. Try IndexedDB first
+      let localLevels = await idbProvider.current.loadLevels();
+
+      // 2. If empty, migrate from localStorage (one-time)
+      if (localLevels.length === 0) {
+        const migrated = await migrateLocalStorageToIndexedDB<T>(localStorageKey, migrate);
+        if (migrated.length > 0) {
+          localLevels = migrated;
+        } else {
+          // Fallback: try reading localStorage directly (no migration)
+          localLevels = await localProvider.current.loadLevels();
+        }
+      }
 
       if (isMounted) {
         if (localLevels.length > 0) {
@@ -139,23 +156,31 @@ export function useSyncedLevelCollection<T extends BaseLevel>(
         setIsLoaded(true);
       }
 
-      // Then check Supabase in background
+      // 3. Reconcile with Supabase in background
       if (supabaseProvider.current.isAvailable()) {
         try {
           const remoteLevels = await supabaseProvider.current.loadLevels();
 
           if (isMounted) {
             if (remoteLevels.length > 0 && localLevels.length === 0) {
-              // No local data but remote data exists - use remote
+              // No local data but remote data exists — use remote
               const migrated = migrate
                 ? remoteLevels.map(migrate)
                 : remoteLevels;
               setLevelsState(migrated);
               levelsRef.current = migrated;
-              // Also save to localStorage
-              await localProvider.current.saveLevels(migrated);
+              await idbProvider.current.saveLevels(migrated);
+            } else if (localLevels.length > 0 && remoteLevels.length > localLevels.length) {
+              // Remote has MORE levels — local was likely truncated by the old
+              // localStorage 5 MB limit. Prefer remote to avoid data loss.
+              const migrated = migrate
+                ? remoteLevels.map(migrate)
+                : remoteLevels;
+              setLevelsState(migrated);
+              levelsRef.current = migrated;
+              await idbProvider.current.saveLevels(migrated);
             } else if (localLevels.length > 0) {
-              // Local data exists - push to remote if different
+              // Local data exists and is at least as large as remote — push to remote
               const localJson = JSON.stringify(localLevels);
               const remoteJson = JSON.stringify(remoteLevels);
               if (localJson !== remoteJson) {
@@ -204,7 +229,7 @@ export function useSyncedLevelCollection<T extends BaseLevel>(
     return () => {
       isMounted = false;
     };
-  // Intentional mount-only effect: loads from localStorage then reconciles with Supabase once.
+  // Intentional mount-only effect: loads from IndexedDB then reconciles with Supabase once.
   // All referenced values are refs or stable setState dispatchers that do not change.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -243,9 +268,27 @@ export function useSyncedLevelCollection<T extends BaseLevel>(
 
   // CRUD operations
   const addLevel = useCallback(
-    (level: T) => {
+    (level: T, atPosition?: number) => {
       setLevels((prev) => {
         if (prev.length >= maxLevels) return prev;
+
+        // If a level with the same name exists, replace it in-place
+        // (covers the "delete level 4, re-add level 4" workflow)
+        const existingIdx = prev.findIndex((l) => l.name === level.name);
+        if (existingIdx >= 0) {
+          const updated = [...prev];
+          updated[existingIdx] = { ...level, levelNumber: existingIdx + 1 } as T;
+          return updated;
+        }
+
+        // Insert at a specific position (1-based) if requested
+        if (atPosition !== undefined && atPosition >= 1 && atPosition <= prev.length + 1) {
+          const newLevels = [...prev];
+          newLevels.splice(atPosition - 1, 0, level);
+          return newLevels.map((l, i) => ({ ...l, levelNumber: i + 1 } as T));
+        }
+
+        // Default: append to end
         const maxNum = prev.reduce((max, l) => Math.max(max, l.levelNumber), 0);
         const newLevel = { ...level, levelNumber: maxNum + 1 } as T;
         return [...prev, newLevel];

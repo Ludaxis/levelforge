@@ -148,7 +148,7 @@ export interface SyncedLevelCollection<T extends BaseLevel> {
   /**
    * Add a new level to the collection
    */
-  addLevel: (level: T) => void;
+  addLevel: (level: T, atPosition?: number) => void;
 
   /**
    * Update an existing level by ID

@@ -61,8 +61,9 @@ function FruitMatchPageContent() {
       setLevels((prev: DesignedFruitMatchLevel[]) => prev.map((l) => (l.id === level.id ? level : l)));
       setEditingLevel(null);
     } else {
-      // Add new level
-      addLevel(level);
+      // Add new level — insert at the designer's level number position
+      // so "Level 4" lands at position 4, not at the end.
+      addLevel(level, levelNumber);
       // Auto-increment level number
       setLevelNumber(prev => prev + 1);
     }

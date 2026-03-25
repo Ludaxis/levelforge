@@ -927,10 +927,45 @@ export function FruitMatchLevelCollection({
                     <GripVertical className="h-5 w-5" />
                   </div>
 
-                  {/* Level number */}
-                  <span className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm font-medium shrink-0">
-                    {level.levelNumber}
-                  </span>
+                  {/* Level number — click to move to a different position */}
+                  <input
+                    type="number"
+                    min={1}
+                    max={levels.length}
+                    defaultValue={level.levelNumber}
+                    className="w-10 h-8 rounded-full bg-muted text-center text-sm font-medium shrink-0 border-0 focus:ring-2 focus:ring-primary [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    title="Type a number to move this level"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const target = parseInt((e.target as HTMLInputElement).value);
+                        if (target >= 1 && target <= levels.length && target !== level.levelNumber) {
+                          const newLevels = [...levels];
+                          const fromIdx = newLevels.findIndex((l) => l.id === level.id);
+                          if (fromIdx !== -1) {
+                            const [moved] = newLevels.splice(fromIdx, 1);
+                            newLevels.splice(target - 1, 0, moved);
+                            onLevelsChange(newLevels.map((l, i) => ({ ...l, levelNumber: i + 1 })));
+                          }
+                        }
+                        (e.target as HTMLInputElement).blur();
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const target = parseInt(e.target.value);
+                      if (target >= 1 && target <= levels.length && target !== level.levelNumber) {
+                        const newLevels = [...levels];
+                        const fromIdx = newLevels.findIndex((l) => l.id === level.id);
+                        if (fromIdx !== -1) {
+                          const [moved] = newLevels.splice(fromIdx, 1);
+                          newLevels.splice(target - 1, 0, moved);
+                          onLevelsChange(newLevels.map((l, i) => ({ ...l, levelNumber: i + 1 })));
+                        }
+                      } else {
+                        e.target.value = String(level.levelNumber);
+                      }
+                    }}
+                  />
 
                   {/* Preview */}
                   <div className="shrink-0">
