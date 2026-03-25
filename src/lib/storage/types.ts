@@ -50,6 +50,7 @@ export interface SyncState {
  */
 export interface BaseLevel {
   id: string;
+  name: string;
   levelNumber: number;
 }
 

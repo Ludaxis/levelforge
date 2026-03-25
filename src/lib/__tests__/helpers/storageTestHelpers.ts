@@ -11,6 +11,7 @@ export function createTestBaseLevel(
 ): BaseLevel {
   return {
     id,
+    name: `Level ${levelNumber}`,
     levelNumber,
     ...extras,
   };
