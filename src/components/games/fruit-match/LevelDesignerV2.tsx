@@ -530,18 +530,30 @@ export function LevelDesignerV2({
           setMoveLimit(typeof studioData.MoveLimit === 'number' ? studioData.MoveLimit : undefined);
           setPinnedItemIds(new Set());
 
+          // Build group → colorType map from launchers so pixel colorTypes
+          // are reconciled when hex-mapping produced a different colorType
+          // (e.g. dark green hex mapped to Black=8 while launcher says Green=5).
+          const launcherGroupCT = new Map<number, number>();
+          const rawLaunchersForReconcile = studioData.Launchers as { ColorType: number; Group: number }[] | undefined;
+          if (rawLaunchersForReconcile && Array.isArray(rawLaunchersForReconcile)) {
+            for (const l of rawLaunchersForReconcile) {
+              if (!launcherGroupCT.has(l.Group)) launcherGroupCT.set(l.Group, l.ColorType);
+            }
+          }
+
           const map = new Map<string, StudioPixelCell>();
           const groupMap = new Map<number, StudioGroup>();
           const artworkData = studioData.Artwork as { PixelData: { Position: { x: number; y: number }; ColorType: number; ColorGroup?: number; Group: number; ColorHex: string }[] };
 
           for (const pixel of artworkData.PixelData) {
             const flippedRow = (height - 1) - pixel.Position.y;
-            const fruitType = COLOR_TYPE_TO_FRUIT[pixel.ColorType] || 'apple';
+            const effectiveCT = launcherGroupCT.get(pixel.Group) ?? pixel.ColorType;
+            const fruitType = COLOR_TYPE_TO_FRUIT[effectiveCT] || 'apple';
             const sp: StudioPixelCell = {
               row: flippedRow,
               col: pixel.Position.x,
-              colorType: pixel.ColorType,
-              colorGroup: pixel.ColorGroup ?? pixel.ColorType,
+              colorType: effectiveCT,
+              colorGroup: pixel.ColorGroup ?? effectiveCT,
               colorHex: pixel.ColorHex,
               group: pixel.Group,
               fruitType,
@@ -550,13 +562,13 @@ export function LevelDesignerV2({
 
             const existing = groupMap.get(pixel.Group);
             if (existing) {
-              existing.pixelsByColor[pixel.ColorType] = (existing.pixelsByColor[pixel.ColorType] || 0) + 1;
+              existing.pixelsByColor[effectiveCT] = (existing.pixelsByColor[effectiveCT] || 0) + 1;
               existing.totalPixels++;
             } else {
               groupMap.set(pixel.Group, {
                 id: pixel.Group,
                 name: `Group ${pixel.Group}`,
-                pixelsByColor: { [pixel.ColorType]: 1 },
+                pixelsByColor: { [effectiveCT]: 1 },
                 totalPixels: 1,
               });
             }

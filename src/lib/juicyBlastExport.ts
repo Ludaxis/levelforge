@@ -731,11 +731,21 @@ export interface StudioExportData {
 export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
   const height = data.height;
 
+  // Build group → colorType from launchers so pixel ColorType matches.
+  // The pixel's own colorType can be stale (e.g. hexToColorType mapped dark
+  // green to Black=8 while the designer assigned the launcher as Green=5).
+  const groupColorType = new Map<number, number>();
+  for (const l of data.launchers) {
+    if (!groupColorType.has(l.group)) {
+      groupColorType.set(l.group, l.colorType);
+    }
+  }
+
   const pixelData = data.pixels.map((pixel) => {
     const flippedY = (height - 1) - pixel.row;
     return {
       Position: { x: pixel.col, y: flippedY },
-      ColorType: pixel.colorType,
+      ColorType: groupColorType.get(pixel.group) ?? pixel.colorType,
       Group: pixel.group,
       ColorHex: pixel.colorHex,
     };

@@ -467,10 +467,21 @@ export function FruitMatchLevelCollection({
     const height = artwork.Height;
     const width = artwork.Width;
 
-    // Build pixel art — preserve colorHex and colorType for accurate round-trip
+    // Extract launcher data first — needed to reconcile pixel colorTypes
+    const rawLaunchers = (data.Launchers as { ColorType: number; Value: number; Group: number; Order: number; IsLocked: boolean }[]) || [];
+
+    // Build group → colorType from launchers so pixels match launcher intent
+    // (hex-mapping can produce a wrong colorType, e.g. dark green → Black=8)
+    const launcherGroupCT = new Map<number, number>();
+    for (const l of rawLaunchers) {
+      if (!launcherGroupCT.has(l.Group)) launcherGroupCT.set(l.Group, l.ColorType);
+    }
+
+    // Build pixel art — reconcile colorType from launcher data for accurate round-trip
     const pixelArt: PixelCell[] = artwork.PixelData.map((pixel) => {
       const flippedRow = (height - 1) - pixel.Position.y;
-      const fruitType = COLOR_TYPE_TO_FRUIT[pixel.ColorType] || 'apple';
+      const effectiveCT = launcherGroupCT.get(pixel.Group) ?? pixel.ColorType;
+      const fruitType = COLOR_TYPE_TO_FRUIT[effectiveCT] || 'apple';
       return {
         row: flippedRow,
         col: pixel.Position.x,
@@ -478,7 +489,7 @@ export function FruitMatchLevelCollection({
         filled: false,
         groupId: pixel.Group,
         colorHex: pixel.ColorHex,
-        colorType: pixel.ColorType,
+        colorType: effectiveCT,
       };
     });
 
@@ -491,8 +502,6 @@ export function FruitMatchLevelCollection({
       layer: layerNames[item.Layer] || 'A' as 'A' | 'B' | 'C',
       order: typeof item.Order === 'number' ? item.Order : idx,
     }));
-
-    const rawLaunchers = (data.Launchers as { ColorType: number; Value: number; Group: number; Order: number; IsLocked: boolean }[]) || [];
     const studioLaunchers = rawLaunchers.map((l, idx) => ({
       colorType: l.ColorType,
       pixelCount: l.Value,
