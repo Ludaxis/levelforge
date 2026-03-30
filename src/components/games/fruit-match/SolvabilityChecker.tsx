@@ -68,11 +68,16 @@ function VerdictBadge({ verdict }: { verdict: LevelReport['verdict'] }) {
 // Difficulty adjustment — applied to originals to produce working files
 // ============================================================================
 
-/** Apply a difficulty delta to all levels. Negative = easier, positive = harder. */
-function applyDifficultyDelta(originals: StudioExportLevel[], delta: number): StudioExportLevel[] {
-  if (delta === 0) return originals;
+/** Apply a per-level difficulty delta. Negative = easier, positive = harder. */
+function applyDifficultyDeltas(
+  originals: StudioExportLevel[],
+  deltas: Map<string, number>,
+): StudioExportLevel[] {
+  if (deltas.size === 0) return originals;
 
   return originals.map((level) => {
+    const delta = deltas.get(level.LevelId || '') ?? 0;
+    if (delta === 0) return level;
     const curBlocking = typeof level.BlockingOffset === 'number' ? level.BlockingOffset : 0;
     const newBlocking = Math.max(0, Math.min(10, curBlocking + delta));
 
@@ -135,9 +140,11 @@ function applyDifficultyDelta(originals: StudioExportLevel[], delta: number): St
 // Main Component
 // ============================================================================
 
+type AdjustTarget = 'all' | 'solvable' | 'risky' | 'stuck';
+
 export function SolvabilityChecker() {
   const [originalFiles, setOriginalFiles] = useState<StudioExportLevel[]>([]);
-  const [difficultyDelta, setDifficultyDelta] = useState(0);
+  const [levelDeltas, setLevelDeltas] = useState<Map<string, number>>(new Map());
   const [report, setReport] = useState<BatchReport | null>(null);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -147,13 +154,23 @@ export function SolvabilityChecker() {
   const [sortKey, setSortKey] = useState<SortKey>('levelId');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [adjustTarget, setAdjustTarget] = useState<AdjustTarget>('all');
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Compute adjusted files from originals + delta
+  // Compute adjusted files from originals + per-level deltas
   const files = useMemo(
-    () => applyDifficultyDelta(originalFiles, difficultyDelta),
-    [originalFiles, difficultyDelta],
+    () => applyDifficultyDeltas(originalFiles, levelDeltas),
+    [originalFiles, levelDeltas],
   );
+
+  // Summary of current deltas for display
+  const deltaInfo = useMemo(() => {
+    if (levelDeltas.size === 0) return null;
+    const vals = Array.from(levelDeltas.values());
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    return { count: levelDeltas.size, min, max };
+  }, [levelDeltas]);
 
   // File upload
   const handleFiles = useCallback(async (fileList: FileList) => {
@@ -170,7 +187,7 @@ export function SolvabilityChecker() {
     }
     levels.sort((a, b) => extractLevelNum(a.LevelId || '') - extractLevelNum(b.LevelId || ''));
     setOriginalFiles(levels);
-    setDifficultyDelta(0);
+    setLevelDeltas(new Map());
     setReport(null);
   }, []);
 
@@ -216,17 +233,36 @@ export function SolvabilityChecker() {
     URL.revokeObjectURL(url);
   }, [report]);
 
-  // ── Make Harder / Easier ──────────────────────────────────────────
-  // Shifts delta, recomputes files (via useMemo), and re-runs analysis.
+  // ── Make Harder / Easier (targeted) ──────────────────────────────
+  // Only adjusts levels matching the selected target verdict.
   const adjustDifficulty = useCallback(async (step: number) => {
     if (originalFiles.length === 0) return;
-    const newDelta = difficultyDelta + step;
-    setDifficultyDelta(newDelta);
+
+    // Determine which level IDs to adjust based on the current report + target
+    const targetIds = new Set<string>();
+    if (adjustTarget === 'all') {
+      originalFiles.forEach((l) => targetIds.add(l.LevelId || ''));
+    } else if (report) {
+      report.levels
+        .filter((r) => r.verdict === adjustTarget)
+        .forEach((r) => targetIds.add(r.levelId));
+    } else {
+      // No report yet — adjust all
+      originalFiles.forEach((l) => targetIds.add(l.LevelId || ''));
+    }
+
+    // Update per-level deltas
+    const newDeltas = new Map(levelDeltas);
+    targetIds.forEach((id) => {
+      newDeltas.set(id, (newDeltas.get(id) ?? 0) + step);
+    });
+    // Clean up zero deltas
+    newDeltas.forEach((v, k) => { if (v === 0) newDeltas.delete(k); });
+    setLevelDeltas(newDeltas);
     setReport(null);
 
-    // Re-analyze with new delta (files memo will update on next render,
-    // so we compute inline here for the batch run)
-    const adjusted = applyDifficultyDelta(originalFiles, newDelta);
+    // Re-analyze
+    const adjusted = applyDifficultyDeltas(originalFiles, newDeltas);
     setRunning(true);
     setProgress({ done: 0, total: adjusted.length });
     try {
@@ -241,7 +277,7 @@ export function SolvabilityChecker() {
     } finally {
       setRunning(false);
     }
-  }, [originalFiles, difficultyDelta, mcRuns, enableDFS, dfsLimit]);
+  }, [originalFiles, levelDeltas, adjustTarget, report, mcRuns, enableDFS, dfsLimit]);
 
   // ── Export all level JSONs ──────────────────────────────────────
   const handleExportAllJSON = useCallback(() => {
@@ -356,7 +392,17 @@ export function SolvabilityChecker() {
 
             {/* Difficulty adjustment + export */}
             <div className="flex items-center gap-2 pt-2 border-t border-border/50 flex-wrap">
-              <span className="text-xs text-muted-foreground mr-1">Adjust all levels:</span>
+              <span className="text-xs text-muted-foreground">Adjust:</span>
+              <select
+                value={adjustTarget}
+                onChange={(e) => setAdjustTarget(e.target.value as AdjustTarget)}
+                className="h-7 text-xs bg-background border rounded px-2"
+              >
+                <option value="all">All levels</option>
+                <option value="solvable">Solvable only</option>
+                <option value="risky">Risky only</option>
+                <option value="stuck">Stuck only</option>
+              </select>
               <Button
                 variant="outline" size="sm" className="h-7 text-green-400 border-green-500/50 hover:bg-green-500/10"
                 onClick={() => adjustDifficulty(-1)}
@@ -371,14 +417,14 @@ export function SolvabilityChecker() {
               >
                 <ArrowUp className="h-3 w-3 mr-1" /> Harder
               </Button>
-              {difficultyDelta !== 0 && (
+              {deltaInfo && (
                 <>
-                  <Badge variant="outline" className={difficultyDelta < 0 ? 'text-green-400 border-green-500/50' : 'text-red-400 border-red-500/50'}>
-                    {difficultyDelta > 0 ? '+' : ''}{difficultyDelta}
+                  <Badge variant="outline" className="text-muted-foreground">
+                    {deltaInfo.count} adjusted ({deltaInfo.min > 0 ? '+' : ''}{deltaInfo.min}{deltaInfo.min !== deltaInfo.max ? ` to ${deltaInfo.max > 0 ? '+' : ''}${deltaInfo.max}` : ''})
                   </Badge>
                   <Button
                     variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground"
-                    onClick={() => { setDifficultyDelta(0); setReport(null); }}
+                    onClick={() => { setLevelDeltas(new Map()); setReport(null); }}
                     disabled={running}
                   >
                     Reset
