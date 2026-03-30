@@ -9,11 +9,12 @@ import {
   FruitMatchLevelCollection,
   useFruitMatchLevelCollection,
   LevelDesignerV2,
+  SolvabilityChecker,
 } from '@/components/games/fruit-match';
 import { FruitMatchCurveChart } from '@/components/games/fruit-match/FruitMatchCurveChart';
 import { FruitMatchLevel, DesignedFruitMatchLevel } from '@/types/fruitMatch';
 import { generateSinkStacks, getRequiredFruitCounts } from '@/lib/fruitMatchUtils';
-import { ArrowLeft, Palette, Layers, Play, BookOpen } from 'lucide-react';
+import { ArrowLeft, Palette, Layers, Play, BookOpen, Search } from 'lucide-react';
 import Link from 'next/link';
 import { ErrorBoundary } from '@/components/layout/ErrorBoundary';
 
@@ -114,7 +115,7 @@ function FruitMatchPageContent() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="design" className="flex items-center gap-2">
             <Palette className="h-4 w-4" />
             <span className="hidden sm:inline">Design</span>
@@ -122,6 +123,10 @@ function FruitMatchPageContent() {
           <TabsTrigger value="collection" className="flex items-center gap-2">
             <Layers className="h-4 w-4" />
             <span className="hidden sm:inline">Collection</span>
+          </TabsTrigger>
+          <TabsTrigger value="analyze" className="flex items-center gap-2">
+            <Search className="h-4 w-4" />
+            <span className="hidden sm:inline">Analyze</span>
           </TabsTrigger>
           <TabsTrigger value="theory" className="flex items-center gap-2">
             <BookOpen className="h-4 w-4" />
@@ -166,6 +171,13 @@ function FruitMatchPageContent() {
               }}
             />
           )}
+          </ErrorBoundary>
+        </TabsContent>
+
+        {/* Analyze Tab — Solvability Checker */}
+        <TabsContent value="analyze" className="space-y-4">
+          <ErrorBoundary>
+            <SolvabilityChecker />
           </ErrorBoundary>
         </TabsContent>
 
