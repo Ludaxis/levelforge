@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Upload, Play, Download, ChevronDown, ChevronRight } from 'lucide-react';
+import { Upload, Play, Download, ChevronDown, ChevronRight, ArrowUp, ArrowDown } from 'lucide-react';
 import {
   analyzeBatch,
   LevelReport,
@@ -64,8 +64,80 @@ function VerdictBadge({ verdict }: { verdict: LevelReport['verdict'] }) {
 // Main Component
 // ============================================================================
 
+// ============================================================================
+// Difficulty adjustment — applied to originals to produce working files
+// ============================================================================
+
+/** Apply a difficulty delta to all levels. Negative = easier, positive = harder. */
+function applyDifficultyDelta(originals: StudioExportLevel[], delta: number): StudioExportLevel[] {
+  if (delta === 0) return originals;
+
+  return originals.map((level) => {
+    const curBlocking = typeof level.BlockingOffset === 'number' ? level.BlockingOffset : 0;
+    const newBlocking = Math.max(0, Math.min(10, curBlocking + delta));
+
+    // Adjust MaxSelectableItems inversely — more visible items = easier
+    const curMax = level.MaxSelectableItems || 12;
+    const newMax = Math.max(8, Math.min(20, curMax - delta));
+
+    // For easier (delta < 0): collapse variants that create impossible fragmentation.
+    // The merge threshold scales with how much easier:
+    //   -1: merge variant groups with ≤3 items into the largest group
+    //   -2: merge groups with ≤6 items
+    //   -3 or below: collapse ALL variants to 0 (maximum simplification)
+    let items = level.SelectableItems;
+    if (delta < 0) {
+      const absDelta = Math.abs(delta);
+      if (absDelta >= 3) {
+        // Full collapse — all variants become 0
+        items = items.map((item) => ({ ...item, Variant: 0 }));
+      } else {
+        const mergeThreshold = absDelta * 3; // -1→3, -2→6
+        const ctVariantCounts = new Map<number, Map<number, number>>();
+        for (const item of items) {
+          if (!ctVariantCounts.has(item.ColorType)) ctVariantCounts.set(item.ColorType, new Map());
+          const vc = ctVariantCounts.get(item.ColorType)!;
+          vc.set(item.Variant, (vc.get(item.Variant) || 0) + 1);
+        }
+
+        const variantRemap = new Map<string, number>();
+        ctVariantCounts.forEach((variants, ct) => {
+          if (variants.size <= 1) return;
+          let maxV = 0, maxCount = 0;
+          variants.forEach((count, v) => { if (count > maxCount) { maxCount = count; maxV = v; } });
+          variants.forEach((count, v) => {
+            if (v !== maxV && count <= mergeThreshold) {
+              variantRemap.set(`${ct}:${v}`, maxV);
+            }
+          });
+        });
+
+        if (variantRemap.size > 0) {
+          items = items.map((item) => {
+            const newV = variantRemap.get(`${item.ColorType}:${item.Variant}`);
+            return newV !== undefined ? { ...item, Variant: newV } : item;
+          });
+        }
+      }
+    }
+
+    return {
+      ...level,
+      BlockingOffset: newBlocking,
+      MismatchDepth: newBlocking / 10,
+      MaxSelectableItems: newMax,
+      SelectableItems: items,
+    };
+  });
+}
+
+// ============================================================================
+// Main Component
+// ============================================================================
+
 export function SolvabilityChecker() {
-  const [files, setFiles] = useState<StudioExportLevel[]>([]);
+  const [originalFiles, setOriginalFiles] = useState<StudioExportLevel[]>([]);
+  const [difficultyDelta, setDifficultyDelta] = useState(0);
   const [report, setReport] = useState<BatchReport | null>(null);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -76,6 +148,12 @@ export function SolvabilityChecker() {
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Compute adjusted files from originals + delta
+  const files = useMemo(
+    () => applyDifficultyDelta(originalFiles, difficultyDelta),
+    [originalFiles, difficultyDelta],
+  );
 
   // File upload
   const handleFiles = useCallback(async (fileList: FileList) => {
@@ -91,7 +169,8 @@ export function SolvabilityChecker() {
       } catch { /* skip invalid */ }
     }
     levels.sort((a, b) => extractLevelNum(a.LevelId || '') - extractLevelNum(b.LevelId || ''));
-    setFiles(levels);
+    setOriginalFiles(levels);
+    setDifficultyDelta(0);
     setReport(null);
   }, []);
 
@@ -136,6 +215,48 @@ export function SolvabilityChecker() {
     a.href = url; a.download = 'solvability-report.csv'; a.click();
     URL.revokeObjectURL(url);
   }, [report]);
+
+  // ── Make Harder / Easier ──────────────────────────────────────────
+  // Shifts delta, recomputes files (via useMemo), and re-runs analysis.
+  const adjustDifficulty = useCallback(async (step: number) => {
+    if (originalFiles.length === 0) return;
+    const newDelta = difficultyDelta + step;
+    setDifficultyDelta(newDelta);
+    setReport(null);
+
+    // Re-analyze with new delta (files memo will update on next render,
+    // so we compute inline here for the batch run)
+    const adjusted = applyDifficultyDelta(originalFiles, newDelta);
+    setRunning(true);
+    setProgress({ done: 0, total: adjusted.length });
+    try {
+      const result = await analyzeBatch(adjusted, {
+        runMonteCarlo: true,
+        monteCarloRuns: mcRuns,
+        runDFS: enableDFS,
+        dfsStateLimit: dfsLimit,
+        onProgress: (done, total) => setProgress({ done, total }),
+      });
+      setReport(result);
+    } finally {
+      setRunning(false);
+    }
+  }, [originalFiles, difficultyDelta, mcRuns, enableDFS, dfsLimit]);
+
+  // ── Export all level JSONs ──────────────────────────────────────
+  const handleExportAllJSON = useCallback(() => {
+    if (files.length === 0) return;
+    for (const level of files) {
+      const name = level.LevelId || 'level';
+      const blob = new Blob([JSON.stringify(level, null, 4)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${name}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  }, [files]);
 
   // Sort toggle
   const toggleSort = (key: SortKey) => {
@@ -211,24 +332,63 @@ export function SolvabilityChecker() {
         </CardContent>
       </Card>
 
-      {/* Summary */}
+      {/* Summary + Difficulty Controls */}
       {report && (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center justify-between">
               <span>Summary</span>
-              <Button variant="outline" size="sm" className="h-7" onClick={handleExportCSV}>
-                <Download className="h-3 w-3 mr-1" /> CSV
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" className="h-7" onClick={handleExportCSV}>
+                  <Download className="h-3 w-3 mr-1" /> CSV
+                </Button>
+              </div>
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
             <div className="flex gap-4 text-sm">
               <span>{report.summary.total} total</span>
               <span className="text-green-400">{report.summary.solvable} solvable</span>
               <span className="text-yellow-400">{report.summary.risky} risky</span>
               <span className="text-red-400">{report.summary.stuck} stuck</span>
               <span className="text-muted-foreground">avg win rate: {(report.summary.avgWinRate * 100).toFixed(1)}%</span>
+            </div>
+
+            {/* Difficulty adjustment + export */}
+            <div className="flex items-center gap-2 pt-2 border-t border-border/50 flex-wrap">
+              <span className="text-xs text-muted-foreground mr-1">Adjust all levels:</span>
+              <Button
+                variant="outline" size="sm" className="h-7 text-green-400 border-green-500/50 hover:bg-green-500/10"
+                onClick={() => adjustDifficulty(-1)}
+                disabled={running}
+              >
+                <ArrowDown className="h-3 w-3 mr-1" /> Easier
+              </Button>
+              <Button
+                variant="outline" size="sm" className="h-7 text-red-400 border-red-500/50 hover:bg-red-500/10"
+                onClick={() => adjustDifficulty(+1)}
+                disabled={running}
+              >
+                <ArrowUp className="h-3 w-3 mr-1" /> Harder
+              </Button>
+              {difficultyDelta !== 0 && (
+                <>
+                  <Badge variant="outline" className={difficultyDelta < 0 ? 'text-green-400 border-green-500/50' : 'text-red-400 border-red-500/50'}>
+                    {difficultyDelta > 0 ? '+' : ''}{difficultyDelta}
+                  </Badge>
+                  <Button
+                    variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground"
+                    onClick={() => { setDifficultyDelta(0); setReport(null); }}
+                    disabled={running}
+                  >
+                    Reset
+                  </Button>
+                </>
+              )}
+              <div className="flex-1" />
+              <Button variant="outline" size="sm" className="h-7" onClick={handleExportAllJSON} disabled={running}>
+                <Download className="h-3 w-3 mr-1" /> Export All JSONs
+              </Button>
             </div>
           </CardContent>
         </Card>
