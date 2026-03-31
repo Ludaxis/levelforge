@@ -337,11 +337,11 @@ export function DifficultyAnalysis({
             {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
             <BarChart3 className="h-3.5 w-3.5" />
           </button>
-          <Badge className={`${DIFFICULTY_COLORS[tier] || 'bg-gray-500'} h-5 text-[10px]`}>
-            {score} ({tier})
+          <Badge className={`${parMoves === null ? 'bg-red-700' : DIFFICULTY_COLORS[tier] || 'bg-gray-500'} h-5 text-[10px]`}>
+            {parMoves === null ? 'unsolvable' : `${score} (${tier})`}
           </Badge>
           <span className="text-[10px] text-muted-foreground">Unlock {unlockDistance}</span>
-          <span className="text-[10px] text-muted-foreground" title={parMoves === null ? 'Unsolvable at this config' : undefined}>
+          <span className="text-[10px] text-muted-foreground">
             Par {parMoves ?? '--'}
           </span>
           {moveLimit !== undefined && (
