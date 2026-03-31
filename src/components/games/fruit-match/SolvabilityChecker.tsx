@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -1230,36 +1230,36 @@ export function SolvabilityChecker() {
                     const qm = r.moveAnalysis?.queueMoves ?? 0;
                     const paths = r.dfs?.solutionCount ?? (r.greedy.solved ? 1 : 0);
                     return (
-                      <tr key={r.levelId} className="group">
-                        <td colSpan={9} className="p-0">
-                          <div
-                            className="flex items-center px-3 py-2 cursor-pointer hover:bg-accent/50 transition-colors border-b border-border/50"
-                            onClick={() => setExpandedId(isExpanded ? null : r.levelId)}
-                          >
-                            <span className="w-24 font-mono cursor-pointer hover:text-primary" onClick={(e) => { e.stopPropagation(); setSelectedLevelId(r.levelId); setDetailTab('layers'); }}>
-                              {r.levelId}
-                            </span>
-                            <span className="w-20">
-                              {r.verdict === 'solvable'
-                                ? <span className="text-green-400 font-medium">&#10003;</span>
-                                : r.verdict === 'risky'
-                                  ? <span className="text-yellow-400 font-medium">~</span>
-                                  : <span className="text-red-400 font-medium">&#10007;</span>}
-                            </span>
-                            <span className="w-16 text-center font-mono text-xs">{paths || '-'}</span>
-                            <span className="w-16 text-center font-mono text-xs">{r.totalLaunchers}</span>
-                            <span className="w-16 text-center font-mono text-xs">{r.totalItems}</span>
-                            <span className="w-16 text-center font-mono text-xs">{r.moveAnalysis?.totalMoves ?? '-'}</span>
-                            <span className="w-16 text-center font-mono text-xs text-green-400">{r.moveAnalysis?.directMoves ?? '-'}</span>
-                            <span className={`w-16 text-center font-mono text-xs ${qm > 3 ? 'text-red-400' : qm > 0 ? 'text-yellow-400' : 'text-green-400'}`}>
-                              {r.moveAnalysis ? qm : '-'}
-                            </span>
-                            <span className="w-8 text-muted-foreground">
-                              {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                            </span>
-                          </div>
-                          {isExpanded && (
-                            <div className="px-6 py-3 bg-muted/30 border-b border-border/50 text-xs space-y-1">
+                      <React.Fragment key={r.levelId}>
+                        <tr
+                          className="border-b border-border/50 cursor-pointer hover:bg-accent/50 transition-colors"
+                          onClick={() => setExpandedId(isExpanded ? null : r.levelId)}
+                        >
+                          <td className="px-3 py-2 font-mono cursor-pointer hover:text-primary" onClick={(e) => { e.stopPropagation(); setSelectedLevelId(r.levelId); setDetailTab('layers'); }}>
+                            {r.levelId}
+                          </td>
+                          <td className="px-3 py-2">
+                            {r.verdict === 'solvable'
+                              ? <span className="text-green-400 font-medium">&#10003;</span>
+                              : r.verdict === 'risky'
+                                ? <span className="text-yellow-400 font-medium">~</span>
+                                : <span className="text-red-400 font-medium">&#10007;</span>}
+                          </td>
+                          <td className="px-3 py-2 text-center font-mono text-xs">{paths || '-'}</td>
+                          <td className="px-3 py-2 text-center font-mono text-xs">{r.totalLaunchers}</td>
+                          <td className="px-3 py-2 text-center font-mono text-xs">{r.totalItems}</td>
+                          <td className="px-3 py-2 text-center font-mono text-xs">{r.moveAnalysis?.totalMoves ?? '-'}</td>
+                          <td className="px-3 py-2 text-center font-mono text-xs text-green-400">{r.moveAnalysis?.directMoves ?? '-'}</td>
+                          <td className={`px-3 py-2 text-center font-mono text-xs ${qm > 3 ? 'text-red-400' : qm > 0 ? 'text-yellow-400' : 'text-green-400'}`}>
+                            {r.moveAnalysis ? qm : '-'}
+                          </td>
+                          <td className="px-3 py-2 w-8 text-muted-foreground">
+                            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr className="border-b border-border/50">
+                            <td colSpan={9} className="px-6 py-3 bg-muted/30 text-xs space-y-1">
                               <div className="flex gap-6">
                                 <span>Colors: {r.uniqueColors}</span>
                                 <span>MaxSel: {r.maxSelectableItems}</span>
@@ -1273,10 +1273,10 @@ export function SolvabilityChecker() {
                               <Button size="sm" variant="outline" className="h-6 text-xs mt-1" onClick={() => { setSelectedLevelId(r.levelId); setDetailTab('layers'); }}>
                                 View Detail
                               </Button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
