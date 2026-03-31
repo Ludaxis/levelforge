@@ -672,14 +672,20 @@ export function computeParMoves(config: StudioGameConfig): number | null {
   const simB = state.layerB.map((t) => (t ? { ...t } : null));
   const simC = state.layerC.map((t) => ({ ...t }));
 
-  interface SimLauncher { colorType: number; collected: number }
-  const active: SimLauncher[] = sorted.slice(0, activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0 }));
-  const queue: SimLauncher[] = sorted.slice(activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0 }));
-  const stand: number[] = [];
+  interface SimLauncher { colorType: number; collected: number; lockedVariant: number | undefined }
+  const active: SimLauncher[] = sorted.slice(0, activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0, lockedVariant: undefined }));
+  const queue: SimLauncher[] = sorted.slice(activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0, lockedVariant: undefined }));
+  const stand: { colorType: number; variant: number }[] = [];
   let fired = 0;
   let moves = 0;
   const totalLaunchers = sorted.length;
   const maxIter = simA.length * 4 + simC.length + 200;
+
+  const matchesLauncher = (l: SimLauncher, tile: StudioTile): boolean => {
+    if (l.colorType !== tile.colorType || l.collected >= 3) return false;
+    if (l.lockedVariant !== undefined) return l.lockedVariant === tile.variant;
+    return true;
+  };
 
   for (let iter = 0; iter < maxIter; iter++) {
     if (fired >= totalLaunchers) return moves;
@@ -689,13 +695,13 @@ export function computeParMoves(config: StudioGameConfig): number | null {
 
     let bestIdx = -1, bestScore = -Infinity;
     for (const { idx, tile } of available) {
-      const launcher = active.find((l) => l.colorType === tile.colorType && l.collected < 3);
+      const launcher = active.find((l) => matchesLauncher(l, tile));
       const score = launcher ? (launcher.collected === 2 ? 200 : 100) : (stand.length < (config.waitingStandSlots ?? 5) ? 0 : -1000);
       if (score > bestScore) { bestScore = score; bestIdx = idx; }
     }
     if (bestIdx === -1) break;
     if (bestScore <= -1000) {
-      const match = available.find(({ tile }) => active.some((l) => l.colorType === tile.colorType && l.collected < 3));
+      const match = available.find(({ tile }) => active.some((l) => matchesLauncher(l, tile)));
       if (match) bestIdx = match.idx; else return null; // unsolvable
     }
 
@@ -705,19 +711,41 @@ export function computeParMoves(config: StudioGameConfig): number | null {
 
     if (simB[bestIdx]) { simA[bestIdx] = simB[bestIdx]; simB[bestIdx] = null; if (simC.length > 0) simB[bestIdx] = simC.shift()!; }
 
-    const matchLauncher = active.find((l) => l.colorType === tile.colorType && l.collected < 3);
+    const matchLauncher = active.find((l) => matchesLauncher(l, tile));
     if (matchLauncher) {
       matchLauncher.collected++;
+      if (matchLauncher.lockedVariant === undefined) matchLauncher.lockedVariant = tile.variant;
       if (matchLauncher.collected >= 3) {
         fired++; active.splice(active.indexOf(matchLauncher), 1);
         if (queue.length > 0) active.push(queue.shift()!);
         let changed = true;
         while (changed) {
           changed = false;
+          active.sort((a, b) => b.collected - a.collected);
           for (const l of active) {
             if (l.collected >= 3) continue;
+            const need = 3 - l.collected;
             const indices: number[] = [];
-            for (let i = 0; i < stand.length && indices.length < 3 - l.collected; i++) { if (stand[i] === l.colorType) indices.push(i); }
+            if (l.lockedVariant !== undefined) {
+              for (let i = 0; i < stand.length && indices.length < need; i++) {
+                if (stand[i].colorType === l.colorType && stand[i].variant === l.lockedVariant) indices.push(i);
+              }
+            } else {
+              const variantGroups = new Map<number, number[]>();
+              for (let i = 0; i < stand.length; i++) {
+                if (stand[i].colorType === l.colorType) {
+                  const v = stand[i].variant;
+                  if (!variantGroups.has(v)) variantGroups.set(v, []);
+                  variantGroups.get(v)!.push(i);
+                }
+              }
+              variantGroups.forEach((vIndices, variant) => {
+                if (indices.length === 0 && vIndices.length >= need) {
+                  indices.push(...vIndices.slice(0, need));
+                  l.lockedVariant = variant;
+                }
+              });
+            }
             if (indices.length > 0) { l.collected += indices.length; for (let j = indices.length - 1; j >= 0; j--) stand.splice(indices[j], 1); changed = true; }
           }
           const nowFiring = active.filter((l) => l.collected >= 3);
@@ -725,7 +753,7 @@ export function computeParMoves(config: StudioGameConfig): number | null {
         }
       }
     } else {
-      stand.push(tile.colorType);
+      stand.push({ colorType: tile.colorType, variant: tile.variant });
     }
   }
 

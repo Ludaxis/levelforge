@@ -1181,7 +1181,7 @@ export function LevelDesignerV2({
     a.download = `${fileName.trim() || levelId}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [palette, levelId, levelNumber, fileName, difficultyResult, artWidth, artHeight, pixelArray, itemsWithLayers, itemDisplayOrder, launchers, groups, maxSelectableItems, seed, blockingOffset, waitingStandSlots, activeLauncherCount]);
+  }, [palette, levelId, levelNumber, fileName, difficultyResult, artWidth, artHeight, pixelArray, itemsWithLayers, itemDisplayOrder, launchers, groups, maxSelectableItems, seed, blockingOffset, waitingStandSlots, activeLauncherCount, moveLimit]);
 
   const handleExportJSON = useCallback(() => {
     if (existingLevelIds.includes(levelId) && !editingLevel) {
