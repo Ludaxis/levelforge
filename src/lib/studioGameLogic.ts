@@ -672,20 +672,14 @@ export function computeParMoves(config: StudioGameConfig): number | null {
   const simB = state.layerB.map((t) => (t ? { ...t } : null));
   const simC = state.layerC.map((t) => ({ ...t }));
 
-  interface SimLauncher { colorType: number; collected: number; lockedVariant: number | undefined }
-  const active: SimLauncher[] = sorted.slice(0, activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0, lockedVariant: undefined }));
-  const queue: SimLauncher[] = sorted.slice(activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0, lockedVariant: undefined }));
-  const stand: { colorType: number; variant: number }[] = [];
+  interface SimLauncher { colorType: number; collected: number }
+  const active: SimLauncher[] = sorted.slice(0, activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0 }));
+  const queue: SimLauncher[] = sorted.slice(activeLauncherCount).map((l) => ({ colorType: l.colorType, collected: 0 }));
+  const stand: number[] = [];
   let fired = 0;
   let moves = 0;
   const totalLaunchers = sorted.length;
   const maxIter = simA.length * 4 + simC.length + 200;
-
-  const matchesLauncher = (l: SimLauncher, tile: StudioTile): boolean => {
-    if (l.colorType !== tile.colorType || l.collected >= 3) return false;
-    if (l.lockedVariant !== undefined) return l.lockedVariant === tile.variant;
-    return true;
-  };
 
   for (let iter = 0; iter < maxIter; iter++) {
     if (fired >= totalLaunchers) return moves;
@@ -695,13 +689,13 @@ export function computeParMoves(config: StudioGameConfig): number | null {
 
     let bestIdx = -1, bestScore = -Infinity;
     for (const { idx, tile } of available) {
-      const launcher = active.find((l) => matchesLauncher(l, tile));
+      const launcher = active.find((l) => l.colorType === tile.colorType && l.collected < 3);
       const score = launcher ? (launcher.collected === 2 ? 200 : 100) : (stand.length < (config.waitingStandSlots ?? 5) ? 0 : -1000);
       if (score > bestScore) { bestScore = score; bestIdx = idx; }
     }
     if (bestIdx === -1) break;
     if (bestScore <= -1000) {
-      const match = available.find(({ tile }) => active.some((l) => matchesLauncher(l, tile)));
+      const match = available.find(({ tile }) => active.some((l) => l.colorType === tile.colorType && l.collected < 3));
       if (match) bestIdx = match.idx; else return null; // unsolvable
     }
 
@@ -711,41 +705,19 @@ export function computeParMoves(config: StudioGameConfig): number | null {
 
     if (simB[bestIdx]) { simA[bestIdx] = simB[bestIdx]; simB[bestIdx] = null; if (simC.length > 0) simB[bestIdx] = simC.shift()!; }
 
-    const matchLauncher = active.find((l) => matchesLauncher(l, tile));
+    const matchLauncher = active.find((l) => l.colorType === tile.colorType && l.collected < 3);
     if (matchLauncher) {
       matchLauncher.collected++;
-      if (matchLauncher.lockedVariant === undefined) matchLauncher.lockedVariant = tile.variant;
       if (matchLauncher.collected >= 3) {
         fired++; active.splice(active.indexOf(matchLauncher), 1);
         if (queue.length > 0) active.push(queue.shift()!);
         let changed = true;
         while (changed) {
           changed = false;
-          active.sort((a, b) => b.collected - a.collected);
           for (const l of active) {
             if (l.collected >= 3) continue;
-            const need = 3 - l.collected;
             const indices: number[] = [];
-            if (l.lockedVariant !== undefined) {
-              for (let i = 0; i < stand.length && indices.length < need; i++) {
-                if (stand[i].colorType === l.colorType && stand[i].variant === l.lockedVariant) indices.push(i);
-              }
-            } else {
-              const variantGroups = new Map<number, number[]>();
-              for (let i = 0; i < stand.length; i++) {
-                if (stand[i].colorType === l.colorType) {
-                  const v = stand[i].variant;
-                  if (!variantGroups.has(v)) variantGroups.set(v, []);
-                  variantGroups.get(v)!.push(i);
-                }
-              }
-              variantGroups.forEach((vIndices, variant) => {
-                if (indices.length === 0 && vIndices.length >= need) {
-                  indices.push(...vIndices.slice(0, need));
-                  l.lockedVariant = variant;
-                }
-              });
-            }
+            for (let i = 0; i < stand.length && indices.length < 3 - l.collected; i++) { if (stand[i] === l.colorType) indices.push(i); }
             if (indices.length > 0) { l.collected += indices.length; for (let j = indices.length - 1; j >= 0; j--) stand.splice(indices[j], 1); changed = true; }
           }
           const nowFiring = active.filter((l) => l.collected >= 3);
@@ -753,7 +725,7 @@ export function computeParMoves(config: StudioGameConfig): number | null {
         }
       }
     } else {
-      stand.push({ colorType: tile.colorType, variant: tile.variant });
+      stand.push(tile.colorType);
     }
   }
 
@@ -1144,7 +1116,6 @@ export function buildChallengingSequenceSeeded(
 
 /** Distribute a tile sequence into three layers by sequence index.
  *  First maxSelectableItems → Layer A, next → Layer B, rest → Layer C.
- *  Designer layer assignments are handled separately in the initializers (depth=0 only).
  */
 function distributeToLayersSeeded(
   sequence: StudioTile[],
@@ -1159,6 +1130,37 @@ function distributeToLayersSeeded(
     else if (idx < 2 * maxSelectableItems) b[idx - maxSelectableItems] = tile;
     else c.push(tile);
   });
+  return { a, b, c };
+}
+
+/**
+ * Distribute tiles into layers using the designer's explicit layer assignments.
+ * Used when importing levels from the Juicy Blast format where the Layer field
+ * is authoritative (not derived from blocking).
+ *
+ * Items are sorted by order within each layer, then placed into A/B/C arrays.
+ * A and B get the first maxSelectableItems slots each; excess goes to C.
+ */
+function distributeByDesignerLayers(
+  tiles: StudioTile[],
+  maxSelectableItems: number,
+): { a: (StudioTile | null)[]; b: (StudioTile | null)[]; c: StudioTile[] } {
+  const a: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
+  const b: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
+  const c: StudioTile[] = [];
+
+  const layerATiles = tiles.filter((t) => t.designerLayer === 'A');
+  const layerBTiles = tiles.filter((t) => t.designerLayer === 'B');
+  const layerCTiles = tiles.filter((t) => t.designerLayer === 'C');
+
+  for (let i = 0; i < layerATiles.length && i < maxSelectableItems; i++) {
+    a[i] = layerATiles[i];
+  }
+  for (let i = 0; i < layerBTiles.length && i < maxSelectableItems; i++) {
+    b[i] = layerBTiles[i];
+  }
+  c.push(...layerCTiles);
+
   return { a, b, c };
 }
 
@@ -1287,6 +1289,16 @@ function buildDerivedLayers(
   }));
 
   const sortedLauncherConfigs = [...launchers].sort((a, b) => a.order - b.order);
+
+  // When ALL tiles have explicit designer layer assignments (imported levels),
+  // use those directly instead of the blocking-based positional assignment.
+  // The designer's Layer field is authoritative for imported Juicy Blast JSONs.
+  const hasDesignerLayers = allTiles.length > 0 && allTiles.every((t) => t.designerLayer != null);
+  if (hasDesignerLayers) {
+    const layers = distributeByDesignerLayers(allTiles, maxSelectableItems);
+    return { layerA: layers.a, layerB: layers.b, layerC: layers.c, sortedLauncherConfigs };
+  }
+
   let layerA: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
   let layerB: (StudioTile | null)[] = new Array(maxSelectableItems).fill(null);
   let layerC: StudioTile[] = [];
@@ -1352,10 +1364,26 @@ export function buildPreviewState(config: StudioGameConfig): StudioGameState {
 
   const sortedLauncherConfigs = [...launchers].sort((a, b) => a.order - b.order);
 
-  const sequence = buildDeterministicSequence(
-    allTiles, sortedLauncherConfigs, activeLauncherCount, blockingOffset, maxSelectableItems,
-  );
-  const { a: layerA, b: layerB, c: layerC } = distributeToLayersSeeded(sequence, maxSelectableItems);
+  // Use designer layers when available (imported levels), otherwise use blocking
+  const hasDesignerLayers = allTiles.length > 0 && allTiles.every((t) => t.designerLayer != null);
+  let layerA: (StudioTile | null)[];
+  let layerB: (StudioTile | null)[];
+  let layerC: StudioTile[];
+
+  if (hasDesignerLayers) {
+    const layers = distributeByDesignerLayers(allTiles, maxSelectableItems);
+    layerA = layers.a;
+    layerB = layers.b;
+    layerC = layers.c;
+  } else {
+    const sequence = buildDeterministicSequence(
+      allTiles, sortedLauncherConfigs, activeLauncherCount, blockingOffset, maxSelectableItems,
+    );
+    const layers = distributeToLayersSeeded(sequence, maxSelectableItems);
+    layerA = layers.a;
+    layerB = layers.b;
+    layerC = layers.c;
+  }
 
   const allLaunchers: StudioLauncherState[] = sortedLauncherConfigs.map((l, i) => ({
     id: `preview-launcher-${i}`,
