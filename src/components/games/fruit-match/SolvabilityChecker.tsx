@@ -1206,20 +1206,20 @@ export function SolvabilityChecker() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border text-left text-muted-foreground">
-                    {([
-                      ['levelId', 'Level'],
-                      ['totalItems', 'Items'],
-                      ['blockingOffset', 'Blk'],
-                      ['greedy', 'Greedy'],
-                      ['winRate', 'MC Win%'],
-                      ['verdict', 'Verdict'],
-                    ] as [SortKey, string][]).map(([key, label]) => (
-                      <th key={key} className="px-3 py-2 cursor-pointer hover:text-foreground select-none" onClick={() => toggleSort(key)}>
-                        {label} {sortKey === key ? (sortDir === 'asc' ? '\u2191' : '\u2193') : ''}
-                      </th>
-                    ))}
+                  <tr className="border-b border-border text-left text-muted-foreground uppercase text-[11px] tracking-wider font-mono">
+                    <th className="px-3 py-2 cursor-pointer hover:text-foreground select-none" onClick={() => toggleSort('levelId')}>
+                      Level {sortKey === 'levelId' ? (sortDir === 'asc' ? '\u2191' : '\u2193') : ''}
+                    </th>
+                    <th className="px-3 py-2 cursor-pointer hover:text-foreground select-none" onClick={() => toggleSort('verdict')}>
+                      Status {sortKey === 'verdict' ? (sortDir === 'asc' ? '\u2191' : '\u2193') : ''}
+                    </th>
+                    <th className="px-3 py-2 text-center">Paths</th>
+                    <th className="px-3 py-2 text-center">Reqs</th>
+                    <th className="px-3 py-2 text-center cursor-pointer hover:text-foreground select-none" onClick={() => toggleSort('totalItems')}>
+                      Items {sortKey === 'totalItems' ? (sortDir === 'asc' ? '\u2191' : '\u2193') : ''}
+                    </th>
                     <th className="px-3 py-2 text-center">Moves</th>
+                    <th className="px-3 py-2 text-center">Direct</th>
                     <th className="px-3 py-2 text-center">Queue</th>
                     <th className="px-3 py-2 w-8" />
                   </tr>
@@ -1228,6 +1228,7 @@ export function SolvabilityChecker() {
                   {displayLevels.map((r) => {
                     const isExpanded = expandedId === r.levelId;
                     const qm = r.moveAnalysis?.queueMoves ?? 0;
+                    const paths = r.dfs?.solutionCount ?? (r.greedy.solved ? 1 : 0);
                     return (
                       <tr key={r.levelId} className="group">
                         <td colSpan={9} className="p-0">
@@ -1238,16 +1239,20 @@ export function SolvabilityChecker() {
                             <span className="w-24 font-mono cursor-pointer hover:text-primary" onClick={(e) => { e.stopPropagation(); setSelectedLevelId(r.levelId); setDetailTab('layers'); }}>
                               {r.levelId}
                             </span>
-                            <span className="w-16 text-center">{r.totalItems}</span>
-                            <span className="w-12 text-center">{r.blockingOffset}</span>
-                            <span className="w-16 text-center">{r.greedy.solved ? <span className="text-green-400">PASS</span> : <span className="text-red-400">FAIL</span>}</span>
-                            <span className={`w-20 text-center font-medium ${r.monteCarlo.winRate >= 0.5 ? 'text-green-400' : r.monteCarlo.winRate > 0 ? 'text-yellow-400' : 'text-red-400'}`}>
-                              {(r.monteCarlo.winRate * 100).toFixed(1)}%
+                            <span className="w-20">
+                              {r.verdict === 'solvable'
+                                ? <span className="text-green-400 font-medium">&#10003;</span>
+                                : r.verdict === 'risky'
+                                  ? <span className="text-yellow-400 font-medium">~</span>
+                                  : <span className="text-red-400 font-medium">&#10007;</span>}
                             </span>
-                            <span className="w-20"><VerdictBadge verdict={r.verdict} /></span>
+                            <span className="w-16 text-center font-mono text-xs">{paths || '-'}</span>
+                            <span className="w-16 text-center font-mono text-xs">{r.totalLaunchers}</span>
+                            <span className="w-16 text-center font-mono text-xs">{r.totalItems}</span>
                             <span className="w-16 text-center font-mono text-xs">{r.moveAnalysis?.totalMoves ?? '-'}</span>
+                            <span className="w-16 text-center font-mono text-xs text-green-400">{r.moveAnalysis?.directMoves ?? '-'}</span>
                             <span className={`w-16 text-center font-mono text-xs ${qm > 3 ? 'text-red-400' : qm > 0 ? 'text-yellow-400' : 'text-green-400'}`}>
-                              {qm}
+                              {r.moveAnalysis ? qm : '-'}
                             </span>
                             <span className="w-8 text-muted-foreground">
                               {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -1256,17 +1261,15 @@ export function SolvabilityChecker() {
                           {isExpanded && (
                             <div className="px-6 py-3 bg-muted/30 border-b border-border/50 text-xs space-y-1">
                               <div className="flex gap-6">
-                                <span>Items: {r.totalItems}</span>
-                                <span>Launchers: {r.totalLaunchers}</span>
                                 <span>Colors: {r.uniqueColors}</span>
                                 <span>MaxSel: {r.maxSelectableItems}</span>
+                                <span>Blocking: {r.blockingOffset}</span>
                                 <span>Stand: {r.waitingStandSlots}</span>
                                 <span>Active: {r.activeLauncherCount}</span>
                               </div>
                               <div>Greedy: {r.greedy.solved ? `PASS in ${r.greedy.moves} moves` : `FAIL (${r.greedy.deadEndReason})`}{r.greedy.peakStandUsage > 0 && ` | peak stand ${r.greedy.peakStandUsage}/${r.waitingStandSlots}`}</div>
-                              <div>MC: {(r.monteCarlo.winRate * 100).toFixed(1)}% win ({r.monteCarlo.wins}/{r.monteCarlo.runs}){r.monteCarlo.wins > 0 && ` | avg ${r.monteCarlo.avgMoves.toFixed(0)} moves`} | 95% CI: [{(r.monteCarlo.confidenceInterval[0] * 100).toFixed(1)}, {(r.monteCarlo.confidenceInterval[1] * 100).toFixed(1)}]%</div>
-                              {r.dfs && <div>DFS: {r.dfs.verdict} | {r.dfs.solutionCount} solutions, {r.dfs.deadEndCount} dead-ends | explored {r.dfs.exploredStates} states{r.dfs.timedOut && ' (timed out)'}{r.dfs.solvable && ` | moves: ${r.dfs.minMoves}-${r.dfs.maxMoves}`}</div>}
-                              {r.moveAnalysis && <div>Moves: {r.moveAnalysis.totalMoves} total ({r.moveAnalysis.directMoves} direct + {r.moveAnalysis.queueMoves} queue)</div>}
+                              <div>MC: {(r.monteCarlo.winRate * 100).toFixed(1)}% win ({r.monteCarlo.wins}/{r.monteCarlo.runs}){r.monteCarlo.wins > 0 && ` | avg ${r.monteCarlo.avgMoves.toFixed(0)} moves`}</div>
+                              {r.dfs && <div>DFS: {r.dfs.verdict} | {r.dfs.solutionCount} solutions, {r.dfs.exploredStates} states{r.dfs.timedOut && ' (timed out)'}</div>}
                               <Button size="sm" variant="outline" className="h-6 text-xs mt-1" onClick={() => { setSelectedLevelId(r.levelId); setDetailTab('layers'); }}>
                                 View Detail
                               </Button>
