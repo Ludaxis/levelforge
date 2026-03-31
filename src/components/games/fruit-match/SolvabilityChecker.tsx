@@ -478,6 +478,16 @@ function applyDifficultyDeltas(
         }
       }
     }
+    // Re-order items into a canonical sequence (L0→L1→L2) and clear Layer
+    // so the solver re-derives layers from the new BlockingOffset.
+    // Without this canonical order, the blocking algorithm produces bad results
+    // because the original Order field doesn't represent layer positions.
+    const l0 = items.filter((it) => it.Layer === 0);
+    const l1 = items.filter((it) => it.Layer === 1);
+    const l2 = items.filter((it) => it.Layer === 2);
+    const reordered = [...l0, ...l1, ...l2];
+    items = reordered.map((item, idx) => ({ ...item, Layer: -1, Order: idx }));
+
     return { ...level, BlockingOffset: newBlocking, MismatchDepth: newBlocking / 10, MaxSelectableItems: newMax, SelectableItems: items };
   });
 }

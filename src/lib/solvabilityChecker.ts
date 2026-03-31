@@ -131,7 +131,7 @@ export function studioExportToGameConfig(level: StudioExportLevel): StudioGameCo
       colorType: item.ColorType,
       variant: item.Variant ?? 0,
       order: typeof item.Order === 'number' ? item.Order : idx,
-      layer: layerNames[item.Layer] || ('A' as const),
+      layer: layerNames[item.Layer],
     })),
     launchers: (level.Launchers || [])
       .sort((a, b) => a.Order - b.Order)
