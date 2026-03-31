@@ -47,6 +47,13 @@ export interface DFSResult {
   maxMoves: number;
   verdict: 'always' | 'sometimes' | 'never';
   timedOut: boolean;
+  solutionPath?: number[]; // item indices of the first solution found
+}
+
+export interface MoveAnalysis {
+  totalMoves: number;
+  directMoves: number;  // picks placed directly in a matching slot
+  queueMoves: number;   // picks that went to waiting queue
 }
 
 export interface LevelReport {
@@ -62,6 +69,8 @@ export interface LevelReport {
   monteCarlo: MonteCarloResult;
   dfs?: DFSResult;
   verdict: 'solvable' | 'risky' | 'stuck';
+  solutionPath?: number[];  // item indices of the best solution (greedy or DFS)
+  moveAnalysis?: MoveAnalysis;
 }
 
 export interface BatchReport {
@@ -141,7 +150,7 @@ export function studioExportToGameConfig(level: StudioExportLevel): StudioGameCo
 // Lightweight solver types (matches reference level_tool)
 // ============================================================================
 
-interface SolverItem {
+export interface SolverItem {
   ColorType: number;
   Variant: number;
   idx: number;
@@ -173,7 +182,7 @@ interface SolverState {
 // Config → solver input extraction
 // ============================================================================
 
-interface SolverInput {
+export interface SolverInput {
   L0: SolverItem[];
   L1: SolverItem[];
   L2: SolverItem[];
@@ -182,7 +191,7 @@ interface SolverInput {
   slotCount: number;
 }
 
-function configToSolverInput(config: StudioGameConfig): SolverInput {
+export function configToSolverInput(config: StudioGameConfig): SolverInput {
   // Split items into layers by designer layer (authoritative)
   const allItems = [...config.selectableItems].sort((a, b) => a.order - b.order);
 
@@ -436,12 +445,14 @@ export function solveDFS(
   let maxMoves = 0;
   let timedOut = false;
   let foundSolution = false;
+  let firstSolutionPicks: number[] | null = null;
 
   function dfs(state: SolverState): void {
     if (explored++ > stateLimit || foundSolution) return;
     if (state.cr >= totalReqs) {
       solutions++;
       foundSolution = true;
+      firstSolutionPicks = [...state.picks];
       minMoves = Math.min(minMoves, state.picks.length);
       maxMoves = Math.max(maxMoves, state.picks.length);
       return;
@@ -547,6 +558,12 @@ export function solveDFS(
         ? 'sometimes'
         : 'never';
 
+  // Convert position picks to item indices using replay
+  let solutionPath: number[] | undefined;
+  if (firstSolutionPicks) {
+    solutionPath = positionPicksToItemIndices(firstSolutionPicks, input);
+  }
+
   return {
     solvable,
     solutionCount: solutions,
@@ -556,7 +573,126 @@ export function solveDFS(
     maxMoves,
     verdict,
     timedOut,
+    solutionPath,
   };
+}
+
+// ============================================================================
+// Solution path helpers
+// ============================================================================
+
+/** Convert position-based picks to item indices by replaying the picks. */
+function positionPicksToItemIndices(picks: number[], input: SolverInput): number[] {
+  const { L0, L1, L2 } = input;
+  const pos: SolverPos[] = L0.map((it, i) => ({
+    vis: { ...it },
+    beh: i < L1.length ? { ...L1[i] } : null,
+  }));
+  let l2i = 0;
+  const itemIndices: number[] = [];
+
+  for (const pi of picks) {
+    const p = pos[pi];
+    if (!p.vis) continue;
+    itemIndices.push(p.vis.idx);
+    if (p.beh) {
+      p.vis = { ...p.beh };
+      p.beh = l2i < L2.length ? { ...L2[l2i++] } : null;
+    } else {
+      p.vis = null;
+    }
+  }
+  return itemIndices;
+}
+
+/** Analyze a solution path: classify each pick as direct (slot match) or queue. */
+export function analyzeMoves(
+  path: number[],
+  input: SolverInput,
+): MoveAnalysis {
+  if (!path.length) return { totalMoves: 0, directMoves: 0, queueMoves: 0 };
+
+  const { L0, L1, L2, reqs, maxWait, slotCount } = input;
+  const pos: SolverPos[] = L0.map((it, i) => ({
+    vis: { ...it },
+    beh: i < L1.length ? { ...L1[i] } : null,
+  }));
+  let l2i = 0;
+  let nri = 0;
+  const wq: SolverItem[] = [];
+  const slots: (SolverSlot | null)[] = new Array(slotCount).fill(null);
+  let cr = 0;
+  let direct = 0;
+  let queue = 0;
+
+  function loadSlotLocal(si: number) {
+    if (nri >= reqs.length) { slots[si] = null; return; }
+    const ri = nri++;
+    slots[si] = { ri, ct: reqs[ri].ColorType, items: [], vl: null };
+    let ch = true;
+    while (ch && slots[si] && slots[si]!.items.length < 3) {
+      ch = false;
+      for (let wi = 0; wi < wq.length; wi++) {
+        const w = wq[wi];
+        const sl = slots[si]!;
+        if (w.ColorType !== sl.ct) continue;
+        if (sl.vl !== null && w.Variant !== sl.vl) continue;
+        wq.splice(wi, 1);
+        if (sl.items.length === 0) sl.vl = w.Variant;
+        sl.items.push(w);
+        ch = true;
+        break;
+      }
+    }
+    if (slots[si] && slots[si]!.items.length >= 3) {
+      cr++;
+      loadSlotLocal(si);
+    }
+  }
+
+  for (let si = 0; si < slotCount; si++) loadSlotLocal(si);
+
+  for (const itemIdx of path) {
+    // Find position with this item visible
+    let pi = -1;
+    for (let i = 0; i < pos.length; i++) {
+      if (pos[i].vis && pos[i].vis!.idx === itemIdx) { pi = i; break; }
+    }
+    if (pi < 0) continue;
+
+    const item = { ...pos[pi].vis! };
+    // Reveal next
+    if (pos[pi].beh) {
+      pos[pi].vis = { ...pos[pi].beh! };
+      pos[pi].beh = l2i < L2.length ? { ...L2[l2i++] } : null;
+    } else {
+      pos[pi].vis = null;
+    }
+
+    // Try placing in slot
+    const ms: number[] = [];
+    for (let si = 0; si < slots.length; si++) {
+      const sl = slots[si];
+      if (!sl || item.ColorType !== sl.ct) continue;
+      if (sl.vl !== null && item.Variant !== sl.vl) continue;
+      ms.push(si);
+    }
+    ms.sort((a, b) => (slots[b]?.items.length ?? 0) - (slots[a]?.items.length ?? 0));
+
+    if (ms.length > 0) {
+      const si = ms[0];
+      const sl = slots[si]!;
+      if (sl.items.length === 0) sl.vl = item.Variant;
+      sl.items.push(item);
+      direct++;
+      if (sl.items.length >= 3) { cr++; loadSlotLocal(si); }
+    } else {
+      wq.push(item);
+      queue++;
+    }
+  }
+
+  return { totalMoves: path.length, directMoves: direct, queueMoves: queue };
 }
 
 // ============================================================================
@@ -743,6 +879,18 @@ export function analyzeSingleLevel(
 
   const uniqueColors = new Set(config.selectableItems.map((i) => i.colorType)).size;
 
+  // Build solution path: prefer greedy (position picks → item indices), fall back to DFS
+  const input = configToSolverInput(config);
+  let solutionPath: number[] | undefined;
+  if (greedy.solved && greedy.moveSequence.length > 0) {
+    solutionPath = positionPicksToItemIndices(greedy.moveSequence, input);
+  } else if (dfs?.solutionPath) {
+    solutionPath = dfs.solutionPath;
+  }
+
+  // Move analysis on the solution path
+  const moveAnalysis = solutionPath ? analyzeMoves(solutionPath, input) : undefined;
+
   return {
     levelId: level.LevelId || 'unknown',
     totalItems: config.selectableItems.length,
@@ -756,6 +904,8 @@ export function analyzeSingleLevel(
     monteCarlo,
     dfs,
     verdict,
+    solutionPath,
+    moveAnalysis,
   };
 }
 
