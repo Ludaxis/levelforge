@@ -516,22 +516,33 @@ function verifySolvability(
     }
     if (available.length === 0) break;
 
-    // Score each pick option
+    // B-aware scoring: 3=slot match, 2=behind matches slot, 1=queue room
     let bestIdx = -1;
     let bestScore = -Infinity;
 
-    for (const { idx, tile } of available) {
-      const launcher = active.find((l) => {
-        if (l.colorType !== tile.colorType || l.collected >= 3) return false;
-        if (l.lockedVariant !== undefined) return l.lockedVariant === tile.variant;
+    const matchesAnyActive = (ct: number, v: number | undefined): boolean =>
+      active.some((l) => {
+        if (l.colorType !== ct || l.collected >= 3) return false;
+        if (v !== undefined && l.lockedVariant !== undefined) return l.lockedVariant === v;
         return true;
       });
+
+    for (const { idx, tile } of available) {
       let score: number;
-      if (launcher) {
-        // Prefer completing a launcher (causes fire + cascade)
-        score = launcher.collected === 2 ? 200 : 100;
+      if (matchesAnyActive(tile.colorType, tile.variant)) {
+        const launcher = active.find((l) => {
+          if (l.colorType !== tile.colorType || l.collected >= 3) return false;
+          if (l.lockedVariant !== undefined) return l.lockedVariant === tile.variant;
+          return true;
+        });
+        score = launcher && launcher.collected === 2 ? 200 : 100;
       } else if (stand.length < waitingStandSlots) {
-        score = 0; // Goes to stand, but room available
+        score = 0;
+        // B-aware: bonus if behind tile matches an active launcher
+        const bTile = simB[idx];
+        if (bTile && matchesAnyActive(bTile.colorType, bTile.variant)) {
+          score = 50;
+        }
       } else {
         score = -1000; // Would overflow stand
       }
@@ -1164,7 +1175,7 @@ function distributeByDesignerLayers(
   return { a, b, c };
 }
 
-/** Greedy solvability check for seeded arrangements (variant-aware). */
+/** Greedy solvability check for seeded arrangements (variant-aware, B-layer-aware). */
 function verifySolvabilitySeeded(
   layerA: (StudioTile | null)[],
   layerB: (StudioTile | null)[],
@@ -1184,28 +1195,47 @@ function verifySolvabilitySeeded(
   let fired = 0;
   const totalLaunchers = sorted.length;
   const maxIter = layerA.length * 4 + layerC.length + 200;
+
+  function matchesActive(ct: number, variant: number | undefined): boolean {
+    return active.some((l) => {
+      if (l.colorType !== ct || l.collected >= 3) return false;
+      if (variant !== undefined && l.lockedVariant !== undefined) return l.lockedVariant === variant;
+      return true;
+    });
+  }
+
   for (let iter = 0; iter < maxIter; iter++) {
     if (fired >= totalLaunchers) return true;
     const available: { idx: number; tile: StudioTile }[] = [];
     for (let i = 0; i < simA.length; i++) { if (simA[i]) available.push({ idx: i, tile: simA[i]! }); }
     if (available.length === 0) break;
+
+    // B-aware scoring: 3=slot match, 2=behind matches slot, 1=queue room
     let bestIdx = -1, bestScore = -Infinity;
     for (const { idx, tile } of available) {
-      const launcher = active.find((l) => {
-        if (l.colorType !== tile.colorType || l.collected >= 3) return false;
-        if (l.lockedVariant !== undefined) return l.lockedVariant === tile.variant;
-        return true;
-      });
-      const score = launcher ? (launcher.collected === 2 ? 200 : 100) : (stand.length < waitingStandSlots ? 0 : -1000);
+      let score: number;
+      if (matchesActive(tile.colorType, tile.variant)) {
+        const launcher = active.find((l) => {
+          if (l.colorType !== tile.colorType || l.collected >= 3) return false;
+          if (l.lockedVariant !== undefined) return l.lockedVariant === tile.variant;
+          return true;
+        });
+        score = launcher && launcher.collected === 2 ? 200 : 100;
+      } else if (stand.length < waitingStandSlots) {
+        score = 0;
+        // B-aware: bonus if behind tile matches an active launcher
+        const bTile = simB[idx];
+        if (bTile && matchesActive(bTile.colorType, bTile.variant)) {
+          score = 50;
+        }
+      } else {
+        score = -1000;
+      }
       if (score > bestScore) { bestScore = score; bestIdx = idx; }
     }
     if (bestIdx === -1) break;
     if (bestScore <= -1000) {
-      const match = available.find(({ tile }) => active.some((l) => {
-        if (l.colorType !== tile.colorType || l.collected >= 3) return false;
-        if (l.lockedVariant !== undefined) return l.lockedVariant === tile.variant;
-        return true;
-      }));
+      const match = available.find(({ tile }) => matchesActive(tile.colorType, tile.variant));
       if (match) bestIdx = match.idx; else return false;
     }
     const tile = simA[bestIdx]!;

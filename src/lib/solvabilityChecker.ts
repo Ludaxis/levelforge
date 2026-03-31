@@ -1,8 +1,10 @@
 /**
  * Solvability Checker Engine
  *
- * Parses level JSONs and determines whether they are completable using
- * multiple strategies: greedy, Monte Carlo (multi-seed), and DFS with pruning.
+ * Port of the reference level_tool solver.
+ * Uses a lightweight self-contained simulation that operates directly on
+ * L0/L1/L2 layers with B-aware scoring, drain-pipe greedy, and strategic
+ * DFS branching on placement choice (slot vs queue).
  */
 
 import {
@@ -136,8 +138,432 @@ export function studioExportToGameConfig(level: StudioExportLevel): StudioGameCo
 }
 
 // ============================================================================
-// Scoring helper (shared by greedy and semi-random)
+// Lightweight solver types (matches reference level_tool)
 // ============================================================================
+
+interface SolverItem {
+  ColorType: number;
+  Variant: number;
+  idx: number;
+}
+
+interface SolverPos {
+  vis: SolverItem | null;
+  beh: SolverItem | null;
+}
+
+interface SolverSlot {
+  ri: number;
+  ct: number;
+  items: SolverItem[];
+  vl: number | null; // variant lock
+}
+
+interface SolverState {
+  pos: SolverPos[];
+  l2i: number;
+  nri: number; // next requirement index
+  slots: (SolverSlot | null)[];
+  wq: SolverItem[];
+  cr: number; // completed requirements
+  picks: number[];
+}
+
+// ============================================================================
+// Config → solver input extraction
+// ============================================================================
+
+interface SolverInput {
+  L0: SolverItem[];
+  L1: SolverItem[];
+  L2: SolverItem[];
+  reqs: { ColorType: number; order: number }[];
+  maxWait: number;
+  slotCount: number;
+}
+
+function configToSolverInput(config: StudioGameConfig): SolverInput {
+  // Split items into layers by designer layer (authoritative)
+  const allItems = [...config.selectableItems].sort((a, b) => a.order - b.order);
+
+  const hasDesignerLayers = allItems.length > 0 && allItems.every((it) => it.layer != null);
+
+  let L0: SolverItem[];
+  let L1: SolverItem[];
+  let L2: SolverItem[];
+
+  if (hasDesignerLayers) {
+    L0 = allItems.filter((it) => it.layer === 'A').map((it, i) => ({ ColorType: it.colorType, Variant: it.variant, idx: i }));
+    L1 = allItems.filter((it) => it.layer === 'B').map((it, i) => ({ ColorType: it.colorType, Variant: it.variant, idx: 100 + i }));
+    L2 = allItems.filter((it) => it.layer === 'C').map((it, i) => ({ ColorType: it.colorType, Variant: it.variant, idx: 200 + i }));
+  } else {
+    // Fallback: positional assignment
+    const N = config.maxSelectableItems;
+    L0 = allItems.slice(0, N).map((it, i) => ({ ColorType: it.colorType, Variant: it.variant, idx: i }));
+    L1 = allItems.slice(N, 2 * N).map((it, i) => ({ ColorType: it.colorType, Variant: it.variant, idx: 100 + i }));
+    L2 = allItems.slice(2 * N).map((it, i) => ({ ColorType: it.colorType, Variant: it.variant, idx: 200 + i }));
+  }
+
+  // Requirements = launchers sorted by order
+  const reqs = [...config.launchers]
+    .sort((a, b) => a.order - b.order)
+    .map((l, i) => ({ ColorType: l.colorType, order: i }));
+
+  return {
+    L0, L1, L2, reqs,
+    maxWait: config.waitingStandSlots,
+    slotCount: config.activeLauncherCount ?? 2,
+  };
+}
+
+// ============================================================================
+// Lightweight solver core (matches reference level_tool)
+// ============================================================================
+
+function makeState(input: SolverInput): SolverState {
+  const pos: SolverPos[] = input.L0.map((it, i) => ({
+    vis: { ...it },
+    beh: i < input.L1.length ? { ...input.L1[i] } : null,
+  }));
+  return { pos, l2i: 0, nri: 0, slots: new Array(input.slotCount).fill(null), wq: [], cr: 0, picks: [] };
+}
+
+function cloneState(s: SolverState): SolverState {
+  return {
+    pos: s.pos.map((p) => ({
+      vis: p.vis ? { ...p.vis } : null,
+      beh: p.beh ? { ...p.beh } : null,
+    })),
+    l2i: s.l2i,
+    nri: s.nri,
+    slots: s.slots.map((sl) =>
+      sl ? { ri: sl.ri, ct: sl.ct, items: sl.items.map((x) => ({ ...x })), vl: sl.vl } : null,
+    ),
+    wq: s.wq.map((w) => ({ ...w })),
+    cr: s.cr,
+    picks: [...s.picks],
+  };
+}
+
+function loadSlot(s: SolverState, si: number, reqs: SolverInput['reqs'], maxWait: number): void {
+  if (s.nri >= reqs.length) {
+    s.slots[si] = null;
+    return;
+  }
+  const ri = s.nri++;
+  s.slots[si] = { ri, ct: reqs[ri].ColorType, items: [], vl: null };
+
+  // Auto-fill from waiting queue (cascade)
+  let changed = true;
+  while (changed && s.slots[si] && s.slots[si]!.items.length < 3) {
+    changed = false;
+    for (let wi = 0; wi < s.wq.length; wi++) {
+      const w = s.wq[wi];
+      const slot = s.slots[si]!;
+      if (w.ColorType !== slot.ct) continue;
+      if (slot.vl !== null && w.Variant !== slot.vl) continue;
+      s.wq.splice(wi, 1);
+      if (slot.items.length === 0) slot.vl = w.Variant;
+      slot.items.push(w);
+      changed = true;
+      break;
+    }
+  }
+  // If slot completed from cascade, load next
+  if (s.slots[si] && s.slots[si]!.items.length >= 3) {
+    s.cr++;
+    loadSlot(s, si, reqs, maxWait);
+  }
+}
+
+function pickSurface(s: SolverState, pi: number, L2: SolverItem[]): SolverItem {
+  const p = { ...s.pos[pi].vis! };
+  if (s.pos[pi].beh) {
+    s.pos[pi].vis = { ...s.pos[pi].beh! };
+    s.pos[pi].beh = s.l2i < L2.length ? { ...L2[s.l2i++] } : null;
+  } else {
+    s.pos[pi].vis = null;
+  }
+  return p;
+}
+
+function placeItem(
+  s: SolverState,
+  p: SolverItem,
+  tgt: number,
+  reqs: SolverInput['reqs'],
+  maxWait: number,
+): boolean {
+  if (tgt >= 0) {
+    const sl = s.slots[tgt]!;
+    if (sl.items.length === 0) sl.vl = p.Variant;
+    sl.items.push(p);
+    if (sl.items.length >= 3) {
+      s.cr++;
+      loadSlot(s, tgt, reqs, maxWait);
+    }
+  } else {
+    s.wq.push(p);
+    if (s.wq.length >= maxWait) return false;
+  }
+  return true;
+}
+
+/** Find matching slots for an item. Returns slot indices sorted by fullest first. */
+function findMatchSlots(s: SolverState, item: SolverItem): number[] {
+  const ms: number[] = [];
+  for (let si = 0; si < s.slots.length; si++) {
+    const sl = s.slots[si];
+    if (!sl || item.ColorType !== sl.ct) continue;
+    if (sl.vl !== null && item.Variant !== sl.vl) continue;
+    ms.push(si);
+  }
+  ms.sort((a, b) => (s.slots[b]?.items.length ?? 0) - (s.slots[a]?.items.length ?? 0));
+  return ms;
+}
+
+/** Check if a behind-tile matches any active slot. */
+function behindMatchesSlot(s: SolverState, beh: SolverItem | null): boolean {
+  if (!beh) return false;
+  return s.slots.some((sl) => {
+    if (!sl) return false;
+    if (beh.ColorType !== sl.ct) return false;
+    if (sl.vl !== null && beh.Variant !== sl.vl) return false;
+    return true;
+  });
+}
+
+// ============================================================================
+// Greedy solver — drain-pipe strategy (matches reference level_tool)
+// ============================================================================
+
+export function solveGreedy(config: StudioGameConfig): SolverResult {
+  const input = configToSolverInput(config);
+  const { L0, L1, L2, reqs, maxWait, slotCount } = input;
+  const totalReqs = reqs.length;
+
+  // Try each position as a "drain pipe" — pick repeatedly to cycle L2
+  for (let drainPos = 0; drainPos < L0.length; drainPos++) {
+    const init = makeState(input);
+    for (let si = 0; si < slotCount; si++) loadSlot(init, si, reqs, maxWait);
+    if (!init.pos[drainPos]?.vis) continue;
+
+    const s = cloneState(init);
+    const maxIter = totalReqs * 3 + 30;
+    let lastPick = -1;
+    let peakStand = 0;
+
+    for (let iter = 0; iter < maxIter && s.cr < totalReqs; iter++) {
+      const avail: number[] = [];
+      for (let i = 0; i < s.pos.length; i++) if (s.pos[i].vis) avail.push(i);
+      if (avail.length === 0) break;
+
+      // Score each pick: 3=slot match, 2=behind matches, 1.5=drain, 1=queue room
+      const scored = avail.map((pi) => {
+        const v = s.pos[pi].vis!;
+        const beh = s.pos[pi].beh;
+        let score = 0;
+        // Direct slot match
+        for (let si = 0; si < s.slots.length; si++) {
+          const sl = s.slots[si];
+          if (!sl) continue;
+          if (v.ColorType === sl.ct && (sl.vl === null || v.Variant === sl.vl)) score = 3;
+        }
+        // Behind matches slot
+        if (score < 3 && beh) {
+          if (behindMatchesSlot(s, beh)) score = Math.max(score, 2);
+        }
+        // Non-matching but queue has room
+        if (score < 2 && s.wq.length < maxWait) {
+          score = Math.max(score, 1);
+          if (pi === drainPos || pi === lastPick) score = Math.max(score, 1.5);
+        }
+        return { pi, score };
+      }).filter((x) => x.score > 0);
+
+      scored.sort((a, b) => b.score - a.score);
+      if (scored.length === 0) break;
+
+      const pi = scored[0].pi;
+      const ns = cloneState(s);
+      const p = pickSurface(ns, pi, L2);
+
+      const ms = findMatchSlots(ns, p);
+      if (ms.length > 0) {
+        placeItem(ns, p, ms[0], reqs, maxWait);
+      } else {
+        ns.wq.push(p);
+        if (ns.wq.length >= maxWait) break;
+      }
+      ns.picks.push(pi);
+      lastPick = pi;
+      peakStand = Math.max(peakStand, ns.wq.length);
+
+      // Copy back
+      s.pos = ns.pos; s.l2i = ns.l2i; s.nri = ns.nri;
+      s.slots = ns.slots; s.wq = ns.wq; s.cr = ns.cr; s.picks = ns.picks;
+    }
+
+    if (s.cr >= totalReqs) {
+      return {
+        solved: true,
+        moves: s.picks.length,
+        peakStandUsage: peakStand,
+        moveSequence: s.picks,
+      };
+    }
+  }
+
+  return { solved: false, moves: 0, peakStandUsage: 0, moveSequence: [], deadEndReason: 'no_tiles' };
+}
+
+// ============================================================================
+// DFS solver — strategic queue branching (matches reference level_tool)
+// ============================================================================
+
+export function solveDFS(
+  config: StudioGameConfig,
+  stateLimit: number = 10000,
+): DFSResult {
+  const input = configToSolverInput(config);
+  const { L0, L1, L2, reqs, maxWait, slotCount } = input;
+  const totalReqs = reqs.length;
+
+  let solutions = 0;
+  let deadEnds = 0;
+  let explored = 0;
+  let minMoves = Infinity;
+  let maxMoves = 0;
+  let timedOut = false;
+  let foundSolution = false;
+
+  function dfs(state: SolverState): void {
+    if (explored++ > stateLimit || foundSolution) return;
+    if (state.cr >= totalReqs) {
+      solutions++;
+      foundSolution = true;
+      minMoves = Math.min(minMoves, state.picks.length);
+      maxMoves = Math.max(maxMoves, state.picks.length);
+      return;
+    }
+
+    const avail: number[] = [];
+    for (let i = 0; i < state.pos.length; i++) if (state.pos[i].vis) avail.push(i);
+    if (avail.length === 0) { deadEnds++; return; }
+
+    // Dedup: items with same CT+V and same behind CT+V are interchangeable
+    const seen = new Set<string>();
+    const deduped: number[] = [];
+    for (const pi of avail) {
+      const v = state.pos[pi].vis!;
+      const b = state.pos[pi].beh;
+      const k = `${v.ColorType}_${v.Variant}_${b ? `${b.ColorType}_${b.Variant}` : 'x'}`;
+      if (!seen.has(k)) { seen.add(k); deduped.push(pi); }
+    }
+
+    // Sort: 3=direct match, 2=behind matches, 1=other (B-aware ordering)
+    deduped.sort((a, b) => {
+      let sA = 0; let sB = 0;
+      for (let si = 0; si < state.slots.length; si++) {
+        const sl = state.slots[si];
+        if (!sl) continue;
+        const ia = state.pos[a].vis!;
+        const ib = state.pos[b].vis!;
+        if (ia.ColorType === sl.ct && (sl.vl === null || ia.Variant === sl.vl)) sA = 3;
+        if (ib.ColorType === sl.ct && (sl.vl === null || ib.Variant === sl.vl)) sB = 3;
+      }
+      if (sA < 3 && behindMatchesSlot(state, state.pos[a].beh)) sA = Math.max(sA, 2);
+      if (sB < 3 && behindMatchesSlot(state, state.pos[b].beh)) sB = Math.max(sB, 2);
+      return sB - sA;
+    });
+
+    for (const pi of deduped) {
+      if (foundSolution || explored > stateLimit) return;
+      const item = state.pos[pi].vis!;
+
+      const matchSlots = findMatchSlots(state, item);
+
+      // Build placement targets: slot(s) + strategic queue
+      const targets: number[] = [];
+      if (matchSlots.length > 0) targets.push(...matchSlots);
+
+      // Allow queue pick if: queue not full AND (no match OR behind is useful)
+      if (state.wq.length < maxWait - 1) {
+        if (matchSlots.length === 0) {
+          targets.push(-1);
+        } else {
+          // Even matching items: try queue if behind item matches a slot
+          if (behindMatchesSlot(state, state.pos[pi].beh)) targets.push(-1);
+        }
+      } else if (matchSlots.length === 0 && state.wq.length < maxWait) {
+        targets.push(-1); // last queue slot, only for non-matching
+      }
+
+      if (targets.length === 0) continue;
+
+      for (const tgt of targets) {
+        if (foundSolution || explored > stateLimit) return;
+        const ns = cloneState(state);
+        const p = pickSurface(ns, pi, L2);
+        if (placeItem(ns, p, tgt, reqs, maxWait)) {
+          ns.picks.push(pi);
+          dfs(ns);
+        } else {
+          deadEnds++;
+        }
+      }
+    }
+  }
+
+  // Try starting from each position (like reference tool)
+  for (let fp = 0; fp < L0.length; fp++) {
+    if (foundSolution) break;
+    const init = makeState(input);
+    for (let si = 0; si < slotCount; si++) loadSlot(init, si, reqs, maxWait);
+    if (!init.pos[fp]?.vis) continue;
+
+    const item = init.pos[fp].vis!;
+    const matchSlots = findMatchSlots(init, item);
+    const targets = matchSlots.length > 0 ? matchSlots : [-1];
+
+    for (const tgt of targets) {
+      if (foundSolution) break;
+      const ns = cloneState(init);
+      const p = pickSurface(ns, fp, L2);
+      if (placeItem(ns, p, tgt, reqs, maxWait)) {
+        ns.picks.push(fp);
+        dfs(ns);
+      }
+    }
+  }
+
+  if (explored > stateLimit) timedOut = true;
+
+  const solvable = solutions > 0;
+  const verdict: DFSResult['verdict'] =
+    solvable && deadEnds === 0 && !timedOut
+      ? 'always'
+      : solvable
+        ? 'sometimes'
+        : 'never';
+
+  return {
+    solvable,
+    solutionCount: solutions,
+    deadEndCount: deadEnds,
+    exploredStates: explored,
+    minMoves: solvable ? minMoves : 0,
+    maxMoves,
+    verdict,
+    timedOut,
+  };
+}
+
+// ============================================================================
+// Monte Carlo solver (multi-seed, blended strategies)
+// ============================================================================
+
+type Strategy = 'greedy' | 'semi-random' | 'random' | 'strategic';
 
 function scoreAvailableTiles(state: StudioGameState): { idx: number; score: number }[] {
   const available: { idx: number; score: number }[] = [];
@@ -156,7 +582,17 @@ function scoreAvailableTiles(state: StudioGameState): { idx: number; score: numb
     if (launcher) {
       score = launcher.collected.length === 2 ? 200 : 100;
     } else if (state.waitingStand.length < state.waitingStandSlots) {
+      // B-aware: bonus if behind tile matches a launcher
       score = 0;
+      const bTile = state.layerB[i];
+      if (bTile) {
+        const bMatches = state.activeLaunchers.some((l) => {
+          if (l.colorType !== bTile.colorType || l.collected.length >= 3) return false;
+          if (l.collected.length > 0) return l.collected[0].variant === bTile.variant;
+          return true;
+        });
+        if (bMatches) score = 50;
+      }
     } else {
       score = -1000;
     }
@@ -166,60 +602,6 @@ function scoreAvailableTiles(state: StudioGameState): { idx: number; score: numb
 
   return available;
 }
-
-// ============================================================================
-// Greedy solver
-// ============================================================================
-
-export function solveGreedy(config: StudioGameConfig, seed: number = 42): SolverResult {
-  const effectiveConfig = { ...config, seed };
-  let state: StudioGameState;
-  try {
-    state = initializeStateSeeded(effectiveConfig);
-  } catch {
-    return { solved: false, moves: 0, peakStandUsage: 0, moveSequence: [], deadEndReason: 'no_tiles' };
-  }
-
-  const moveSequence: number[] = [];
-  let peakStand = 0;
-  const maxIter = (state.layerA.length + state.layerC.length) * 3 + 200;
-
-  for (let i = 0; i < maxIter && !state.isWon && !state.isLost; i++) {
-    const available = scoreAvailableTiles(state);
-    if (available.length === 0) break;
-
-    available.sort((a, b) => b.score - a.score);
-
-    // If all moves overflow, try to find any matching tile
-    let bestIdx = available[0].idx;
-    if (available[0].score <= -1000) {
-      const match = available.find((a) => a.score > -1000);
-      if (match) bestIdx = match.idx;
-    }
-
-    moveSequence.push(bestIdx);
-    state = pickTileLogic(state, bestIdx);
-    peakStand = Math.max(peakStand, state.waitingStand.length);
-  }
-
-  return {
-    solved: state.isWon,
-    moves: state.moveCount,
-    peakStandUsage: peakStand,
-    moveSequence,
-    deadEndReason: state.isLost
-      ? 'stand_overflow'
-      : !state.isWon
-        ? 'no_tiles'
-        : undefined,
-  };
-}
-
-// ============================================================================
-// Monte Carlo solver (multi-seed, blended strategies)
-// ============================================================================
-
-type Strategy = 'greedy' | 'semi-random' | 'random';
 
 function pickTileByStrategy(
   state: StudioGameState,
@@ -235,8 +617,11 @@ function pickTileByStrategy(
 
   available.sort((a, b) => b.score - a.score);
 
-  if (strategy === 'greedy') {
-    return available[0].idx;
+  if (strategy === 'greedy' || strategy === 'strategic') {
+    // Among top-scored, pick randomly for variety
+    const best = available[0].score;
+    const tied = available.filter((a) => a.score === best);
+    return tied[Math.floor(rng() * tied.length)].idx;
   }
 
   // semi-random: 60% best, 40% random safe
@@ -252,7 +637,7 @@ function runSingleMC(
   rng: () => number,
 ): { won: boolean; moves: number; peakStand: number } {
   const roll = rng();
-  const strategy: Strategy = roll < 0.4 ? 'greedy' : roll < 0.8 ? 'semi-random' : 'random';
+  const strategy: Strategy = roll < 0.3 ? 'greedy' : roll < 0.55 ? 'semi-random' : roll < 0.75 ? 'random' : 'strategic';
 
   let state: StudioGameState;
   try {
@@ -318,115 +703,6 @@ export function solveMonteCarlo(
 }
 
 // ============================================================================
-// DFS solver with pruning
-// ============================================================================
-
-export function solveDFS(
-  config: StudioGameConfig,
-  stateLimit: number = 10000,
-  seed: number = 42,
-): DFSResult {
-  let state: StudioGameState;
-  try {
-    state = initializeStateSeeded({ ...config, seed });
-  } catch {
-    return {
-      solvable: false, solutionCount: 0, deadEndCount: 1,
-      exploredStates: 0, minMoves: 0, maxMoves: 0, verdict: 'never', timedOut: false,
-    };
-  }
-
-  const visited = new Set<string>();
-  let solutions = 0;
-  let deadEnds = 0;
-  let explored = 0;
-  let minMoves = Infinity;
-  let maxMoves = 0;
-  let timedOut = false;
-
-  function stateHash(s: StudioGameState): string {
-    const standKey = s.waitingStand
-      .map((t) => `${t.colorType}:${t.variant}`)
-      .sort()
-      .join(',');
-    const layerKey = s.layerA.map((t) => t?.id ?? '_').join('');
-    const launcherKey = s.activeLaunchers
-      .map((l) => `${l.colorType}:${l.collected.length}`)
-      .join(',');
-    return `${standKey}|${layerKey}|${launcherKey}|${s.matchCount}`;
-  }
-
-  function dfs(s: StudioGameState, depth: number): void {
-    if (explored >= stateLimit) { timedOut = true; return; }
-    if (s.isWon) {
-      solutions++;
-      minMoves = Math.min(minMoves, depth);
-      maxMoves = Math.max(maxMoves, depth);
-      return;
-    }
-    if (s.isLost) { deadEnds++; return; }
-
-    const hash = stateHash(s);
-    if (visited.has(hash)) return;
-    visited.add(hash);
-    explored++;
-
-    // Get unique moves — deduplicate by (colorType, variant) for symmetry
-    const seen = new Set<string>();
-    const moves: number[] = [];
-    for (let i = 0; i < s.layerA.length; i++) {
-      const tile = s.layerA[i];
-      if (!tile) continue;
-      const key = `${tile.colorType}:${tile.variant}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      moves.push(i);
-    }
-
-    if (moves.length === 0) { deadEnds++; return; }
-
-    // Explore matching-launcher moves first (better pruning)
-    moves.sort((a, b) => {
-      const tA = s.layerA[a]!;
-      const tB = s.layerA[b]!;
-      const matchA = s.activeLaunchers.some(
-        (l) => l.colorType === tA.colorType && l.collected.length < 3,
-      ) ? 1 : 0;
-      const matchB = s.activeLaunchers.some(
-        (l) => l.colorType === tB.colorType && l.collected.length < 3,
-      ) ? 1 : 0;
-      return matchB - matchA;
-    });
-
-    for (const slotIdx of moves) {
-      if (explored >= stateLimit) { timedOut = true; return; }
-      dfs(pickTileLogic(s, slotIdx), depth + 1);
-    }
-  }
-
-  dfs(state, 0);
-
-  const solvable = solutions > 0;
-  const verdict: DFSResult['verdict'] =
-    solvable && deadEnds === 0 && !timedOut
-      ? 'always'
-      : solvable
-        ? 'sometimes'
-        : 'never';
-
-  return {
-    solvable,
-    solutionCount: solutions,
-    deadEndCount: deadEnds,
-    exploredStates: explored,
-    minMoves: solvable ? minMoves : 0,
-    maxMoves,
-    verdict,
-    timedOut,
-  };
-}
-
-// ============================================================================
 // Analyze a single level
 // ============================================================================
 
@@ -439,7 +715,7 @@ export function analyzeSingleLevel(
     runMonteCarlo = true,
     monteCarloRuns = 200,
     runDFS = false,
-    dfsStateLimit = 10000,
+    dfsStateLimit = 500000,
   } = options;
 
   const greedy = solveGreedy(config);
@@ -448,7 +724,11 @@ export function analyzeSingleLevel(
     ? solveMonteCarlo(config, monteCarloRuns)
     : { runs: 0, wins: 0, winRate: greedy.solved ? 1 : 0, avgMoves: 0, peakStandUsage: 0, confidenceInterval: [0, 0] as [number, number] };
 
-  const dfs = runDFS ? solveDFS(config, dfsStateLimit) : undefined;
+  // Run DFS if explicitly requested, OR as a fallback when greedy+MC find no wins.
+  const needsFallbackDFS = !runDFS && !greedy.solved && monteCarlo.winRate === 0;
+  const dfs = (runDFS || needsFallbackDFS)
+    ? solveDFS(config, dfsStateLimit)
+    : undefined;
 
   // Determine verdict
   const bestWinRate = monteCarlo.winRate;
