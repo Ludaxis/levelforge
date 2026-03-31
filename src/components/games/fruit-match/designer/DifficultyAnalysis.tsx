@@ -341,11 +341,9 @@ export function DifficultyAnalysis({
             {score} ({tier})
           </Badge>
           <span className="text-[10px] text-muted-foreground">Unlock {unlockDistance}</span>
-          {parMoves !== null && (
-            <span className="text-[10px] text-muted-foreground">
-              Par {parMoves}
-            </span>
-          )}
+          <span className="text-[10px] text-muted-foreground" title={parMoves === null ? 'Unsolvable at this config' : undefined}>
+            Par {parMoves ?? '--'}
+          </span>
           {moveLimit !== undefined && (
             <span className="text-[10px] text-muted-foreground">
               Limit {moveLimit}
@@ -430,12 +428,12 @@ export function DifficultyAnalysis({
           {/* Move Stats (par + simulation) */}
           {(parMoves !== null || simulationResult) && (
             <div className="p-2 bg-muted/30 rounded-lg space-y-1">
-              {parMoves !== null && (
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">Par (Best Possible)</span>
-                  <span className="font-mono font-medium">{parMoves} moves</span>
-                </div>
-              )}
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Par (Best Possible)</span>
+                <span className={`font-mono font-medium ${parMoves === null ? 'text-muted-foreground' : ''}`}>
+                  {parMoves !== null ? `${parMoves} moves` : 'unsolvable'}
+                </span>
+              </div>
               {simulationResult && (
                 <>
                   <div className="flex justify-between text-xs">

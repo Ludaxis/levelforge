@@ -1598,9 +1598,7 @@ export function LevelDesignerV2({
             {/* Move Stats */}
             {(parMoves !== null || liveSimResult) && (
               <div className="flex items-center gap-3 text-[11px] text-muted-foreground px-1 py-1.5 bg-muted/20 rounded-md">
-                {parMoves !== null && (
-                  <span>Par: <span className="font-mono text-foreground font-medium">{parMoves}</span></span>
-                )}
+                <span>Par: <span className={`font-mono font-medium ${parMoves !== null ? 'text-foreground' : ''}`}>{parMoves ?? '--'}</span></span>
                 {liveSimResult && liveSimResult.minMoves > 0 && (
                   <>
                     <span className="text-border">|</span>
