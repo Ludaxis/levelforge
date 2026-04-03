@@ -218,21 +218,18 @@ export function SquareBlockLevelDesigner({
     };
   }, [rows, cols, cellSize]);
 
-  // Calculate blocks ahead for all blocks (for visualization)
-  const blocksAheadMap = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const [key, block] of blocks) {
-      const blocksAhead = getMinBlocksAhead(
-        block.coord,
-        block.direction,
-        blocks,
-        holes,
-        rows,
-        cols
-      );
-      map.set(key, blocksAhead);
-    }
-    return map;
+  // Calculate blocks ahead for all blocks (for visualization) — debounced
+  const [blocksAheadMap, setBlocksAheadMap] = useState<Map<string, number>>(new Map());
+  const blocksAheadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (blocksAheadTimerRef.current) clearTimeout(blocksAheadTimerRef.current);
+    blocksAheadTimerRef.current = setTimeout(() => {
+      const map = new Map<string, number>();
+      for (const [key, block] of blocks) {
+        map.set(key, getMinBlocksAhead(block.coord, block.direction, blocks, holes, rows, cols));
+      }
+      setBlocksAheadMap(map);
+    }, 200);
   }, [blocks, holes, rows, cols]);
 
   // Check if direction is clear
@@ -277,27 +274,24 @@ export function SquareBlockLevelDesigner({
     return isDirectionClear(block.coord, block.direction as SquareDirection, currentBlocks, currentHoles);
   }, [isDirectionClear]);
 
-  // Solve level using analyzer's quickSolve (handles ice, mirror, gate properly)
-  const solvability = useMemo(() => {
+  // Solve level — debounced to avoid blocking UI on every click
+  const [solvability, setSolvability] = useState<{ solvable: boolean; optimalMoves: number; message: string }>({
+    solvable: false, optimalMoves: 0, message: 'Add at least one block',
+  });
+  const solvabilityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (solvabilityTimerRef.current) clearTimeout(solvabilityTimerRef.current);
     if (blocks.size === 0) {
-      return { solvable: false, optimalMoves: 0, message: 'Add at least one block' };
+      setSolvability({ solvable: false, optimalMoves: 0, message: 'Add at least one block' });
+      return;
     }
-
-    const result = analyzerQuickSolve(blocks, holes, rows, cols);
-
-    if (result.solvable) {
-      return {
-        solvable: true,
-        optimalMoves: result.moves,
-        message: `Solvable: ${result.moves} moves`,
-      };
-    } else {
-      return {
-        solvable: false,
-        optimalMoves: 0,
-        message: `Deadlock: some blocks stuck`,
-      };
-    }
+    solvabilityTimerRef.current = setTimeout(() => {
+      const result = analyzerQuickSolve(blocks, holes, rows, cols);
+      setSolvability(result.solvable
+        ? { solvable: true, optimalMoves: result.moves, message: `Solvable: ${result.moves} moves` }
+        : { solvable: false, optimalMoves: 0, message: 'Deadlock: some blocks stuck' }
+      );
+    }, 150);
   }, [blocks, holes, rows, cols]);
 
   // Get path info for a single direction (for deadlock analysis)
@@ -351,123 +345,72 @@ export function SquareBlockLevelDesigner({
     return getDirectionPath(block.coord, block.direction as SquareDirection, currentBlocks, currentHoles);
   }, [getDirectionPath]);
 
-  // Compute deadlock info with full chain tracing
-  const deadlockInfo = useMemo((): DeadlockInfo => {
-    const emptyResult: DeadlockInfo = {
-      stuckBlocks: new Map(),
-      blockerBlocks: new Set(),
-      hasDeadlock: false,
-    };
-
-    if (solvability.solvable) return emptyResult;
-
-    // Step 1: Build a map of each block's immediate blocker
-    const immediateBlocker = new Map<string, string | null>();
-    const isStuckBlock = new Set<string>();
-
-    for (const [key, block] of blocks) {
-      if (canClearBlock(block, blocks, holes)) continue;
-      if (block.iceCount && block.iceCount > 0) continue;
-      if (block.locked) {
-        const hasNeighbor = ['N', 'E', 'S', 'W'].some(dir => {
-          const neighborCoord = gridAdd(block.coord, SQUARE_DIRECTIONS[dir as SquareDirection]);
-          return blocks.has(gridKey(neighborCoord));
-        });
-        if (hasNeighbor) continue;
-      }
-
-      isStuckBlock.add(key);
-      const pathInfo = getBlockPath(block, blocks, holes);
-      if (pathInfo.blocked && pathInfo.blockerCoord) {
-        immediateBlocker.set(key, gridKey(pathInfo.blockerCoord));
-      } else {
-        immediateBlocker.set(key, null); // Edge blocked
-      }
+  // Compute deadlock info with full chain tracing — debounced
+  const emptyDeadlock: DeadlockInfo = useMemo(() => ({
+    stuckBlocks: new Map(), blockerBlocks: new Set(), hasDeadlock: false,
+  }), []);
+  const [deadlockInfo, setDeadlockInfo] = useState<DeadlockInfo>(emptyDeadlock);
+  const deadlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (deadlockTimerRef.current) clearTimeout(deadlockTimerRef.current);
+    if (solvability.solvable) {
+      setDeadlockInfo(emptyDeadlock);
+      return;
     }
-
-    // Step 2: Trace chains to find root cause
-    const stuckBlocks = new Map<string, StuckReason>();
-    const blockerBlocks = new Set<string>();
-
-    function traceChain(startKey: string): { chain: string[]; rootCause: RootCauseType; rootBlockKey?: string } {
-      const chain: string[] = [startKey];
-      const visited = new Set<string>([startKey]);
-      let current = startKey;
-
-      while (true) {
-        const blockerKey = immediateBlocker.get(current);
-
-        if (blockerKey === null || blockerKey === undefined) {
-          return { chain, rootCause: 'edge_blocked', rootBlockKey: current };
+    deadlockTimerRef.current = setTimeout(() => {
+      const immediateBlocker = new Map<string, string | null>();
+      const isStuck = new Set<string>();
+      for (const [key, block] of blocks) {
+        if (canClearBlock(block, blocks, holes)) continue;
+        if (block.iceCount && block.iceCount > 0) continue;
+        if (block.locked) {
+          const hasNeighbor = ['N', 'E', 'S', 'W'].some(dir => {
+            const neighborCoord = gridAdd(block.coord, SQUARE_DIRECTIONS[dir as SquareDirection]);
+            return blocks.has(gridKey(neighborCoord));
+          });
+          if (hasNeighbor) continue;
         }
-
-        if (visited.has(blockerKey)) {
-          const cycleStart = chain.indexOf(blockerKey);
-          const cycleLength = chain.length - cycleStart;
-          if (cycleLength === 2) {
-            return { chain, rootCause: 'mutual_block' };
-          } else {
-            return { chain, rootCause: 'circular_chain' };
-          }
-        }
-
-        if (!isStuckBlock.has(blockerKey)) {
-          return { chain, rootCause: 'edge_blocked', rootBlockKey: blockerKey };
-        }
-
-        chain.push(blockerKey);
-        visited.add(blockerKey);
-        current = blockerKey;
-      }
-    }
-
-    for (const key of isStuckBlock) {
-      const { chain, rootCause, rootBlockKey } = traceChain(key);
-      const blockerKey = immediateBlocker.get(key);
-
-      for (let i = 1; i < chain.length; i++) {
-        blockerBlocks.add(chain[i]);
-      }
-
-      let message: string;
-      let type: StuckReason['type'];
-
-      if (rootCause === 'edge_blocked') {
-        if (chain.length === 1) {
-          message = 'Points at edge, cannot exit';
-          type = 'edge_blocked';
+        isStuck.add(key);
+        const pathInfo = getBlockPath(block, blocks, holes);
+        if (pathInfo.blocked && pathInfo.blockerCoord) {
+          immediateBlocker.set(key, gridKey(pathInfo.blockerCoord));
         } else {
-          const rootBlock = blocks.get(rootBlockKey!);
-          const rootCoord = rootBlock ? `(${rootBlock.coord.row},${rootBlock.coord.col})` : rootBlockKey;
-          message = `Chain: ${chain.length} blocks → ${rootCoord} hits edge`;
-          type = 'blocked_by';
+          immediateBlocker.set(key, null);
         }
-      } else if (rootCause === 'mutual_block') {
-        message = `Mutual block with ${blockerKey}`;
-        type = 'mutual_block';
-      } else {
-        message = `Circular chain of ${chain.length} blocks`;
-        type = 'circular_chain';
       }
+      const stuckMap = new Map<string, StuckReason>();
+      const blockers = new Set<string>();
+      function traceChain(startKey: string): { chain: string[]; rootCause: RootCauseType; rootBlockKey?: string } {
+        const chain: string[] = [startKey];
+        const visited = new Set<string>([startKey]);
+        let current = startKey;
+        while (true) {
+          const bk = immediateBlocker.get(current);
+          if (bk === null || bk === undefined) return { chain, rootCause: 'edge_blocked', rootBlockKey: current };
+          if (visited.has(bk)) {
+            const cl = chain.length - chain.indexOf(bk);
+            return { chain, rootCause: cl === 2 ? 'mutual_block' : 'circular_chain' };
+          }
+          if (!isStuck.has(bk)) return { chain, rootCause: 'edge_blocked', rootBlockKey: bk };
+          chain.push(bk); visited.add(bk); current = bk;
+        }
+      }
+      for (const key of isStuck) {
+        const { chain, rootCause, rootBlockKey } = traceChain(key);
+        const bk = immediateBlocker.get(key);
+        for (let i = 1; i < chain.length; i++) blockers.add(chain[i]);
+        let message: string, type: StuckReason['type'];
+        if (rootCause === 'edge_blocked') {
+          if (chain.length === 1) { message = 'Points at edge'; type = 'edge_blocked'; }
+          else { message = `Chain: ${chain.length} blocks`; type = 'blocked_by'; }
+        } else if (rootCause === 'mutual_block') { message = `Mutual block`; type = 'mutual_block'; }
+        else { message = `Circular chain of ${chain.length}`; type = 'circular_chain'; }
+        stuckMap.set(key, { type, blockedBy: bk ?? undefined, blockingChain: chain, rootCause, rootBlockKey, message });
+      }
+      setDeadlockInfo({ stuckBlocks: stuckMap, blockerBlocks: blockers, hasDeadlock: stuckMap.size > 0 });
+    }, 250);
+  }, [blocks, holes, solvability.solvable, canClearBlock, getBlockPath, emptyDeadlock]);
 
-      stuckBlocks.set(key, {
-        type,
-        blockedBy: blockerKey ?? undefined,
-        blockingChain: chain,
-        rootCause,
-        rootBlockKey,
-        message,
-      });
-    }
-
-    return {
-      stuckBlocks,
-      blockerBlocks,
-      hasDeadlock: stuckBlocks.size > 0,
-    };
-  }, [blocks, holes, solvability.solvable, canClearBlock, getBlockPath]);
-
-  // For backward compatibility
   const stuckBlocks = useMemo(() => new Set(deadlockInfo.stuckBlocks.keys()), [deadlockInfo]);
 
   // Block type counts for display
@@ -482,17 +425,23 @@ export function SquareBlockLevelDesigner({
     };
   }, [blocks]);
 
-  // Deep puzzle analysis for difficulty scoring
-  const puzzleAnalysis = useMemo(() => {
-    if (blocks.size === 0) return null;
-    return analyzePuzzle(blocks, holes, rows, cols);
+  // Deep puzzle analysis for difficulty scoring — debounced (heaviest computation)
+  const [puzzleAnalysis, setPuzzleAnalysis] = useState<ReturnType<typeof analyzePuzzle> | null>(null);
+  const [difficultyBreakdown, setDifficultyBreakdown] = useState<ReturnType<typeof calculateDifficultyScore> | null>(null);
+  const analysisTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (analysisTimerRef.current) clearTimeout(analysisTimerRef.current);
+    if (blocks.size === 0) {
+      setPuzzleAnalysis(null);
+      setDifficultyBreakdown(null);
+      return;
+    }
+    analysisTimerRef.current = setTimeout(() => {
+      const analysis = analyzePuzzle(blocks, holes, rows, cols);
+      setPuzzleAnalysis(analysis);
+      setDifficultyBreakdown(analysis.solvable ? calculateDifficultyScore(analysis) : null);
+    }, 300);
   }, [blocks, holes, rows, cols]);
-
-  // Calculate difficulty from analysis
-  const difficultyBreakdown = useMemo(() => {
-    if (!puzzleAnalysis || !puzzleAnalysis.solvable) return null;
-    return calculateDifficultyScore(puzzleAnalysis);
-  }, [puzzleAnalysis]);
 
   // Helper function to shuffle an array in place
   function shuffleArray<T>(array: T[]): void {
