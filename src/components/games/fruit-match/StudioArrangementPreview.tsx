@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
 import { StudioGameState, StudioTile, StudioLauncherState } from '@/lib/useStudioGame';
@@ -93,6 +94,39 @@ function CompactTile({
   );
 }
 
+/**
+ * Self-contained blocking slider that uses local state during drag
+ * to avoid heavy re-renders mid-drag. Commits on pointer release.
+ */
+function BlockingSlider({
+  blockingOffset,
+  onBlockingOffsetChange,
+}: {
+  blockingOffset: number;
+  onBlockingOffsetChange: (v: number) => void;
+}) {
+  const [localValue, setLocalValue] = useState<number | null>(null);
+  const displayValue = localValue ?? blockingOffset;
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] font-medium text-muted-foreground whitespace-nowrap">Blocking: {displayValue}</span>
+      <Slider
+        value={[displayValue]}
+        min={0}
+        max={10}
+        step={1}
+        onValueChange={([v]) => setLocalValue(v)}
+        onValueCommit={([v]) => {
+          setLocalValue(null);
+          onBlockingOffsetChange(v);
+        }}
+        className="flex-1"
+      />
+    </div>
+  );
+}
+
 export function StudioArrangementPreview({
   previewState,
   colorTypeToHex,
@@ -131,17 +165,10 @@ export function StudioArrangementPreview({
         <Badge variant="outline" className="h-5 text-[10px]">Slots: {waitingStandSlots}</Badge>
       </div>
       {onBlockingOffsetChange && (
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-medium text-muted-foreground whitespace-nowrap">Blocking: {blockingOffset}</span>
-          <Slider
-            value={[blockingOffset]}
-            min={0}
-            max={10}
-            step={1}
-            onValueChange={([v]) => onBlockingOffsetChange(v)}
-            className="flex-1"
-          />
-        </div>
+        <BlockingSlider
+          blockingOffset={blockingOffset}
+          onBlockingOffsetChange={onBlockingOffsetChange}
+        />
       )}
 
       {/* Blenders — compact inline list */}
