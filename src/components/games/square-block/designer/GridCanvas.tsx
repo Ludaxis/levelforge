@@ -17,7 +17,7 @@ export function GridCanvas({
   hoveredCell,
   setHoveredCell,
   handleCellClick,
-  canClearBlock,
+  clearableKeys,
   deadlockInfo,
   selectedDirection,
   selectedLocked,
@@ -183,7 +183,7 @@ export function GridCanvas({
           {Array.from(blocks.values()).map((block) => {
             const key = gridKey(block.coord);
             const pixel = gridToPixel(block.coord, cellSize, origin);
-            const canClear = canClearBlock(block, blocks, holes);
+            const canClear = clearableKeys.has(key);
             const isBlockHovered = hoveredCell === key;
 
             // Deadlock state

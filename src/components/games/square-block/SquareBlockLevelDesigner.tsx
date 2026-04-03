@@ -232,6 +232,10 @@ export function SquareBlockLevelDesigner({
     }, 200);
   }, [blocks, holes, rows, cols]);
 
+  // Pre-compute clearable block keys — debounced
+  const [clearableKeys, setClearableKeys] = useState<Set<string>>(new Set());
+  const clearableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Check if direction is clear
   const isDirectionClear = useCallback((
     startCoord: GridCoord,
@@ -273,6 +277,18 @@ export function SquareBlockLevelDesigner({
     }
     return isDirectionClear(block.coord, block.direction as SquareDirection, currentBlocks, currentHoles);
   }, [isDirectionClear]);
+
+  // Debounced clearable keys computation
+  useEffect(() => {
+    if (clearableTimerRef.current) clearTimeout(clearableTimerRef.current);
+    clearableTimerRef.current = setTimeout(() => {
+      const keys = new Set<string>();
+      for (const [key, block] of blocks) {
+        if (canClearBlock(block, blocks, holes)) keys.add(key);
+      }
+      setClearableKeys(keys);
+    }, 100);
+  }, [blocks, holes, canClearBlock]);
 
   // Solve level — debounced to avoid blocking UI on every click
   const [solvability, setSolvability] = useState<{ solvable: boolean; optimalMoves: number; message: string }>({
@@ -1359,7 +1375,7 @@ export function SquareBlockLevelDesigner({
             hoveredCell={hoveredCell}
             setHoveredCell={setHoveredCell}
             handleCellClick={handleCellClick}
-            canClearBlock={canClearBlock}
+            clearableKeys={clearableKeys}
             deadlockInfo={deadlockInfo}
             selectedDirection={selectedDirection}
             selectedLocked={selectedLocked}

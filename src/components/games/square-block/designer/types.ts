@@ -69,7 +69,7 @@ export interface GridCanvasProps {
   hoveredCell: string | null;
   setHoveredCell: (key: string | null) => void;
   handleCellClick: (coord: import('@/lib/squareGrid').GridCoord) => void;
-  canClearBlock: (block: SquareBlock, currentBlocks: Map<string, SquareBlock>, currentHoles: Set<string>) => boolean;
+  clearableKeys: Set<string>;
   deadlockInfo: DeadlockInfo;
   selectedDirection: BlockDirection;
   selectedLocked: boolean;
