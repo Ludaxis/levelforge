@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -202,14 +202,18 @@ function SquareBlockPageContent() {
     saveLevelsForCollection,
   } = useLevelCollection();
 
-  // Wrap setLevels to also persist to the active collection's multi-collection storage
+  // Debounced sync: persist levels to active collection storage after changes settle
+  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const setLevelsAndSync = useCallback((levelsOrUpdater: DesignedLevel[] | ((prev: DesignedLevel[]) => DesignedLevel[])) => {
     setLevels((prev: DesignedLevel[]) => {
       const next = typeof levelsOrUpdater === 'function' ? levelsOrUpdater(prev) : levelsOrUpdater;
-      // Also save to multi-collection storage
-      if (activeCollectionId) {
-        saveLevelsForCollection(activeCollectionId, next);
-      }
+      // Debounce localStorage write to avoid lag during rapid edits
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = setTimeout(() => {
+        if (activeCollectionId) {
+          saveLevelsForCollection(activeCollectionId, next);
+        }
+      }, 300);
       return next;
     });
   }, [setLevels, activeCollectionId, saveLevelsForCollection]);
@@ -218,9 +222,7 @@ function SquareBlockPageContent() {
   useEffect(() => {
     if (!isLoaded || !activeCollectionId) return;
     const stored = getLevelsForCollection(activeCollectionId);
-    if (stored.length > 0) {
-      setLevels(stored);
-    }
+    setLevels(stored);
   }, [activeCollectionId, isLoaded]);
 
   // Handle shared import
