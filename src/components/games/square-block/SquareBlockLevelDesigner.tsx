@@ -85,6 +85,7 @@ export function SquareBlockLevelDesigner({
   const [selectedLocked, setSelectedLocked] = useState(false);
   const [selectedIceCount, setSelectedIceCount] = useState<number>(0);
   const [selectedMirror, setSelectedMirror] = useState(false);
+  const [eraserMode, setEraserMode] = useState(false);
 
 
   // Placed blocks and holes
@@ -967,6 +968,16 @@ export function SquareBlockLevelDesigner({
   const handleCellClick = (coord: GridCoord) => {
     const key = gridKey(coord);
 
+    // Eraser mode: remove any block on click
+    if (eraserMode) {
+      if (blocks.has(key)) {
+        const newBlocks = new Map(blocks);
+        newBlocks.delete(key);
+        setBlocks(newBlocks);
+      }
+      return;
+    }
+
     if (blocks.has(key)) {
       const existingBlock = blocks.get(key)!;
 
@@ -1381,6 +1392,8 @@ export function SquareBlockLevelDesigner({
             setSelectedIceCount={setSelectedIceCount}
             selectedMirror={selectedMirror}
             setSelectedMirror={setSelectedMirror}
+            eraserMode={eraserMode}
+            setEraserMode={setEraserMode}
             zoom={zoom}
             handleZoomIn={handleZoomIn}
             handleZoomOut={handleZoomOut}

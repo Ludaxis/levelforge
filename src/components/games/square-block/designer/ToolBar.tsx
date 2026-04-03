@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
 import { DIRECTION_ORDER } from '@/lib/squareGrid';
-import { Lock, Unlock, Snowflake, FlipHorizontal, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
+import { Lock, Unlock, Snowflake, FlipHorizontal, ZoomIn, ZoomOut, Maximize, Eraser } from 'lucide-react';
 import { DIRECTION_LABELS } from './types';
 import type { ToolBarProps } from './types';
 
@@ -17,6 +17,8 @@ export function ToolBar({
   setSelectedIceCount,
   selectedMirror,
   setSelectedMirror,
+  eraserMode,
+  setEraserMode,
   zoom,
   handleZoomIn,
   handleZoomOut,
@@ -32,14 +34,23 @@ export function ToolBar({
             {DIRECTION_ORDER.map((dir) => (
               <Button
                 key={dir}
-                variant={selectedDirection === dir ? 'default' : 'outline'}
+                variant={!eraserMode && selectedDirection === dir ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => setSelectedDirection(dir)}
+                onClick={() => { setSelectedDirection(dir); setEraserMode(false); }}
                 className="w-10 h-10 text-lg"
               >
                 {DIRECTION_LABELS[dir]}
               </Button>
             ))}
+            <Button
+              variant={eraserMode ? 'destructive' : 'outline'}
+              size="sm"
+              onClick={() => setEraserMode(!eraserMode)}
+              className="w-10 h-10"
+              title="Eraser — click blocks to remove them"
+            >
+              <Eraser className="h-5 w-5" />
+            </Button>
           </div>
         </div>
         {/* Gate Toggle */}

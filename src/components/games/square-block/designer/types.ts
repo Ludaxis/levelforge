@@ -99,6 +99,8 @@ export interface ToolBarProps {
   setSelectedIceCount: (count: number) => void;
   selectedMirror: boolean;
   setSelectedMirror: (mirror: boolean) => void;
+  eraserMode: boolean;
+  setEraserMode: (eraser: boolean) => void;
   zoom: number;
   handleZoomIn: () => void;
   handleZoomOut: () => void;
