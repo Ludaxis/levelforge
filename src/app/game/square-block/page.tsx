@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -202,6 +202,27 @@ function SquareBlockPageContent() {
     saveLevelsForCollection,
   } = useLevelCollection();
 
+  // Wrap setLevels to also persist to the active collection's multi-collection storage
+  const setLevelsAndSync = useCallback((levelsOrUpdater: DesignedLevel[] | ((prev: DesignedLevel[]) => DesignedLevel[])) => {
+    setLevels((prev: DesignedLevel[]) => {
+      const next = typeof levelsOrUpdater === 'function' ? levelsOrUpdater(prev) : levelsOrUpdater;
+      // Also save to multi-collection storage
+      if (activeCollectionId) {
+        saveLevelsForCollection(activeCollectionId, next);
+      }
+      return next;
+    });
+  }, [setLevels, activeCollectionId, saveLevelsForCollection]);
+
+  // On initial load or collection switch, load levels from multi-collection storage
+  useEffect(() => {
+    if (!isLoaded || !activeCollectionId) return;
+    const stored = getLevelsForCollection(activeCollectionId);
+    if (stored.length > 0) {
+      setLevels(stored);
+    }
+  }, [activeCollectionId, isLoaded]);
+
   // Handle shared import
   useEffect(() => {
     if (searchParams.get('import') !== 'shared') return;
@@ -257,25 +278,35 @@ function SquareBlockPageContent() {
     const targetId = collectionId || activeCollectionId;
 
     if (editingLevel) {
-      if (targetId && targetId !== activeCollectionId) {
-        // Editing in a different collection — update via saveLevelsForCollection
+      // Update existing level
+      if (targetId) {
         const existing = getLevelsForCollection(targetId);
-        saveLevelsForCollection(targetId, existing.map(l => l.id === level.id ? level : l));
+        const updated = existing.map(l => l.id === level.id ? level : l);
+        saveLevelsForCollection(targetId, updated);
+        // Also update in-memory levels if this is the active collection
+        if (targetId === activeCollectionId) {
+          setLevels(updated);
+        }
       } else {
-        // Update in active collection
         setLevels(prev => prev.map(l => l.id === level.id ? level : l));
       }
       setEditingLevel(null);
     } else {
-      if (targetId && targetId !== activeCollectionId) {
-        // Add to a specific (non-active) collection
+      // Add new level
+      if (targetId) {
         const existing = getLevelsForCollection(targetId);
         const numbered = { ...level, levelNumber: existing.length + 1 };
-        saveLevelsForCollection(targetId, [...existing, numbered]);
-        // Switch to that collection so user can see the added level
-        setActiveCollection(targetId);
+        const updated = [...existing, numbered];
+        saveLevelsForCollection(targetId, updated);
+        // If adding to active collection, also update in-memory levels
+        if (targetId === activeCollectionId) {
+          setLevels(updated);
+        } else {
+          // Switch to target collection so user sees the result
+          setActiveCollection(targetId);
+          setLevels(updated);
+        }
       } else {
-        // Add to active collection
         addLevel(level);
       }
       setLevelNumber(prev => prev + 1);
@@ -360,14 +391,17 @@ function SquareBlockPageContent() {
             />
             <SquareBlockLevelCollection
               levels={levels}
-              onLevelsChange={setLevels}
+              onLevelsChange={setLevelsAndSync}
               onEditLevel={handleEditLevel}
               onPlayLevel={handlePlayCollectionLevel}
               syncState={syncState}
               onForceSync={forceSync}
               collections={collections}
               activeCollectionId={activeCollectionId}
-              onCollectionChange={setActiveCollection}
+              onCollectionChange={(id) => {
+                setActiveCollection(id);
+                setLevels(getLevelsForCollection(id));
+              }}
               onCreateCollection={createCollection}
               onRenameCollection={renameCollection}
               onDeleteCollection={deleteCollection}
