@@ -9,6 +9,8 @@ import {
   Plus,
   Trash2,
   GripVertical,
+  Pin,
+  PinOff,
 } from 'lucide-react';
 import { VARIANT_NAMES } from '@/types/fruitMatch';
 import { COLOR_TYPE_TO_FRUIT, COLOR_TYPE_TO_HEX, hexToColorName } from '@/lib/juicyBlastExport';
@@ -25,6 +27,8 @@ export function ItemPoolSection({
   onChangeLayer,
   onChangeVariant,
   colorTypeToHex,
+  pinnedItemIds,
+  onClearPins,
 }: {
   items: StudioSelectableItem[];
   maxSelectableItems: number;
@@ -36,6 +40,8 @@ export function ItemPoolSection({
   onChangeLayer: (id: string, layer: 'A' | 'B' | 'C') => void;
   onChangeVariant: (id: string, variant: number) => void;
   colorTypeToHex?: Record<number, string>;
+  pinnedItemIds?: Set<string>;
+  onClearPins?: () => void;
 }) {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -61,9 +67,12 @@ export function ItemPoolSection({
 
   const layerOptions: ('A' | 'B' | 'C')[] = ['A', 'B', 'C'];
 
+  const pinnedCount = pinnedItemIds?.size ?? 0;
+
   const renderItem = (item: StudioSelectableItem, globalIdx: number, layerNum: number) => {
     const fruit = COLOR_TYPE_TO_FRUIT[item.colorType];
     const variantNames = fruit ? VARIANT_NAMES[fruit] : undefined;
+    const isPinned = pinnedItemIds?.has(item.id) ?? false;
     return (
       <div
         key={item.id}
@@ -86,9 +95,10 @@ export function ItemPoolSection({
         }}
         className={`flex items-center gap-1.5 p-1.5 rounded border bg-card text-xs transition-all ${
           draggedIdx === globalIdx ? 'opacity-50' : ''
-        } ${dragOverIdx === globalIdx ? 'border-primary border-2' : 'border-border'}`}
+        } ${dragOverIdx === globalIdx ? 'border-primary border-2' : isPinned ? 'border-amber-500/50' : 'border-border'}`}
       >
         <span className="w-4 text-[10px] text-muted-foreground text-center font-mono shrink-0">{layerNum}</span>
+        {isPinned && <Pin className="h-2.5 w-2.5 text-amber-500 shrink-0" />}
         <GripVertical className="h-3 w-3 text-muted-foreground cursor-grab shrink-0" />
         <ColorSwatch colorType={item.colorType} size={16} hex={colorTypeToHex?.[item.colorType]} />
         <select
@@ -128,7 +138,15 @@ export function ItemPoolSection({
       <CardHeader className="pb-2">
         <CardTitle className="text-sm flex items-center justify-between">
           <span>Item Pool (Selectable Items)</span>
-          <Badge variant="outline" className="text-[10px]">{items.length} items</Badge>
+          <div className="flex items-center gap-1.5">
+            {pinnedCount > 0 && onClearPins && (
+              <Button variant="ghost" size="sm" className="h-5 text-[10px] text-amber-500" onClick={onClearPins} title="Clear all pinned layers — let blocking control layers">
+                <PinOff className="h-3 w-3 mr-1" />
+                {pinnedCount} pinned
+              </Button>
+            )}
+            <Badge variant="outline" className="text-[10px]">{items.length} items</Badge>
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">

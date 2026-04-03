@@ -1,6 +1,7 @@
 'use client';
 
 import { Badge } from '@/components/ui/badge';
+import { Slider } from '@/components/ui/slider';
 import { StudioGameState, StudioTile, StudioLauncherState } from '@/lib/useStudioGame';
 import { COLOR_TYPE_TO_FRUIT, COLOR_TYPE_TO_HEX } from '@/lib/juicyBlastExport';
 import { VARIANT_NAMES, FruitType } from '@/types/fruitMatch';
@@ -98,12 +99,14 @@ export function StudioArrangementPreview({
   waitingStandSlots,
   blockingOffset,
   maxSelectableItems,
+  onBlockingOffsetChange,
 }: {
   previewState: StudioGameState | null;
   colorTypeToHex?: Record<number, string>;
   waitingStandSlots: number;
   blockingOffset: number;
   maxSelectableItems: number;
+  onBlockingOffsetChange?: (value: number) => void;
 }) {
   if (!previewState) {
     return (
@@ -119,7 +122,7 @@ export function StudioArrangementPreview({
 
   return (
     <div className="space-y-3">
-      {/* Stats */}
+      {/* Stats + Blocking slider */}
       <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
         <Badge variant="outline" className="h-5 text-[10px]">Unlock {unlockDistance}</Badge>
         <Badge variant="outline" className="h-5 text-[10px]">A: {previewState.layerA.filter(t => t).length}</Badge>
@@ -127,6 +130,19 @@ export function StudioArrangementPreview({
         <Badge variant="outline" className="h-5 text-[10px]">C: {previewState.layerC.length}</Badge>
         <Badge variant="outline" className="h-5 text-[10px]">Slots: {waitingStandSlots}</Badge>
       </div>
+      {onBlockingOffsetChange && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-medium text-muted-foreground whitespace-nowrap">Blocking: {blockingOffset}</span>
+          <Slider
+            value={[blockingOffset]}
+            min={0}
+            max={10}
+            step={1}
+            onValueChange={([v]) => onBlockingOffsetChange(v)}
+            className="flex-1"
+          />
+        </div>
+      )}
 
       {/* Blenders — compact inline list */}
       <div className="grid gap-1.5 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">

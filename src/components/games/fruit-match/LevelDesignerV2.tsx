@@ -148,6 +148,102 @@ export function LevelDesignerV2({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ============================================================================
+  // Undo / Redo
+  // ============================================================================
+
+  interface UndoSnapshot {
+    pixels: Map<string, StudioPixelCell>;
+    groups: StudioGroup[];
+    launchers: StudioLauncher[];
+    selectableItems: StudioSelectableItem[];
+    maxSelectableItems: number;
+    blockingOffset: number;
+    activeLauncherCount: number;
+    pinnedItemIds: Set<string>;
+  }
+
+  const MAX_UNDO = 50;
+  const undoStack = useRef<UndoSnapshot[]>([]);
+  const redoStack = useRef<UndoSnapshot[]>([]);
+  const isRestoring = useRef(false);
+
+  const captureSnapshot = useCallback((): UndoSnapshot => ({
+    pixels: new Map(pixels),
+    groups: groups.map((g) => ({ ...g, pixelsByColor: { ...g.pixelsByColor } })),
+    launchers: launchers.map((l) => ({ ...l })),
+    selectableItems: selectableItems.map((i) => ({ ...i })),
+    maxSelectableItems,
+    blockingOffset,
+    activeLauncherCount,
+    pinnedItemIds: new Set(pinnedItemIds),
+  }), [pixels, groups, launchers, selectableItems, maxSelectableItems, blockingOffset, activeLauncherCount, pinnedItemIds]);
+
+  const pushUndo = useCallback(() => {
+    if (isRestoring.current) return;
+    const snap = captureSnapshot();
+    undoStack.current = [...undoStack.current.slice(-(MAX_UNDO - 1)), snap];
+    redoStack.current = []; // clear redo on new action
+  }, [captureSnapshot]);
+
+  const restoreSnapshot = useCallback((snap: UndoSnapshot) => {
+    isRestoring.current = true;
+    setPixels(snap.pixels);
+    setGroups(snap.groups);
+    setLaunchers(snap.launchers);
+    setSelectableItems(snap.selectableItems);
+    setMaxSelectableItems(snap.maxSelectableItems);
+    setBlockingOffset(snap.blockingOffset);
+    setActiveLauncherCount(snap.activeLauncherCount);
+    setPinnedItemIds(snap.pinnedItemIds);
+    // Allow next tick to re-enable capturing
+    requestAnimationFrame(() => { isRestoring.current = false; });
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    if (undoStack.current.length === 0) return;
+    const currentSnap = captureSnapshot();
+    redoStack.current = [...redoStack.current, currentSnap];
+    const prev = undoStack.current.pop()!;
+    restoreSnapshot(prev);
+  }, [captureSnapshot, restoreSnapshot]);
+
+  const handleRedo = useCallback(() => {
+    if (redoStack.current.length === 0) return;
+    const currentSnap = captureSnapshot();
+    undoStack.current = [...undoStack.current, currentSnap];
+    const next = redoStack.current.pop()!;
+    restoreSnapshot(next);
+  }, [captureSnapshot, restoreSnapshot]);
+
+  // Push undo snapshot whenever key state changes
+  const prevStateRef = useRef<string>('');
+  useEffect(() => {
+    if (isRestoring.current) return;
+    // Simple change detection using a hash of key values
+    const hash = `${pixels.size}|${groups.length}|${launchers.length}|${selectableItems.length}|${maxSelectableItems}|${blockingOffset}|${activeLauncherCount}|${pinnedItemIds.size}|${selectableItems.map(i => `${i.id}:${i.layer}:${i.order}`).join(',')}`;
+    if (prevStateRef.current && hash !== prevStateRef.current) {
+      pushUndo();
+    }
+    prevStateRef.current = hash;
+  }, [pixels, groups, launchers, selectableItems, maxSelectableItems, blockingOffset, activeLauncherCount, pinnedItemIds, pushUndo]);
+
+  // Keyboard shortcuts: Cmd+Z / Cmd+Shift+Z
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [handleUndo, handleRedo]);
+
+  // ============================================================================
   // Derived state
   // ============================================================================
 
@@ -1624,6 +1720,7 @@ export function LevelDesignerV2({
               waitingStandSlots={waitingStandSlots}
               blockingOffset={blockingOffset}
               maxSelectableItems={maxSelectableItems}
+              onBlockingOffsetChange={setBlockingOffset}
             />
           </CardContent>
         </Card>
@@ -1642,6 +1739,8 @@ export function LevelDesignerV2({
           onChangeLayer={handleChangeLayer}
           onChangeVariant={handleChangeVariant}
           colorTypeToHex={colorTypeToHex}
+          pinnedItemIds={pinnedItemIds}
+          onClearPins={() => setPinnedItemIds(new Set())}
         />
       )}
 
