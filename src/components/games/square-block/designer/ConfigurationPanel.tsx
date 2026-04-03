@@ -142,7 +142,7 @@ export function ConfigurationPanel({
             <div className="space-y-3 pt-3 border-t">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium">Level Position</label>
-                <Badge variant="outline">#{levelNumber}</Badge>
+                <Badge variant="outline" className="font-mono">grid_Level{levelNumber}_1</Badge>
               </div>
               <div className="flex items-center gap-2">
                 <Button

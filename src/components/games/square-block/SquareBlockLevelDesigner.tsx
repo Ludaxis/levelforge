@@ -1051,7 +1051,7 @@ export function SquareBlockLevelDesigner({
       blocks: Array.from(blocks.values()),
     };
 
-    const filename = `grid_Level${levelNumber}.json`;
+    const filename = `grid_Level${levelNumber}_1.json`;
     downloadLevelAsJSON(levelData, filename);
   };
 
@@ -1151,6 +1151,15 @@ export function SquareBlockLevelDesigner({
           });
         }
       }
+      // Sort by level number extracted from filename (e.g., grid_Level5_1.json → 5)
+      newStaged.sort((a, b) => {
+        const numA = a.filename.match(/Level(\d+)/i)?.[1];
+        const numB = b.filename.match(/Level(\d+)/i)?.[1];
+        if (numA && numB) return parseInt(numA, 10) - parseInt(numB, 10);
+        if (numA) return -1;
+        if (numB) return 1;
+        return 0;
+      });
       setStagedLevels(prev => [...prev, ...newStaged]);
     };
     input.click();
@@ -1162,6 +1171,11 @@ export function SquareBlockLevelDesigner({
     const selected = stagedLevels.filter(s => s.selected && !s.error && s.solvable);
     let currentLevelNum = levelNumber;
     for (const staged of selected) {
+      // Extract level number from filename if available (e.g., grid_Level5_1.json → 5)
+      const fileMatch = staged.filename.match(/Level(\d+)/i);
+      if (fileMatch) {
+        currentLevelNum = parseInt(fileMatch[1], 10);
+      }
       const blockMap = new Map<string, SquareBlock>();
       for (const block of staged.levelData.blocks) {
         blockMap.set(gridKey(block.coord), block);
@@ -1195,7 +1209,7 @@ export function SquareBlockLevelDesigner({
 
       const designedLevel: DesignedLevel = {
         id: `level-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        name: `Level ${currentLevelNum}`,
+        name: `grid_Level${currentLevelNum}_1`,
         levelNumber: currentLevelNum,
         rows: staged.levelData.rows,
         cols: staged.levelData.cols,
