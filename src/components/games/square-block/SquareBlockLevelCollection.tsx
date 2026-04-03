@@ -56,6 +56,8 @@ import {
   Plus,
   FolderOpen,
   ChevronDown as ChevronDownIcon,
+  CheckSquare,
+  Square as SquareIcon,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { ShareModal } from '@/components/sharing/ShareModal';
@@ -266,6 +268,7 @@ export function SquareBlockLevelCollection({
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showShareModal, setShowShareModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [collectionId, setCollectionId] = useState<string | null>(null);
@@ -482,9 +485,28 @@ export function SquareBlockLevelCollection({
       }
 
       if (newLevels.length > 0) {
-        // Sort by level number and reassign sequential numbers
+        // Sort by level number
         newLevels.sort((a, b) => a.levelNumber - b.levelNumber);
-        const allLevels = [...levels, ...newLevels].slice(0, MAX_LEVELS);
+
+        // Replace existing levels with matching level numbers, append the rest
+        const importedByNumber = new Map<number, DesignedLevel>();
+        for (const nl of newLevels) {
+          importedByNumber.set(nl.levelNumber, nl);
+        }
+
+        // Replace matching levels in existing collection
+        const merged = levels.map((l) => {
+          const replacement = importedByNumber.get(l.levelNumber);
+          if (replacement) {
+            importedByNumber.delete(l.levelNumber);
+            return { ...replacement, id: l.id }; // preserve id for stable keys
+          }
+          return l;
+        });
+
+        // Append any remaining new levels that didn't match existing numbers
+        const remaining = Array.from(importedByNumber.values());
+        const allLevels = [...merged, ...remaining].slice(0, MAX_LEVELS);
         onLevelsChange(allLevels.map((l, i) => ({ ...l, levelNumber: i + 1 })));
       } else {
         alert('No valid levels found in selected files.');
@@ -496,6 +518,49 @@ export function SquareBlockLevelCollection({
   const handleDelete = (id: string) => {
     const filtered = levels.filter((l) => l.id !== id);
     onLevelsChange(filtered.map((l, i) => ({ ...l, levelNumber: i + 1 })));
+    setSelectedIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Delete ${selectedIds.size} selected level${selectedIds.size > 1 ? 's' : ''}?`)) return;
+    const filtered = levels.filter((l) => !selectedIds.has(l.id));
+    onLevelsChange(filtered.map((l, i) => ({ ...l, levelNumber: i + 1 })));
+    setSelectedIds(new Set());
+  };
+
+  const handleClearAll = () => {
+    if (levels.length === 0) return;
+    if (!confirm(`Clear all ${levels.length} levels from the collection?`)) return;
+    onLevelsChange([]);
+    setSelectedIds(new Set());
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === pagedLevels.length) {
+      // Deselect all on current page
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const l of pagedLevels) next.delete(l.id);
+        return next;
+      });
+    } else {
+      // Select all on current page
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const l of pagedLevels) next.add(l.id);
+        return next;
+      });
+    }
   };
 
   const handleDuplicate = (level: DesignedLevel) => {
@@ -595,8 +660,11 @@ export function SquareBlockLevelCollection({
             <Button variant="outline" size="sm" onClick={handleExportAll} disabled={levels.length === 0} title="Export all as single file">
               <Download className="h-4 w-4" />
             </Button>
-            <Button variant="outline" size="sm" onClick={handleImport}>
+            <Button variant="outline" size="sm" onClick={handleImport} title="Import levels (replaces matching level numbers)">
               <Upload className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleClearAll} disabled={levels.length === 0} title="Clear all levels">
+              <Trash2 className="h-4 w-4" />
             </Button>
             {isSupabaseAvailable && (
               <Button
@@ -833,6 +901,36 @@ export function SquareBlockLevelCollection({
         )}
 
 
+        {/* Selection controls */}
+        {levels.length > 0 && (
+          <div className="flex items-center gap-2 text-xs">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={toggleSelectAll}
+            >
+              {selectedIds.size === pagedLevels.length && pagedLevels.length > 0 ? (
+                <CheckSquare className="h-3.5 w-3.5 mr-1" />
+              ) : (
+                <SquareIcon className="h-3.5 w-3.5 mr-1" />
+              )}
+              {selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select'}
+            </Button>
+            {selectedIds.size > 0 && (
+              <Button
+                variant="destructive"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={handleDeleteSelected}
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1" />
+                Delete {selectedIds.size}
+              </Button>
+            )}
+          </div>
+        )}
+
         {/* Level Grid/List */}
         {filteredLevels.length === 0 ? (
           <div className="py-8 text-center text-muted-foreground">
@@ -852,19 +950,30 @@ export function SquareBlockLevelCollection({
               };
               const colors = tierColors[tier];
 
+              const isSelected = selectedIds.has(level.id);
               return (
                 <div
                   key={level.id}
-                  className={`relative overflow-hidden rounded-lg border ${colors.border} bg-card hover:bg-accent/50 transition-colors cursor-pointer group`}
+                  className={`relative overflow-hidden rounded-lg border ${isSelected ? 'border-primary ring-1 ring-primary' : colors.border} bg-card hover:bg-accent/50 transition-colors cursor-pointer group`}
                   onClick={() => onEditLevel(level)}
                 >
                   <div className="flex gap-2 p-2">
-                    {/* Preview with level number overlay */}
+                    {/* Checkbox + Preview with level number overlay */}
                     <div className="relative shrink-0">
                       <MiniLevelPreview level={level} size={60} />
                       <div className="absolute top-0 left-0 bg-black/80 text-white text-[9px] font-bold px-1 py-0.5 rounded-br">
                         {level.levelNumber}
                       </div>
+                      <button
+                        className="absolute top-0 right-0 p-0.5 bg-black/60 rounded-bl hover:bg-black/80"
+                        onClick={(e) => { e.stopPropagation(); toggleSelect(level.id); }}
+                      >
+                        {isSelected ? (
+                          <CheckSquare className="h-3.5 w-3.5 text-primary" />
+                        ) : (
+                          <SquareIcon className="h-3.5 w-3.5 text-white/60" />
+                        )}
+                      </button>
                     </div>
 
                     {/* Info */}
@@ -937,6 +1046,7 @@ export function SquareBlockLevelCollection({
               const colors = tierColors[tier];
               const isDragging = draggedId === level.id;
               const isDragOver = dragOverId === level.id;
+              const isSelected = selectedIds.has(level.id);
               return (
                 <div
                   key={level.id}
@@ -946,9 +1056,21 @@ export function SquareBlockLevelCollection({
                   onDragLeave={handleDragLeave}
                   onDrop={(e) => handleDrop(e, level.id)}
                   onDragEnd={handleDragEnd}
-                  className={`flex items-center gap-3 p-3 rounded-lg border ${colors.border} bg-card hover:bg-accent/50 transition-all cursor-pointer ${isDragging ? 'opacity-50 scale-95' : ''} ${isDragOver ? 'border-primary border-2 bg-accent/70' : ''}`}
+                  className={`flex items-center gap-3 p-3 rounded-lg border ${isSelected ? 'border-primary ring-1 ring-primary' : colors.border} bg-card hover:bg-accent/50 transition-all cursor-pointer ${isDragging ? 'opacity-50 scale-95' : ''} ${isDragOver ? 'border-primary border-2 bg-accent/70' : ''}`}
                   onClick={() => onEditLevel(level)}
                 >
+                  {/* Checkbox */}
+                  <button
+                    className="shrink-0"
+                    onClick={(e) => { e.stopPropagation(); toggleSelect(level.id); }}
+                  >
+                    {isSelected ? (
+                      <CheckSquare className="h-4 w-4 text-primary" />
+                    ) : (
+                      <SquareIcon className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </button>
+
                   {/* Drag handle */}
                   <div
                     className="cursor-grab active:cursor-grabbing shrink-0 text-muted-foreground hover:text-foreground"
