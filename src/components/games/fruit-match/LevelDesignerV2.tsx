@@ -362,7 +362,9 @@ export function LevelDesignerV2({
         colorType: item.colorType,
         variant: item.variant,
         order: item.order,
-        layer: item.layer,
+        // Only pass explicit layer for pinned items — unpinned items let
+        // the blocking algorithm decide their layer assignment
+        layer: pinnedItemIds.has(item.id) ? item.layer : undefined,
       })),
       launchers: [...launchers]
         .sort((a, b) => a.order - b.order)
@@ -378,7 +380,7 @@ export function LevelDesignerV2({
       seed,
       moveLimit,
     };
-  }, [pixelCellArray, artWidth, artHeight, maxSelectableItems, waitingStandSlots, itemsWithLayers, launchers, activeLauncherCount, blockingOffset, colorTypeToHex, seed, moveLimit]);
+  }, [pixelCellArray, artWidth, artHeight, maxSelectableItems, waitingStandSlots, itemsWithLayers, launchers, activeLauncherCount, blockingOffset, colorTypeToHex, seed, moveLimit, pinnedItemIds]);
 
   const arrangementPreviewState = useMemo(() => {
     if (!studioGameConfig) return null;
