@@ -198,6 +198,8 @@ function SquareBlockPageContent() {
     renameCollection,
     deleteCollection,
     setActiveCollection,
+    getLevelsForCollection,
+    saveLevelsForCollection,
   } = useLevelCollection();
 
   // Handle shared import
@@ -252,14 +254,30 @@ function SquareBlockPageContent() {
 
   // Handle adding/updating level in collection
   const handleAddToCollection = (level: DesignedLevel, collectionId?: string) => {
+    const targetId = collectionId || activeCollectionId;
+
     if (editingLevel) {
-      // Update existing level - use functional update to avoid stale closure
-      setLevels(prev => prev.map(l => l.id === level.id ? level : l));
+      if (targetId && targetId !== activeCollectionId) {
+        // Editing in a different collection — update via saveLevelsForCollection
+        const existing = getLevelsForCollection(targetId);
+        saveLevelsForCollection(targetId, existing.map(l => l.id === level.id ? level : l));
+      } else {
+        // Update in active collection
+        setLevels(prev => prev.map(l => l.id === level.id ? level : l));
+      }
       setEditingLevel(null);
     } else {
-      // Add new level
-      addLevel(level);
-      // Auto-increment level number
+      if (targetId && targetId !== activeCollectionId) {
+        // Add to a specific (non-active) collection
+        const existing = getLevelsForCollection(targetId);
+        const numbered = { ...level, levelNumber: existing.length + 1 };
+        saveLevelsForCollection(targetId, [...existing, numbered]);
+        // Switch to that collection so user can see the added level
+        setActiveCollection(targetId);
+      } else {
+        // Add to active collection
+        addLevel(level);
+      }
       setLevelNumber(prev => prev + 1);
     }
   };

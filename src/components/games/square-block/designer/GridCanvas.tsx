@@ -39,10 +39,10 @@ export function GridCanvas({
 }: GridCanvasProps) {
   return (
     <>
-      {/* Grid SVG - Scrollable container */}
+      {/* Grid SVG - Scrollable container, centered */}
       <div
         ref={svgContainerRef}
-        className="overflow-auto border border-muted rounded-lg bg-muted/20"
+        className="overflow-auto border border-muted rounded-lg bg-muted/20 flex justify-center"
         style={{ maxHeight: '500px', cursor: isPanning ? 'grabbing' : 'default' }}
         onWheel={handleWheel}
         onMouseDown={handlePanStart}
