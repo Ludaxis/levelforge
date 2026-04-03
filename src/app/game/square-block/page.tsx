@@ -11,9 +11,7 @@ import {
   SquareBlockLevelCollection,
   CollectionCurveChart,
   useLevelCollection,
-  DEFAULT_SAWTOOTH_CONFIG,
 } from '@/components/games/square-block';
-import type { SawtoothConfig } from '@/components/games/square-block';
 import { SquareBlockLevel, DesignedLevel } from '@/types/squareBlock';
 import { useSquareBlockGame } from '@/lib/useSquareBlockGame';
 import { ArrowLeft, Undo2, RotateCcw, Trophy, XCircle, Palette, Layers, Play, BookOpen, Grid3X3 } from 'lucide-react';
@@ -183,7 +181,6 @@ function SquareBlockPageContent() {
   const [gameKey, setGameKey] = useState(0);
   const [levelNumber, setLevelNumber] = useState(1);
   const [editingLevel, setEditingLevel] = useState<DesignedLevel | null>(null);
-  const [sawtoothConfig, setSawtoothConfig] = useState<SawtoothConfig>(DEFAULT_SAWTOOTH_CONFIG);
 
   // Level collection state
   const {
@@ -292,7 +289,7 @@ function SquareBlockPageContent() {
       </div>
 
       <div>
-        <h1 className="text-2xl lg:text-3xl font-bold tracking-tight">Square Block Away</h1>
+        <h1 className="text-2xl lg:text-3xl font-bold tracking-tight">Tap Music</h1>
         <p className="text-muted-foreground mt-2 text-sm lg:text-base">
           Design and play rectangular grid puzzles. Learn how level design affects difficulty curves and player flow state.
         </p>
@@ -342,15 +339,12 @@ function SquareBlockPageContent() {
             <CollectionCurveChart
               levels={levels}
               onLevelClick={handleCurveLevelClick}
-              config={sawtoothConfig}
             />
             <SquareBlockLevelCollection
               levels={levels}
               onLevelsChange={setLevels}
               onEditLevel={handleEditLevel}
               onPlayLevel={handlePlayCollectionLevel}
-              sawtoothConfig={sawtoothConfig}
-              onSawtoothConfigChange={setSawtoothConfig}
               syncState={syncState}
               onForceSync={forceSync}
               collections={collections}

@@ -8,12 +8,9 @@ import { Input } from '@/components/ui/input';
 import {
   DesignedLevel,
   DifficultyTier,
-  FlowZone,
   LevelMetrics,
   calculateFlowZone,
   getSawtoothPosition,
-  SAWTOOTH_EXPECTED,
-  getExpectedDifficulty,
 } from '@/types/squareBlock';
 import {
   analyzePuzzle,
@@ -21,13 +18,11 @@ import {
 } from '@/lib/puzzleAnalyzer';
 import { isReferenceFormat, importFromReferenceFormat, exportToReferenceFormat } from '@/lib/squareBlockExport';
 import {
-  GridCoord,
   gridKey,
   createRectangularGrid,
   gridToPixel,
   getGridBounds,
 } from '@/lib/squareGrid';
-import { Slider } from '@/components/ui/slider';
 import { useSyncedLevelCollection } from '@/lib/storage/useSyncedLevelCollection';
 import { useMultipleCollections } from '@/lib/storage/useMultipleCollections';
 import { SyncState, CollectionMetadata } from '@/lib/storage/types';
@@ -54,8 +49,6 @@ import {
   List,
   Files,
   GripVertical,
-  Settings,
-  RotateCcw,
   RefreshCw,
   Cloud,
   CloudOff,
@@ -78,8 +71,6 @@ interface SquareBlockLevelCollectionProps {
   onLevelsChange: (levels: DesignedLevel[]) => void;
   onEditLevel: (level: DesignedLevel) => void;
   onPlayLevel: (level: DesignedLevel) => void;
-  sawtoothConfig?: SawtoothConfig;
-  onSawtoothConfigChange?: (config: SawtoothConfig) => void;
   syncState?: SyncState;
   onForceSync?: () => Promise<void>;
   // Multiple collections support
@@ -92,42 +83,19 @@ interface SquareBlockLevelCollectionProps {
 }
 
 // Export the config type and default for use in parent components
-export type { SawtoothConfig };
-export { DEFAULT_SAWTOOTH_CONFIG };
-
-// Sawtooth configuration
-interface SawtoothConfig {
-  // Difficulty tier thresholds (score ranges)
-  easyMax: number;      // 0 to easyMax = Easy
-  mediumMax: number;    // easyMax+1 to mediumMax = Medium
-  hardMax: number;      // mediumMax+1 to hardMax = Hard
-  // hardMax+1 to 100 = Super Hard
-
-  // Expected difficulty for each sawtooth position (1-10)
-  expectedPattern: DifficultyTier[];
-
-  // Curve simulation parameters
-  totalLevels: number;         // Total levels to display in curve (10-500)
-  skillGrowthRate: number;     // How fast skill grows per level (0.05-0.30)
-  baselineIncrease: number;    // How much difficulty increases per cycle (0-1.0)
-}
-
-const DEFAULT_SAWTOOTH_CONFIG: SawtoothConfig = {
-  easyMax: 24,
-  mediumMax: 49,
-  hardMax: 74,
-  expectedPattern: ['easy', 'easy', 'medium', 'medium', 'hard', 'medium', 'medium', 'hard', 'hard', 'superHard'],
-  totalLevels: 100,
-  skillGrowthRate: 0.15,
-  baselineIncrease: 0.3,
-};
+// Re-export SawtoothConfig from chart component
+export type { SawtoothConfig } from './CollectionCurveChart';
+export { DEFAULT_SAWTOOTH_CONFIG } from './CollectionCurveChart';
+import type { SawtoothConfig } from './CollectionCurveChart';
+import { DEFAULT_SAWTOOTH_CONFIG } from './CollectionCurveChart';
 
 // ============================================================================
 // Constants
 // ============================================================================
 
 const STORAGE_KEY = 'square-block-level-collection';
-const MAX_LEVELS = 100;
+const MAX_LEVELS = 10000;
+const PAGE_SIZE = 50;
 
 const DIFFICULTY_BADGE_COLORS: Record<DifficultyTier, string> = {
   easy: 'bg-green-500/20 text-green-400 border-green-500/50',
@@ -136,11 +104,7 @@ const DIFFICULTY_BADGE_COLORS: Record<DifficultyTier, string> = {
   superHard: 'bg-red-500/20 text-red-400 border-red-500/50',
 };
 
-const FLOW_ZONE_COLORS: Record<FlowZone, string> = {
-  flow: 'text-green-400',
-  boredom: 'text-cyan-400',
-  frustration: 'text-orange-400',
-};
+
 
 // ============================================================================
 // Hook for localStorage persistence
@@ -287,8 +251,6 @@ export function SquareBlockLevelCollection({
   onLevelsChange,
   onEditLevel,
   onPlayLevel,
-  sawtoothConfig: externalConfig,
-  onSawtoothConfigChange,
   syncState,
   onForceSync,
   collections,
@@ -303,8 +265,7 @@ export function SquareBlockLevelCollection({
   const [searchQuery, setSearchQuery] = useState('');
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
-  const [internalConfig, setInternalConfig] = useState<SawtoothConfig>(DEFAULT_SAWTOOTH_CONFIG);
+  const [page, setPage] = useState(0);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [collectionId, setCollectionId] = useState<string | null>(null);
@@ -327,43 +288,13 @@ export function SquareBlockLevelCollection({
     }
   }, [isSupabaseAvailable, isAuthenticated]);
 
-  // Use external config if provided, otherwise use internal state
-  const sawtoothConfig = externalConfig ?? internalConfig;
-  const setSawtoothConfig = (config: SawtoothConfig) => {
-    if (onSawtoothConfigChange) {
-      onSawtoothConfigChange(config);
-    } else {
-      setInternalConfig(config);
-    }
-  };
-
-  // Helper to get tier from score using config
+  // Simple tier helper using standard thresholds
   const getTierFromScore = useCallback((score: number): DifficultyTier => {
-    if (score <= sawtoothConfig.easyMax) return 'easy';
-    if (score <= sawtoothConfig.mediumMax) return 'medium';
-    if (score <= sawtoothConfig.hardMax) return 'hard';
+    if (score < 25) return 'easy';
+    if (score < 50) return 'medium';
+    if (score < 75) return 'hard';
     return 'superHard';
-  }, [sawtoothConfig]);
-
-  // Helper to get expected difficulty from position using config
-  const getExpectedFromPosition = useCallback((levelNumber: number): DifficultyTier => {
-    const position = ((levelNumber - 1) % 10);
-    return sawtoothConfig.expectedPattern[position];
-  }, [sawtoothConfig]);
-
-  // Calculate flow zone using config
-  const getFlowZone = useCallback((score: number, levelNumber: number): FlowZone => {
-    const actual = getTierFromScore(score);
-    const expected = getExpectedFromPosition(levelNumber);
-
-    if (actual === expected) return 'flow';
-
-    const rank: Record<DifficultyTier, number> = { easy: 1, medium: 2, hard: 3, superHard: 4 };
-    return rank[actual] > rank[expected] ? 'frustration' : 'boredom';
-  }, [getTierFromScore, getExpectedFromPosition]);
-
-  // Reset config to defaults
-  const resetConfig = () => setSawtoothConfig(DEFAULT_SAWTOOTH_CONFIG);
+  }, []);
 
   // Filter levels by search
   const filteredLevels = useMemo(() => {
@@ -375,6 +306,17 @@ export function SquareBlockLevelCollection({
         l.levelNumber.toString().includes(query)
     );
   }, [levels, searchQuery]);
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filteredLevels.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages - 1);
+  const pagedLevels = useMemo(() => {
+    const start = safePage * PAGE_SIZE;
+    return filteredLevels.slice(start, start + PAGE_SIZE);
+  }, [filteredLevels, safePage]);
+
+  // Reset page when search changes
+  useEffect(() => { setPage(0); }, [searchQuery]);
 
   // Export single level as reference format JSON
   const handleExportLevel = (level: DesignedLevel) => {
@@ -472,7 +414,7 @@ export function SquareBlockLevelCollection({
 
     return {
       id: `level-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      name: `Level ${levelNumber}`,
+      name: `grid_Level${levelNumber}_1`,
       levelNumber,
       rows: levelData.rows,
       cols: levelData.cols,
@@ -679,7 +621,7 @@ export function SquareBlockLevelCollection({
         open={showShareModal}
         onOpenChange={setShowShareModal}
         collectionId={collectionId}
-        gameType="Square Block"
+        gameType="Tap Music"
         levelCount={levels.length}
         onSignInClick={() => {
           setShowShareModal(false);
@@ -849,7 +791,7 @@ export function SquareBlockLevelCollection({
                   New Collection
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setShowManageDialog(true)}>
-                  <Settings className="h-4 w-4 mr-2" />
+                  <Pencil className="h-4 w-4 mr-2" />
                   Manage Collections
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -857,248 +799,17 @@ export function SquareBlockLevelCollection({
           </div>
         )}
 
-        {/* Search and Settings Toggle */}
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search levels..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-8"
-            />
-          </div>
-          <Button
-            variant={showSettings ? 'default' : 'outline'}
-            size="icon"
-            onClick={() => setShowSettings(!showSettings)}
-            title="Sawtooth Settings"
-          >
-            <Settings className="h-4 w-4" />
-          </Button>
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search levels..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-8"
+          />
         </div>
 
-        {/* Sawtooth Configuration Panel */}
-        {showSettings && (
-          <div className="p-4 bg-muted/30 rounded-lg space-y-4 border border-muted">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium">Sawtooth Configuration</h3>
-              <Button variant="ghost" size="sm" onClick={resetConfig}>
-                <RotateCcw className="h-3.5 w-3.5 mr-1" />
-                Reset
-              </Button>
-            </div>
-
-            {/* Difficulty Tier Thresholds */}
-            <div className="space-y-3">
-              <h4 className="text-xs font-medium text-muted-foreground">Difficulty Tier Thresholds</h4>
-
-              {/* Easy Max */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs text-green-400">Easy (0 - {sawtoothConfig.easyMax})</label>
-                  <Input
-                    type="number"
-                    value={sawtoothConfig.easyMax}
-                    onChange={(e) => {
-                      const v = Math.max(1, Math.min(sawtoothConfig.mediumMax - 1, parseInt(e.target.value) || 0));
-                      setSawtoothConfig({ ...sawtoothConfig, easyMax: v });
-                    }}
-                    className="w-16 h-7 text-xs text-center"
-                    min={1}
-                    max={sawtoothConfig.mediumMax - 1}
-                  />
-                </div>
-                <Slider
-                  value={[sawtoothConfig.easyMax]}
-                  onValueChange={([v]) => setSawtoothConfig({ ...sawtoothConfig, easyMax: Math.min(v, sawtoothConfig.mediumMax - 1) })}
-                  min={1}
-                  max={50}
-                  step={1}
-                  className="[&_[role=slider]]:bg-green-500"
-                />
-              </div>
-
-              {/* Medium Max */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs text-yellow-400">Medium ({sawtoothConfig.easyMax + 1} - {sawtoothConfig.mediumMax})</label>
-                  <Input
-                    type="number"
-                    value={sawtoothConfig.mediumMax}
-                    onChange={(e) => {
-                      const v = Math.max(sawtoothConfig.easyMax + 1, Math.min(sawtoothConfig.hardMax - 1, parseInt(e.target.value) || 0));
-                      setSawtoothConfig({ ...sawtoothConfig, mediumMax: v });
-                    }}
-                    className="w-16 h-7 text-xs text-center"
-                    min={sawtoothConfig.easyMax + 1}
-                    max={sawtoothConfig.hardMax - 1}
-                  />
-                </div>
-                <Slider
-                  value={[sawtoothConfig.mediumMax]}
-                  onValueChange={([v]) => setSawtoothConfig({ ...sawtoothConfig, mediumMax: Math.max(sawtoothConfig.easyMax + 1, Math.min(v, sawtoothConfig.hardMax - 1)) })}
-                  min={20}
-                  max={70}
-                  step={1}
-                  className="[&_[role=slider]]:bg-yellow-500"
-                />
-              </div>
-
-              {/* Hard Max */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs text-orange-400">Hard ({sawtoothConfig.mediumMax + 1} - {sawtoothConfig.hardMax})</label>
-                  <Input
-                    type="number"
-                    value={sawtoothConfig.hardMax}
-                    onChange={(e) => {
-                      const v = Math.max(sawtoothConfig.mediumMax + 1, Math.min(99, parseInt(e.target.value) || 0));
-                      setSawtoothConfig({ ...sawtoothConfig, hardMax: v });
-                    }}
-                    className="w-16 h-7 text-xs text-center"
-                    min={sawtoothConfig.mediumMax + 1}
-                    max={99}
-                  />
-                </div>
-                <Slider
-                  value={[sawtoothConfig.hardMax]}
-                  onValueChange={([v]) => setSawtoothConfig({ ...sawtoothConfig, hardMax: Math.max(sawtoothConfig.mediumMax + 1, v) })}
-                  min={50}
-                  max={99}
-                  step={1}
-                  className="[&_[role=slider]]:bg-orange-500"
-                />
-              </div>
-
-              {/* Super Hard indicator */}
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-red-400">Super Hard ({sawtoothConfig.hardMax + 1} - 100)</span>
-              </div>
-            </div>
-
-            {/* Expected Pattern per Position */}
-            <div className="space-y-2">
-              <h4 className="text-xs font-medium text-muted-foreground">Expected Difficulty Pattern (per 10-level cycle)</h4>
-              <div className="grid grid-cols-10 gap-1">
-                {sawtoothConfig.expectedPattern.map((tier, i) => {
-                  const tierOptions: DifficultyTier[] = ['easy', 'medium', 'hard', 'superHard'];
-                  const colors: Record<DifficultyTier, string> = {
-                    easy: 'bg-green-500/20 border-green-500 text-green-400',
-                    medium: 'bg-yellow-500/20 border-yellow-500 text-yellow-400',
-                    hard: 'bg-orange-500/20 border-orange-500 text-orange-400',
-                    superHard: 'bg-red-500/20 border-red-500 text-red-400',
-                  };
-                  const labels: Record<DifficultyTier, string> = { easy: 'E', medium: 'M', hard: 'H', superHard: 'S' };
-                  return (
-                    <div key={i} className="flex flex-col items-center gap-1">
-                      <span className="text-[9px] text-muted-foreground">{i + 1}</span>
-                      <button
-                        className={`w-full aspect-square rounded border text-[10px] font-bold ${colors[tier]} hover:opacity-80`}
-                        onClick={() => {
-                          const currentIndex = tierOptions.indexOf(tier);
-                          const nextIndex = (currentIndex + 1) % tierOptions.length;
-                          const newPattern = [...sawtoothConfig.expectedPattern];
-                          newPattern[i] = tierOptions[nextIndex];
-                          setSawtoothConfig({ ...sawtoothConfig, expectedPattern: newPattern });
-                        }}
-                        title={`Position ${i + 1}: ${tier} (click to change)`}
-                      >
-                        {labels[tier]}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="text-[10px] text-muted-foreground">Click each position to cycle through: Easy → Medium → Hard → Super Hard</p>
-            </div>
-
-            {/* Curve Simulation Parameters */}
-            <div className="space-y-3 pt-3 border-t border-muted">
-              <h4 className="text-xs font-medium text-muted-foreground">Curve Simulation Parameters</h4>
-
-              {/* Total Levels */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs">Total Levels</label>
-                  <Input
-                    type="number"
-                    value={sawtoothConfig.totalLevels}
-                    onChange={(e) => {
-                      const v = Math.max(10, Math.min(500, parseInt(e.target.value) || 100));
-                      setSawtoothConfig({ ...sawtoothConfig, totalLevels: v });
-                    }}
-                    className="w-20 h-7 text-xs text-center"
-                    min={10}
-                    max={500}
-                    step={10}
-                  />
-                </div>
-                <Slider
-                  value={[sawtoothConfig.totalLevels]}
-                  onValueChange={([v]) => setSawtoothConfig({ ...sawtoothConfig, totalLevels: v })}
-                  min={10}
-                  max={500}
-                  step={10}
-                />
-              </div>
-
-              {/* Skill Growth Rate */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs">Skill Growth Rate</label>
-                  <Input
-                    type="number"
-                    value={sawtoothConfig.skillGrowthRate}
-                    onChange={(e) => {
-                      const v = Math.max(0.05, Math.min(0.30, parseFloat(e.target.value) || 0.15));
-                      setSawtoothConfig({ ...sawtoothConfig, skillGrowthRate: v });
-                    }}
-                    className="w-20 h-7 text-xs text-center"
-                    min={0.05}
-                    max={0.30}
-                    step={0.01}
-                  />
-                </div>
-                <Slider
-                  value={[sawtoothConfig.skillGrowthRate * 100]}
-                  onValueChange={([v]) => setSawtoothConfig({ ...sawtoothConfig, skillGrowthRate: v / 100 })}
-                  min={5}
-                  max={30}
-                  step={1}
-                />
-                <p className="text-[10px] text-muted-foreground">How quickly players improve. Lower = steeper learning curve.</p>
-              </div>
-
-              {/* Difficulty Baseline Increase */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs">Baseline Increase</label>
-                  <Input
-                    type="number"
-                    value={sawtoothConfig.baselineIncrease}
-                    onChange={(e) => {
-                      const v = Math.max(0, Math.min(1.0, parseFloat(e.target.value) || 0.3));
-                      setSawtoothConfig({ ...sawtoothConfig, baselineIncrease: v });
-                    }}
-                    className="w-20 h-7 text-xs text-center"
-                    min={0}
-                    max={1.0}
-                    step={0.1}
-                  />
-                </div>
-                <Slider
-                  value={[sawtoothConfig.baselineIncrease * 10]}
-                  onValueChange={([v]) => setSawtoothConfig({ ...sawtoothConfig, baselineIncrease: v / 10 })}
-                  min={0}
-                  max={10}
-                  step={1}
-                />
-                <p className="text-[10px] text-muted-foreground">How much harder each 10-level cycle becomes.</p>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Level Stats Summary */}
         {levels.length > 0 && (
@@ -1121,27 +832,6 @@ export function SquareBlockLevelCollection({
           </div>
         )}
 
-        {/* Flow Zone Indicators */}
-        {levels.length > 0 && (
-          <div className="flex items-center gap-1 text-[9px] text-muted-foreground overflow-x-auto p-2 bg-muted/30 rounded">
-            {levels.map((level, i) => {
-              const expected = getExpectedFromPosition(i + 1);
-              const actual = getTierFromScore(level.metrics.difficultyScore);
-              const flowZone = getFlowZone(level.metrics.difficultyScore, i + 1);
-              const color = flowZone === 'flow' ? 'bg-green-500/20 text-green-400' :
-                           flowZone === 'boredom' ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400';
-              return (
-                <div
-                  key={level.id}
-                  className={`px-1.5 py-0.5 rounded ${color} shrink-0`}
-                  title={`Level ${i + 1}: Expected ${expected}, Actual ${actual} (${flowZone})`}
-                >
-                  {i + 1}
-                </div>
-              );
-            })}
-          </div>
-        )}
 
         {/* Level Grid/List */}
         {filteredLevels.length === 0 ? (
@@ -1152,7 +842,7 @@ export function SquareBlockLevelCollection({
           </div>
         ) : viewMode === 'grid' ? (
           <div className="grid grid-cols-2 gap-2 max-h-[500px] overflow-y-auto">
-            {filteredLevels.map((level) => {
+            {pagedLevels.map((level) => {
               const tier = getTierFromScore(level.metrics.difficultyScore);
               const tierColors = {
                 easy: { border: 'border-green-500/50', text: 'text-green-400' },
@@ -1236,7 +926,7 @@ export function SquareBlockLevelCollection({
           </div>
         ) : (
           <div className="space-y-2 max-h-[500px] overflow-y-auto">
-            {filteredLevels.map((level) => {
+            {pagedLevels.map((level) => {
               const tier = getTierFromScore(level.metrics.difficultyScore);
               const tierColors = {
                 easy: { border: 'border-green-500/50', text: 'text-green-400' },
@@ -1309,6 +999,21 @@ export function SquareBlockLevelCollection({
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-2 pt-2">
+            <Button variant="outline" size="sm" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+              Prev
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Page {safePage + 1} of {totalPages}
+            </span>
+            <Button variant="outline" size="sm" disabled={safePage >= totalPages - 1} onClick={() => setPage(safePage + 1)}>
+              Next
+            </Button>
           </div>
         )}
       </CardContent>

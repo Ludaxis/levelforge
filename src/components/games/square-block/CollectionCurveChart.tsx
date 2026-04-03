@@ -1,10 +1,9 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import {
   ComposedChart,
   ScatterChart,
-  Area,
   Line,
   Scatter,
   XAxis,
@@ -14,41 +13,68 @@ import {
   ReferenceLine,
   Cell,
   Tooltip,
-  LabelList,
-  ZAxis,
+  Area,
 } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { TrendingUp, Info } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Slider } from '@/components/ui/slider';
+import { TrendingUp, Settings2, RotateCcw } from 'lucide-react';
 import {
   DesignedLevel,
   DifficultyTier,
   FlowZone,
 } from '@/types/squareBlock';
-import { SAWTOOTH_CYCLE, DIFFICULTY_TIERS } from '@/lib/constants';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-export interface SawtoothConfig {
-  easyMax: number;
-  mediumMax: number;
-  hardMax: number;
-  expectedPattern: DifficultyTier[];
-  totalLevels: number;
-  skillGrowthRate: number;
-  baselineIncrease: number;
+/**
+ * A sawtooth phase defines a repeating cycle of difficulty values.
+ * Each value is a difficulty score (0-100) for that position in the cycle.
+ */
+export interface SawtoothPhase {
+  cycleLength: number;       // how many levels in one cycle
+  difficulties: number[];    // difficulty score (0-100) for each position
 }
 
+export interface SawtoothConfig {
+  onboardingLength: number;
+  onboarding: SawtoothPhase;
+  main: SawtoothPhase;
+  /** How much difficulty increases per cycle (added to the base pattern). */
+  baselineIncrease: number;
+  /** Skill growth rate per level for flow state analysis. */
+  skillGrowthRate: number;
+}
+
+// Defaults for Tap Music (Square Block):
+// Onboarding (5-level gentle ramp): ~5 → 10 → 18 → 25 → 35
+// Main (10-level sawtooth):
+//   Pos 1: 10 (victory lap after previous peak)
+//   Pos 2: 15 (recovery)
+//   Pos 3: 25 (rising)
+//   Pos 4: 35 (testing)
+//   Pos 5: 50 (mid-cycle hard spike)
+//   Pos 6: 30 (brief dip — relief)
+//   Pos 7: 35 (continued relief)
+//   Pos 8: 45 (rising tension)
+//   Pos 9: 55 (hard — sustained pressure)
+//   Pos 10: 70 (cycle peak — super hard)
 export const DEFAULT_SAWTOOTH_CONFIG: SawtoothConfig = {
-  easyMax: 24,
-  mediumMax: 49,
-  hardMax: 74,
-  expectedPattern: ['easy', 'easy', 'medium', 'medium', 'hard', 'medium', 'medium', 'hard', 'hard', 'superHard'],
-  totalLevels: 100,
-  skillGrowthRate: 0.10,  // Aligned with difficulty scale: skill reaches ~12 at level 100
-  baselineIncrease: 0.3,
+  onboardingLength: 10,
+  onboarding: {
+    cycleLength: 5,
+    difficulties: [5, 10, 18, 25, 35],
+  },
+  main: {
+    cycleLength: 10,
+    difficulties: [10, 15, 25, 35, 50, 30, 35, 45, 55, 70],
+  },
+  baselineIncrease: 1,
+  skillGrowthRate: 0.4,
 };
 
 interface CollectionCurveChartProps {
@@ -57,38 +83,36 @@ interface CollectionCurveChartProps {
   config?: SawtoothConfig;
 }
 
+type TargetMatch = 'on-target' | 'too-easy' | 'too-hard';
+
 interface ChartDataPoint {
   level: number;
-  idealDifficulty: number | null;
+  difficulty: number | null;       // actual designed difficulty (0-100)
+  expected: number;                // expected difficulty from sawtooth + envelope
   skillLevel: number;
-  actualDifficulty: number | null;
+  actualTier?: DifficultyTier;
   actualLevel?: DesignedLevel;
-  tier: DifficultyTier;
-  flowZone?: FlowZone;
+  isOnboarding: boolean;
+  targetMatch?: TargetMatch;       // actual vs expected sawtooth (for main chart)
+  flowZone?: FlowZone;            // actual vs skill (for scatter plot only)
 }
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-// Map difficulty tiers to chart values (for ideal curve)
-const DIFFICULTY_TO_VALUE: Record<DifficultyTier, number> = {
-  easy: 2.5,
-  medium: 5,
-  hard: 7.5,
-  superHard: 9,
+const TIER_COLORS: Record<DifficultyTier, string> = {
+  easy: 'bg-green-500/20 text-green-400',
+  medium: 'bg-yellow-500/20 text-yellow-400',
+  hard: 'bg-orange-500/20 text-orange-400',
+  superHard: 'bg-red-500/20 text-red-400',
 };
 
-// Scale actual difficulty score (0-100) to chart range (0-12)
-const scoreToChartValue = (score: number): number => {
-  return (score / 100) * 12;
-};
-
-const TIER_COLORS: Record<string, string> = {
-  easy: DIFFICULTY_TIERS.easy.color,
-  medium: DIFFICULTY_TIERS.medium.color,
-  hard: DIFFICULTY_TIERS.hard.color,
-  superHard: DIFFICULTY_TIERS.superHard.color,
+const TIER_DOT_COLORS: Record<DifficultyTier, string> = {
+  easy: '#22c55e',
+  medium: '#eab308',
+  hard: '#f97316',
+  superHard: '#ef4444',
 };
 
 const FLOW_ZONE_COLORS: Record<FlowZone, string> = {
@@ -98,607 +122,654 @@ const FLOW_ZONE_COLORS: Record<FlowZone, string> = {
 };
 
 // ============================================================================
-// Component
+// Helpers
+// ============================================================================
+
+function scoreToTier(score: number): DifficultyTier {
+  if (score < 25) return 'easy';
+  if (score < 50) return 'medium';
+  if (score < 75) return 'hard';
+  return 'superHard';
+}
+
+/** Compare actual difficulty vs expected sawtooth — for main chart tooltip/dots. */
+function getTargetMatch(actual: number, expected: number): TargetMatch {
+  const diff = actual - expected;
+  if (diff > 10) return 'too-hard';
+  if (diff < -10) return 'too-easy';
+  return 'on-target';
+}
+
+/** Compare difficulty vs skill — for flow state scatter plot only. */
+function getFlowZone(difficulty: number, skill: number): FlowZone {
+  const diff = difficulty - skill;
+  if (diff > 15) return 'frustration';
+  if (diff < -15) return 'boredom';
+  return 'flow';
+}
+
+/** Get expected difficulty score for a level number from sawtooth + envelope. */
+function getExpectedDifficulty(levelNumber: number, config: SawtoothConfig): { score: number; isOnboarding: boolean } {
+  if (levelNumber <= config.onboardingLength) {
+    const phase = config.onboarding;
+    const pos = (levelNumber - 1) % phase.cycleLength;
+    const cycleIndex = Math.floor((levelNumber - 1) / phase.cycleLength);
+    const base = phase.difficulties[pos] ?? 20;
+    return { score: Math.min(100, base + cycleIndex * config.baselineIncrease), isOnboarding: true };
+  }
+  const phase = config.main;
+  const offset = levelNumber - config.onboardingLength - 1;
+  const pos = offset % phase.cycleLength;
+  const cycleIndex = Math.floor(offset / phase.cycleLength);
+  const base = phase.difficulties[pos] ?? 40;
+  return { score: Math.min(100, base + cycleIndex * config.baselineIncrease), isOnboarding: false };
+}
+
+// ============================================================================
+// localStorage
+// ============================================================================
+
+const STORAGE_KEY = 'tap-music-sawtooth-config';
+
+function loadSavedConfig(): SawtoothConfig {
+  if (typeof window === 'undefined') return DEFAULT_SAWTOOTH_CONFIG;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_SAWTOOTH_CONFIG;
+    const parsed = JSON.parse(raw);
+    return {
+      ...DEFAULT_SAWTOOTH_CONFIG,
+      ...parsed,
+      onboarding: { ...DEFAULT_SAWTOOTH_CONFIG.onboarding, ...parsed.onboarding },
+      main: { ...DEFAULT_SAWTOOTH_CONFIG.main, ...parsed.main },
+    };
+  } catch {
+    return DEFAULT_SAWTOOTH_CONFIG;
+  }
+}
+
+// ============================================================================
+// Config Editor
+// ============================================================================
+
+function PhaseEditor({
+  label,
+  phase,
+  onChange,
+}: {
+  label: string;
+  phase: SawtoothPhase;
+  onChange: (phase: SawtoothPhase) => void;
+}) {
+  const setCycleLength = (len: number) => {
+    const clamped = Math.max(2, Math.min(20, len));
+    let diffs = [...phase.difficulties];
+    if (clamped > diffs.length) {
+      const last = diffs[diffs.length - 1] ?? 40;
+      while (diffs.length < clamped) diffs.push(last);
+    } else {
+      diffs = diffs.slice(0, clamped);
+    }
+    onChange({ cycleLength: clamped, difficulties: diffs });
+  };
+
+  const updateDifficulty = (index: number, value: number) => {
+    const newDiffs = [...phase.difficulties];
+    newDiffs[index] = Math.max(0, Math.min(100, value));
+    onChange({ ...phase, difficulties: newDiffs });
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-medium">{label}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-muted-foreground">Cycle:</span>
+          <Input
+            type="number"
+            min={2}
+            max={20}
+            value={phase.cycleLength}
+            onChange={(e) => setCycleLength(Number(e.target.value) || 5)}
+            className="h-6 w-14 text-[10px] px-1 text-center"
+          />
+          <span className="text-[10px] text-muted-foreground">levels</span>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {phase.difficulties.map((diff, i) => (
+          <div key={i} className="space-y-0.5">
+            <span className="text-[8px] text-muted-foreground text-center block">{i + 1}</span>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={diff}
+              onChange={(e) => updateDifficulty(i, Number(e.target.value) || 0)}
+              className="h-6 w-10 text-[9px] px-0.5 text-center"
+            />
+          </div>
+        ))}
+      </div>
+      {/* Mini sparkline preview of the cycle shape */}
+      <div className="flex items-end gap-px h-6">
+        {phase.difficulties.map((diff, i) => (
+          <div
+            key={i}
+            className="flex-1 rounded-t-sm"
+            style={{
+              height: `${Math.max(4, (diff / 100) * 24)}px`,
+              backgroundColor: TIER_DOT_COLORS[scoreToTier(diff)],
+              opacity: 0.7,
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SawtoothConfigEditor({
+  config,
+  onChange,
+  onReset,
+}: {
+  config: SawtoothConfig;
+  onChange: (config: SawtoothConfig) => void;
+  onReset: () => void;
+}) {
+  return (
+    <div className="space-y-4 p-3 bg-muted/30 rounded-lg border border-border">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium">Sawtooth Configuration</span>
+        <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={onReset}>
+          <RotateCcw className="h-3 w-3 mr-1" />
+          Reset
+        </Button>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] text-muted-foreground whitespace-nowrap">Onboarding ends at level:</span>
+        <Input
+          type="number"
+          min={0}
+          max={500}
+          value={config.onboardingLength}
+          onChange={(e) => onChange({ ...config, onboardingLength: Math.max(0, Number(e.target.value) || 0) })}
+          className="h-6 w-16 text-[10px] px-1 text-center"
+        />
+      </div>
+
+      {config.onboardingLength > 0 && (
+        <PhaseEditor
+          label="Onboarding Pattern (difficulty scores 0-100)"
+          phase={config.onboarding}
+          onChange={(onboarding) => onChange({ ...config, onboarding })}
+        />
+      )}
+
+      <PhaseEditor
+        label="Main Pattern (difficulty scores 0-100)"
+        phase={config.main}
+        onChange={(main) => onChange({ ...config, main })}
+      />
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-muted-foreground whitespace-nowrap">Baseline +/cycle:</span>
+          <Input
+            type="number"
+            min={0}
+            max={10}
+            step={0.5}
+            value={config.baselineIncrease}
+            onChange={(e) => onChange({ ...config, baselineIncrease: Math.max(0, Math.min(10, Number(e.target.value) || 0)) })}
+            className="h-6 w-14 text-[10px] px-1 text-center"
+          />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-muted-foreground whitespace-nowrap">Skill growth:</span>
+          <Input
+            type="number"
+            min={0.1}
+            max={3}
+            step={0.1}
+            value={config.skillGrowthRate}
+            onChange={(e) => onChange({ ...config, skillGrowthRate: Math.max(0.1, Math.min(3, Number(e.target.value) || 0.4)) })}
+            className="h-6 w-14 text-[10px] px-1 text-center"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Main Component
 // ============================================================================
 
 export function CollectionCurveChart({
   levels,
   onLevelClick,
-  config = DEFAULT_SAWTOOTH_CONFIG,
+  config: externalConfig,
 }: CollectionCurveChartProps) {
-  const maxLevels = config.totalLevels;
+  const [savedConfig, setSavedConfig] = useState<SawtoothConfig>(DEFAULT_SAWTOOTH_CONFIG);
+  const [showSettings, setShowSettings] = useState(false);
 
-  // Helper to get tier from score using config
-  const getTierFromScore = (score: number): DifficultyTier => {
-    if (score <= config.easyMax) return 'easy';
-    if (score <= config.mediumMax) return 'medium';
-    if (score <= config.hardMax) return 'hard';
-    return 'superHard';
-  };
+  useEffect(() => {
+    setSavedConfig(loadSavedConfig());
+  }, []);
 
-  // Helper to get expected difficulty from position using config
-  const getExpectedFromPosition = (levelNumber: number): DifficultyTier => {
-    const position = ((levelNumber - 1) % 10);
-    return config.expectedPattern[position];
-  };
+  const config = externalConfig ?? savedConfig;
 
-  // Calculate flow zone using config
-  const getFlowZoneFromConfig = (score: number, levelNumber: number): FlowZone => {
-    const actual = getTierFromScore(score);
-    const expected = getExpectedFromPosition(levelNumber);
+  const handleConfigChange = useCallback((newConfig: SawtoothConfig) => {
+    setSavedConfig(newConfig);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(newConfig));
+    } catch { /* ignore quota errors */ }
+  }, []);
 
-    if (actual === expected) return 'flow';
+  const handleReset = useCallback(() => {
+    setSavedConfig(DEFAULT_SAWTOOTH_CONFIG);
+    localStorage.removeItem(STORAGE_KEY);
+  }, []);
 
-    const rank: Record<DifficultyTier, number> = { easy: 1, medium: 2, hard: 3, superHard: 4 };
-    return rank[actual] > rank[expected] ? 'frustration' : 'boredom';
-  };
+  // Level lookup
+  const levelMap = useMemo(() => {
+    const map = new Map<number, DesignedLevel>();
+    levels.forEach((l) => map.set(l.levelNumber, l));
+    return map;
+  }, [levels]);
 
-  // Generate chart data
+  const globalMax = useMemo(() => {
+    if (levels.length === 0) return 20;
+    return Math.max(...levels.map((l) => l.levelNumber));
+  }, [levels]);
+
+  // Range selector
+  const [rangeStart, setRangeStart] = useState(1);
+  const [rangeEnd, setRangeEnd] = useState(100);
+  useEffect(() => {
+    if (globalMax > rangeEnd) setRangeEnd(Math.min(globalMax + 10, 10000));
+  }, [globalMax]);
+
+  const visibleStart = Math.max(1, rangeStart);
+  const visibleEnd = Math.max(visibleStart + 1, rangeEnd);
+  const visibleCount = visibleEnd - visibleStart + 1;
+
+  // Chart data — windowed + sampled for large ranges
   const chartData = useMemo((): ChartDataPoint[] => {
     const data: ChartDataPoint[] = [];
-    const numCycles = Math.ceil(maxLevels / 10);
+    const step = visibleCount > 500 ? Math.ceil(visibleCount / 500) : 1;
 
-    // Create level lookup
-    const levelMap = new Map<number, DesignedLevel>();
-    levels.forEach((l) => levelMap.set(l.levelNumber, l));
+    for (let levelNum = visibleStart; levelNum <= visibleEnd; levelNum += step) {
+      const { score: expected, isOnboarding } = getExpectedDifficulty(levelNum, config);
+      const actualLevel = levelMap.get(levelNum);
+      const difficulty = actualLevel ? actualLevel.metrics.difficultyScore : null;
+      const actualTier = difficulty !== null ? scoreToTier(difficulty) : undefined;
+      const skillLevel = 10 + (levelNum - 1) * config.skillGrowthRate;
+      const targetMatch = difficulty !== null ? getTargetMatch(difficulty, expected) : undefined;
+      const flowZone = difficulty !== null ? getFlowZone(difficulty, skillLevel) : undefined;
 
-    for (let cycle = 0; cycle < numCycles; cycle++) {
-      SAWTOOTH_CYCLE.forEach((point) => {
-        const levelNum = cycle * 10 + point.position;
-        if (levelNum > maxLevels) return;
+      data.push({ level: levelNum, difficulty, expected, skillLevel, actualTier, actualLevel, isOnboarding, targetMatch, flowZone });
+    }
 
-        const baselineOffset = cycle * config.baselineIncrease;
-        const idealDifficulty = point.difficulty + baselineOffset;
-
-        const actualLevel = levelMap.get(levelNum);
-        let actualDifficulty: number | null = null;
-        let flowZone: FlowZone | undefined;
-
-        if (actualLevel) {
-          // Use actual difficulty score (0-100) scaled to chart range (0-12)
-          // NOTE: Do NOT add baselineOffset - actual scores are absolute, not relative to theoretical baseline
-          actualDifficulty = scoreToChartValue(actualLevel.metrics.difficultyScore);
-          // Recalculate flow zone using config thresholds
-          flowZone = getFlowZoneFromConfig(actualLevel.metrics.difficultyScore, levelNum);
+    // Ensure all designed levels in range are included even when sampling
+    if (step > 1) {
+      const sampled = new Set(data.map((d) => d.level));
+      for (const level of levels) {
+        if (level.levelNumber >= visibleStart && level.levelNumber <= visibleEnd && !sampled.has(level.levelNumber)) {
+          const { score: expected, isOnboarding } = getExpectedDifficulty(level.levelNumber, config);
+          const skillLevel = 10 + (level.levelNumber - 1) * config.skillGrowthRate;
+          data.push({
+            level: level.levelNumber,
+            difficulty: level.metrics.difficultyScore,
+            expected,
+            skillLevel,
+            actualTier: scoreToTier(level.metrics.difficultyScore),
+            actualLevel: level,
+            isOnboarding,
+            targetMatch: getTargetMatch(level.metrics.difficultyScore, expected),
+            flowZone: getFlowZone(level.metrics.difficultyScore, skillLevel),
+          });
         }
-
-        // Skill grows linearly with level
-        // Start at 2 to align with difficulty scale (easy tier starts at ~2)
-        const skillLevel = 2 + (levelNum - 1) * config.skillGrowthRate;
-
-        data.push({
-          level: levelNum,
-          idealDifficulty,
-          skillLevel,
-          actualDifficulty,
-          actualLevel,
-          tier: getExpectedFromPosition(levelNum),
-          flowZone,
-        });
-      });
+      }
+      data.sort((a, b) => a.level - b.level);
     }
 
     return data;
-  }, [levels, maxLevels, config]);
+  }, [visibleStart, visibleEnd, visibleCount, config, levelMap, levels]);
 
-  // Stats - recalculate flow zones based on config thresholds
+  // Stats (all levels, not just visible)
   const stats = useMemo(() => {
-    let inFlow = 0;
-    let inBoredom = 0;
-    let inFrustration = 0;
-
-    levels.forEach((l) => {
-      const flowZone = getFlowZoneFromConfig(l.metrics.difficultyScore, l.levelNumber);
-      if (flowZone === 'flow') inFlow++;
-      else if (flowZone === 'boredom') inBoredom++;
-      else inFrustration++;
-    });
-
-    const coverage = (levels.length / maxLevels) * 100;
-
-    return { inFlow, inBoredom, inFrustration, coverage };
-  }, [levels, maxLevels, config]);
-
-  // Tick interval for X axis
-  const tickInterval = maxLevels <= 50 ? 5 : maxLevels <= 100 ? 10 : 20;
-
-  // Custom tooltip
-  interface CustomTooltipProps {
-    active?: boolean;
-    payload?: Array<{ value: number; name: string; color: string; dataKey: string; payload: ChartDataPoint }>;
-    label?: string;
-  }
-
-  const CustomTooltip = ({ active, payload }: CustomTooltipProps) => {
-    if (active && payload && payload.length > 0) {
-      const data = payload[0].payload as ChartDataPoint;
-      return (
-        <div className="bg-popover border rounded-lg p-3 shadow-lg">
-          <p className="font-medium">Level {data.level}</p>
-          <p className="text-sm text-muted-foreground">
-            Expected: <Badge className={`ml-1 ${TIER_COLORS[data.tier]}`}>{data.tier}</Badge>
-          </p>
-          {data.actualLevel && (
-            <>
-              <p className="text-sm text-muted-foreground mt-1">
-                Actual: <Badge className={`ml-1 ${TIER_COLORS[data.actualLevel.metrics.difficulty]}`}>
-                  {data.actualLevel.metrics.difficulty}
-                </Badge>
-                <span className="ml-2 font-mono text-xs">
-                  ({data.actualLevel.metrics.difficultyScore}/100)
-                </span>
-              </p>
-              <p className="text-sm mt-1">
-                <span className={`font-medium`} style={{ color: FLOW_ZONE_COLORS[data.flowZone!] }}>
-                  {data.flowZone === 'flow' && 'In Flow'}
-                  {data.flowZone === 'boredom' && 'Too Easy'}
-                  {data.flowZone === 'frustration' && 'Too Hard'}
-                </span>
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {data.actualLevel.metrics.cellCount} blocks, {data.actualLevel.metrics.holeCount} holes
-              </p>
-            </>
-          )}
-          {!data.actualLevel && (
-            <p className="text-xs text-muted-foreground mt-1">Not yet designed</p>
-          )}
-        </div>
-      );
+    let matching = 0, tooEasy = 0, tooHard = 0;
+    for (const l of levels) {
+      const { score: expected } = getExpectedDifficulty(l.levelNumber, config);
+      const diff = l.metrics.difficultyScore - expected;
+      if (Math.abs(diff) <= 10) matching++;
+      else if (diff < -10) tooEasy++;
+      else tooHard++;
     }
-    return null;
+    return { matching, tooEasy, tooHard, total: levels.length };
+  }, [levels, config]);
+
+  const tickInterval = visibleCount <= 30 ? 1 : visibleCount <= 60 ? 5 : visibleCount <= 200 ? 10 : visibleCount <= 500 ? 20 : 50;
+
+  // Tier bands
+  const tierBands = [
+    { label: 'easy', y: 25, color: TIER_DOT_COLORS.easy },
+    { label: 'medium', y: 50, color: TIER_DOT_COLORS.medium },
+    { label: 'hard', y: 75, color: TIER_DOT_COLORS.hard },
+  ];
+
+  const onboardingEnd = config.onboardingLength;
+
+  // Tooltip
+  const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ payload: ChartDataPoint }> }) => {
+    if (!active || !payload || payload.length === 0) return null;
+    const d = payload[0].payload;
+    const expectedTier = scoreToTier(d.expected);
+    return (
+      <div className="bg-popover border rounded-lg p-3 shadow-lg text-sm">
+        <p className="font-medium">Level {d.level}</p>
+        <p className="text-muted-foreground text-xs">
+          {d.isOnboarding ? 'Onboarding' : 'Main'} — Expected: {d.expected.toFixed(0)} <Badge className={`ml-1 scale-90 ${TIER_COLORS[expectedTier]}`}>{expectedTier}</Badge>
+        </p>
+        {d.actualLevel && (
+          <>
+            <p className="text-muted-foreground text-xs mt-1">
+              Actual: <span className="font-mono">{d.difficulty}/100</span>
+              <Badge className={`ml-1 scale-90 ${TIER_COLORS[d.actualTier!]}`}>{d.actualTier}</Badge>
+            </p>
+            {d.targetMatch && (
+              <p className="text-xs mt-1 font-medium" style={{ color: d.targetMatch === 'on-target' ? '#22c55e' : d.targetMatch === 'too-easy' ? '#06b6d4' : '#f97316' }}>
+                {d.targetMatch === 'on-target' && 'On Target'}
+                {d.targetMatch === 'too-easy' && 'Below Expected'}
+                {d.targetMatch === 'too-hard' && 'Above Expected'}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground mt-1">
+              {d.actualLevel.metrics.cellCount} blocks, {d.actualLevel.metrics.holeCount} holes
+            </p>
+          </>
+        )}
+        {!d.actualLevel && <p className="text-xs text-muted-foreground mt-1">Not yet designed</p>}
+      </div>
+    );
   };
 
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5" />
-            Difficulty Curve Analysis
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5" />
+              Difficulty Curve Analysis
+            </CardTitle>
+            {!externalConfig && (
+              <Button
+                variant={showSettings ? 'secondary' : 'ghost'}
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setShowSettings(!showSettings)}
+              >
+                <Settings2 className="h-3.5 w-3.5 mr-1" />
+                Settings
+              </Button>
+            )}
+          </div>
           <CardDescription>
             Compare your designed levels against the ideal sawtooth pattern
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="h-[350px] w-full">
+          {showSettings && !externalConfig && (
+            <div className="mb-4">
+              <SawtoothConfigEditor config={config} onChange={handleConfigChange} onReset={handleReset} />
+            </div>
+          )}
+
+          {/* Range selector */}
+          <div className="flex items-center gap-3 mb-3 text-xs">
+            <span className="text-muted-foreground whitespace-nowrap">Levels</span>
+            <Input
+              type="number" min={1} max={10000} value={rangeStart}
+              onChange={(e) => setRangeStart(Math.max(1, Math.min(rangeEnd - 1, Number(e.target.value) || 1)))}
+              className="h-7 w-20 text-xs text-center"
+            />
+            <div className="flex-1">
+              <Slider
+                value={[rangeStart, rangeEnd]}
+                onValueChange={([s, e]) => { setRangeStart(s); setRangeEnd(e); }}
+                min={1} max={Math.max(globalMax + 50, rangeEnd, 100)} step={1} minStepsBetweenThumbs={5}
+              />
+            </div>
+            <Input
+              type="number" min={1} max={10000} value={rangeEnd}
+              onChange={(e) => setRangeEnd(Math.max(rangeStart + 1, Math.min(10000, Number(e.target.value) || 100)))}
+              className="h-7 w-20 text-xs text-center"
+            />
+            <span className="text-muted-foreground whitespace-nowrap">({visibleCount})</span>
+          </div>
+
+          <div className="h-[400px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart
                 data={chartData}
                 margin={{ top: 10, right: 20, bottom: 30, left: 20 }}
                 onClick={(e) => {
-                  if (e && e.activePayload && e.activePayload[0]) {
-                    const data = e.activePayload[0].payload as ChartDataPoint;
-                    if (data.actualLevel && onLevelClick) {
-                      onLevelClick(data.level);
-                    }
+                  if (e?.activePayload?.[0] && onLevelClick) {
+                    const d = e.activePayload[0].payload as ChartDataPoint;
+                    if (d.actualLevel) onLevelClick(d.level);
                   }
                 }}
               >
                 <defs>
-                  <linearGradient id="squareIdealGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(262, 83%, 58%)" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="hsl(262, 83%, 58%)" stopOpacity={0.05} />
+                  <linearGradient id="expectedGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="hsl(262, 83%, 58%)" stopOpacity={0.2} />
+                    <stop offset="95%" stopColor="hsl(262, 83%, 58%)" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
 
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-
-                <XAxis
-                  dataKey="level"
-                  tick={{ fontSize: 11 }}
-                  tickLine={false}
-                  interval={tickInterval - 1}
-                  label={{ value: 'Level Number', position: 'bottom', offset: 15, fontSize: 12 }}
-                />
-
-                <YAxis
-                  domain={[0, 'auto']}
-                  tick={{ fontSize: 11 }}
-                  tickLine={false}
-                  label={{ value: 'Difficulty / Skill', angle: -90, position: 'insideLeft', offset: 5, fontSize: 12 }}
-                />
-
+                <XAxis dataKey="level" tick={{ fontSize: 11 }} tickLine={false} interval={tickInterval - 1}
+                  label={{ value: 'Level', position: 'bottom', offset: 15, fontSize: 12 }} />
+                <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false}
+                  label={{ value: 'Difficulty', angle: -90, position: 'insideLeft', offset: 5, fontSize: 12 }} />
                 <Tooltip content={<CustomTooltip />} />
 
-                {/* Hard spike reference lines */}
-                {[5, 15, 25, 35, 45, 55, 65, 75, 85, 95].filter((l) => l <= maxLevels).map((level) => (
-                  <ReferenceLine
-                    key={`spike-${level}`}
-                    x={level}
-                    stroke={TIER_COLORS.hard}
-                    strokeDasharray="3 3"
-                    strokeOpacity={0.5}
-                  />
+                {/* Tier boundary lines */}
+                {tierBands.map((band) => (
+                  <ReferenceLine key={band.label} y={band.y} stroke={band.color}
+                    strokeDasharray="4 4" strokeOpacity={0.3}
+                    label={{ value: band.label, position: 'right', fill: band.color, fontSize: 9, opacity: 0.6 }} />
                 ))}
 
-                {/* Super hard peak reference lines */}
-                {[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].filter((l) => l <= maxLevels).map((level) => (
-                  <ReferenceLine
-                    key={`peak-${level}`}
-                    x={level}
-                    stroke={TIER_COLORS.superHard}
-                    strokeDasharray="3 3"
-                    strokeOpacity={0.5}
-                  />
-                ))}
+                {/* Onboarding boundary */}
+                {onboardingEnd > 0 && onboardingEnd >= visibleStart && onboardingEnd < visibleEnd && (
+                  <ReferenceLine x={onboardingEnd} stroke="#6b7280" strokeDasharray="6 3" strokeWidth={1.5}
+                    label={{ value: 'Onboarding', position: 'insideTopLeft', fill: '#6b7280', fontSize: 10 }} />
+                )}
 
-                {/* Ideal sawtooth curve */}
-                <Area
-                  type="monotone"
-                  dataKey="idealDifficulty"
-                  stroke="hsl(262, 83%, 58%)"
-                  fill="url(#squareIdealGradient)"
-                  strokeWidth={2}
-                  strokeDasharray="5 5"
-                  name="Ideal Curve"
-                />
+                {/* Expected sawtooth curve (smooth) */}
+                <Area type="monotone" dataKey="expected" stroke="hsl(262, 83%, 58%)"
+                  fill="url(#expectedGradient)" strokeWidth={2} strokeDasharray="5 3" name="Expected" dot={false} />
 
                 {/* Skill growth line */}
-                <Line
-                  type="monotone"
-                  dataKey="skillLevel"
-                  stroke="#06b6d4"
-                  strokeWidth={2}
-                  dot={false}
-                  name="Player Skill"
-                />
+                <Line type="monotone" dataKey="skillLevel" stroke="#06b6d4"
+                  strokeWidth={1.5} strokeDasharray="3 3" dot={false} name="Skill" />
 
                 {/* Actual difficulty line */}
-                <Line
-                  type="monotone"
-                  dataKey="actualDifficulty"
-                  stroke="#ffffff"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls={false}
-                  name="Your Levels"
-                />
+                <Line type="monotone" dataKey="difficulty" stroke="#ffffff"
+                  strokeWidth={2} dot={false} connectNulls name="Actual" />
 
-                {/* Scatter points for designed levels */}
-                <Scatter
-                  dataKey="actualDifficulty"
-                  name="Designed Levels"
-                >
-                  {chartData.map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={entry.flowZone ? FLOW_ZONE_COLORS[entry.flowZone] : 'transparent'}
-                      stroke={entry.actualLevel ? '#ffffff' : 'transparent'}
-                      strokeWidth={entry.actualLevel ? 2 : 0}
-                      cursor={entry.actualLevel ? 'pointer' : 'default'}
-                    />
-                  ))}
+                {/* Dots for designed levels — fill = tier color, stroke = target match */}
+                <Scatter dataKey="difficulty" name="Levels">
+                  {chartData.map((entry, index) => {
+                    const matchColor = entry.targetMatch === 'on-target' ? '#22c55e'
+                      : entry.targetMatch === 'too-easy' ? '#06b6d4'
+                      : entry.targetMatch === 'too-hard' ? '#f97316'
+                      : 'transparent';
+                    return (
+                      <Cell key={`cell-${index}`}
+                        fill={entry.actualTier ? TIER_DOT_COLORS[entry.actualTier] : 'transparent'}
+                        stroke={entry.actualLevel ? matchColor : 'transparent'}
+                        strokeWidth={entry.actualLevel ? 2.5 : 0}
+                        r={entry.actualLevel ? 5 : 0}
+                        cursor={entry.actualLevel ? 'pointer' : 'default'} />
+                    );
+                  })}
                 </Scatter>
               </ComposedChart>
             </ResponsiveContainer>
           </div>
 
           {/* Legend */}
-          <div className="flex flex-wrap gap-4 justify-center mt-4 text-xs">
+          <div className="flex flex-wrap gap-3 justify-center mt-3 text-xs">
             <div className="flex items-center gap-1.5">
-              <div className="w-4 h-0.5 bg-purple-500" style={{ borderStyle: 'dashed' }} />
-              <span>Ideal Sawtooth</span>
+              <div className="w-4 h-0.5 bg-purple-500 opacity-60" style={{ borderTop: '2px dashed' }} />
+              <span className="text-muted-foreground">Expected Sawtooth</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-4 h-0.5 bg-cyan-500" />
-              <span>Player Skill</span>
+              <div className="w-4 h-0.5 bg-white" />
+              <span className="text-muted-foreground">Actual</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-green-500" />
-              <span>Flow State</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-cyan-400" />
-              <span>Too Easy</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-orange-500" />
-              <span>Too Hard</span>
+              <div className="w-4 h-0.5 bg-cyan-500 opacity-60" style={{ borderTop: '2px dashed' }} />
+              <span className="text-muted-foreground">Skill</span>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card>
-          <CardContent className="p-4 text-center">
-            <p className="text-3xl font-bold">{stats.coverage.toFixed(0)}%</p>
-            <p className="text-xs text-muted-foreground">Collection Coverage</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
-            <p className="text-3xl font-bold text-green-400">{stats.inFlow}</p>
-            <p className="text-xs text-muted-foreground">In Flow State</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
-            <p className="text-3xl font-bold text-cyan-400">{stats.inBoredom}</p>
-            <p className="text-xs text-muted-foreground">Too Easy</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
-            <p className="text-3xl font-bold text-orange-400">{stats.inFrustration}</p>
-            <p className="text-xs text-muted-foreground">Too Hard</p>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Flow State Analysis */}
+      {(() => {
+        const designed = chartData.filter((d) => d.actualLevel && d.flowZone);
+        if (designed.length === 0) return null;
 
-      {/* Flow State Diagram & Best Practices */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Flow State Diagram - Expected vs Actual */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Expected vs Actual Difficulty</CardTitle>
-            <CardDescription className="text-xs">
-              Dots on diagonal = perfect match. Above = too hard, below = too easy.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {(() => {
-              // Get actual level data for flow state diagram
-              const actualLevels = chartData.filter(d => d.actualLevel);
+        const flowCount = designed.filter((d) => d.flowZone === 'flow').length;
+        const boredomCount = designed.filter((d) => d.flowZone === 'boredom').length;
+        const frustrationCount = designed.filter((d) => d.flowZone === 'frustration').length;
+        const total = designed.length;
 
-              if (actualLevels.length === 0) {
-                return (
-                  <div className="h-[200px] flex items-center justify-center text-muted-foreground text-sm">
-                    Add levels to see expected vs actual comparison
-                  </div>
-                );
-              }
+        const scatterData = designed.map((d) => ({
+          skill: d.skillLevel, difficulty: d.difficulty!, flowZone: d.flowZone!, level: d.level, tier: d.actualTier!,
+        }));
 
-              // Build flow data comparing expected (from sawtooth) vs actual difficulty
-              const flowData = actualLevels.map(d => {
-                const actualDiff = scoreToChartValue(d.actualLevel!.metrics.difficultyScore);
-                // Expected difficulty from sawtooth position (idealDifficulty already calculated)
-                const expectedDiff = d.idealDifficulty || DIFFICULTY_TO_VALUE[d.tier];
+        const allVals = [...scatterData.map((d) => d.skill), ...scatterData.map((d) => d.difficulty)];
+        const minVal = Math.max(0, Math.floor(Math.min(...allVals) - 5));
+        const maxVal = Math.min(100, Math.ceil(Math.max(...allVals) + 5));
 
-                // Use the SAME flow zone as the main chart (tier-based comparison)
-                // This ensures consistency between the two visualizations
-                const flowZone = d.flowZone!;
+        return (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Flow State</CardTitle>
+                <CardDescription className="text-xs">
+                  Skill vs Difficulty. Diagonal = flow. Above = frustration.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[250px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ScatterChart margin={{ top: 10, right: 20, bottom: 30, left: 40 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <ReferenceLine segment={[{ x: minVal, y: minVal }, { x: maxVal, y: maxVal }]}
+                        stroke={FLOW_ZONE_COLORS.flow} strokeWidth={2} strokeDasharray="5 5" />
+                      <ReferenceLine segment={[{ x: minVal, y: minVal + 15 }, { x: maxVal - 15, y: maxVal }]}
+                        stroke={FLOW_ZONE_COLORS.frustration} strokeWidth={1} strokeOpacity={0.5} strokeDasharray="3 3" />
+                      <ReferenceLine segment={[{ x: minVal + 15, y: minVal }, { x: maxVal, y: maxVal - 15 }]}
+                        stroke={FLOW_ZONE_COLORS.boredom} strokeWidth={1} strokeOpacity={0.5} strokeDasharray="3 3" />
+                      <XAxis type="number" dataKey="skill" domain={[minVal, maxVal]} tick={{ fontSize: 10 }}
+                        label={{ value: 'Player Skill', position: 'bottom', offset: 15, fontSize: 11 }} />
+                      <YAxis type="number" dataKey="difficulty" domain={[minVal, maxVal]} tick={{ fontSize: 10 }}
+                        label={{ value: 'Difficulty', angle: -90, position: 'insideLeft', offset: 5, fontSize: 11 }} />
+                      <Tooltip content={({ active, payload }) => {
+                        if (!active || !payload?.[0]) return null;
+                        const d = payload[0].payload;
+                        return (
+                          <div className="bg-popover border rounded-lg p-2 shadow-lg text-xs">
+                            <p className="font-medium">Level {d.level}</p>
+                            <p>Skill: {d.skill.toFixed(0)} — Difficulty: {d.difficulty}</p>
+                            <p className="font-medium" style={{ color: FLOW_ZONE_COLORS[d.flowZone as FlowZone] }}>
+                              {d.flowZone === 'flow' ? 'In Flow' : d.flowZone === 'boredom' ? 'Too Easy' : 'Too Hard'}
+                            </p>
+                          </div>
+                        );
+                      }} />
+                      <Scatter data={scatterData}>
+                        {scatterData.map((entry, i) => (
+                          <Cell key={i} fill={FLOW_ZONE_COLORS[entry.flowZone]} stroke="#fff" strokeWidth={1.5} r={5} />
+                        ))}
+                      </Scatter>
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
 
-                return {
-                  expected: expectedDiff,
-                  actual: actualDiff,
-                  flowZone,
-                  level: d.level,
-                  score: d.actualLevel!.metrics.difficultyScore,
-                  expectedTier: d.tier,
-                  actualTier: d.actualLevel!.metrics.difficulty,
-                  name: d.actualLevel!.name,
-                };
-              });
-
-              // Custom tooltip for flow state diagram
-              const FlowTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ payload: typeof flowData[0] }> }) => {
-                if (active && payload && payload.length > 0) {
-                  const data = payload[0].payload;
-                  const zoneColor = FLOW_ZONE_COLORS[data.flowZone];
-                  const expectedTierColor = TIER_COLORS[data.expectedTier];
-                  const actualTierColor = TIER_COLORS[data.actualTier];
-                  return (
-                    <div className="bg-popover border rounded-lg p-2 shadow-lg text-xs">
-                      <p className="font-medium">Level {data.level}</p>
-                      <p className="text-muted-foreground">{data.name}</p>
-                      <p className="mt-1">
-                        Expected: <Badge className={`scale-75 ${expectedTierColor}`}>{data.expectedTier}</Badge>
-                      </p>
-                      <p>
-                        Actual: <span className="font-mono">{data.score}</span>
-                        <Badge className={`ml-1 scale-75 ${actualTierColor}`}>{data.actualTier}</Badge>
-                      </p>
-                      <p className="mt-1 font-medium" style={{ color: zoneColor }}>
-                        {data.flowZone === 'flow' && '✓ In Flow (matches expected)'}
-                        {data.flowZone === 'boredom' && '↓ Too Easy (below expected)'}
-                        {data.flowZone === 'frustration' && '↑ Too Hard (above expected)'}
-                      </p>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Zone Distribution</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {([
+                  { zone: 'flow' as FlowZone, label: 'Flow', count: flowCount },
+                  { zone: 'boredom' as FlowZone, label: 'Too Easy', count: boredomCount },
+                  { zone: 'frustration' as FlowZone, label: 'Too Hard', count: frustrationCount },
+                ]).map(({ zone, label, count }) => (
+                  <div key={zone} className="space-y-1">
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded" style={{ backgroundColor: FLOW_ZONE_COLORS[zone] }} />
+                        <span>{label}</span>
+                      </div>
+                      <span className="font-medium">{count} ({total > 0 ? ((count / total) * 100).toFixed(0) : 0}%)</span>
                     </div>
-                  );
-                }
-                return null;
-              };
-
-              const expectedVals = flowData.map(d => d.expected);
-              const actualVals = flowData.map(d => d.actual);
-
-              // Use the larger range for both axes to maintain aspect ratio
-              const minVal = Math.floor(Math.min(...expectedVals, ...actualVals) - 0.5);
-              const maxVal = Math.ceil(Math.max(...expectedVals, ...actualVals) + 0.5);
-
-              return (
-                <>
-                  <div className="h-[200px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ScatterChart
-                        margin={{ top: 15, right: 20, bottom: 30, left: 40 }}
-                        onClick={(e) => {
-                          if (e && e.activePayload && e.activePayload[0] && onLevelClick) {
-                            const data = e.activePayload[0].payload;
-                            onLevelClick(data.level);
-                          }
-                        }}
-                      >
-                        <defs>
-                          <linearGradient id="flowZoneGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#22c55e" stopOpacity={0.15} />
-                            <stop offset="50%" stopColor="#22c55e" stopOpacity={0.25} />
-                            <stop offset="100%" stopColor="#22c55e" stopOpacity={0.15} />
-                          </linearGradient>
-                        </defs>
-
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-
-                        {/* Flow zone - shaded area between boundaries */}
-                        {/* This is the acceptable range where actual ≈ expected */}
-                        <ReferenceLine
-                          segment={[{ x: minVal, y: minVal }, { x: maxVal, y: maxVal }]}
-                          stroke="#22c55e"
-                          strokeWidth={2}
-                          strokeDasharray="5 5"
-                          label={{ value: 'Flow', position: 'insideTopLeft', fill: '#22c55e', fontSize: 10 }}
-                        />
-
-                        {/* Upper boundary - above this is frustration (actual > expected by more than 1 tier) */}
-                        <ReferenceLine
-                          segment={[{ x: minVal, y: minVal + 2.5 }, { x: maxVal - 2.5, y: maxVal }]}
-                          stroke="#f97316"
-                          strokeWidth={1}
-                          strokeOpacity={0.6}
-                          strokeDasharray="3 3"
-                        />
-
-                        {/* Lower boundary - below this is boredom (actual < expected by more than 1 tier) */}
-                        <ReferenceLine
-                          segment={[{ x: minVal + 2.5, y: minVal }, { x: maxVal, y: maxVal - 2.5 }]}
-                          stroke="#06b6d4"
-                          strokeWidth={1}
-                          strokeOpacity={0.6}
-                          strokeDasharray="3 3"
-                        />
-
-                        <XAxis
-                          type="number"
-                          dataKey="expected"
-                          domain={[minVal, maxVal]}
-                          tick={{ fontSize: 10 }}
-                          label={{ value: 'Expected Difficulty', position: 'bottom', offset: 15, fontSize: 11 }}
-                        />
-                        <YAxis
-                          type="number"
-                          dataKey="actual"
-                          domain={[minVal, maxVal]}
-                          tick={{ fontSize: 10 }}
-                          label={{ value: 'Actual Difficulty', angle: -90, position: 'insideLeft', offset: 5, fontSize: 11 }}
-                        />
-                        <ZAxis range={[60, 60]} />
-
-                        <Tooltip content={<FlowTooltip />} />
-
-                        <Scatter data={flowData} cursor="pointer">
-                          {flowData.map((entry, index) => (
-                            <Cell
-                              key={`flow-cell-${index}`}
-                              fill={FLOW_ZONE_COLORS[entry.flowZone]}
-                              stroke="#ffffff"
-                              strokeWidth={2}
-                            />
-                          ))}
-                          <LabelList
-                            dataKey="level"
-                            position="top"
-                            offset={8}
-                            fontSize={9}
-                            fontWeight="bold"
-                            fill="#ffffff"
-                          />
-                        </Scatter>
-                      </ScatterChart>
-                    </ResponsiveContainer>
+                    <div className="w-full bg-muted rounded-full h-2">
+                      <div className="h-2 rounded-full" style={{ width: `${total > 0 ? (count / total) * 100 : 0}%`, backgroundColor: FLOW_ZONE_COLORS[zone] }} />
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-3 justify-center mt-2 text-xs">
-                    <span className="flex items-center gap-1">
-                      <div className="w-3 h-3 rounded-full bg-green-500" />
-                      Flow (match)
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <div className="w-3 h-3 rounded-full bg-cyan-500" />
-                      Too Easy
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <div className="w-3 h-3 rounded-full bg-orange-500" />
-                      Too Hard
-                    </span>
-                    <span className="text-muted-foreground">• Click to edit</span>
+                ))}
+
+                <div className="pt-3 border-t">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Balance</span>
+                    {flowCount / Math.max(total, 1) >= 0.6 ? (
+                      <Badge className="bg-green-500">Well Balanced</Badge>
+                    ) : frustrationCount / Math.max(total, 1) > 0.3 ? (
+                      <Badge className="bg-orange-500">Too Frustrating</Badge>
+                    ) : boredomCount / Math.max(total, 1) > 0.3 ? (
+                      <Badge className="bg-cyan-500">Too Easy</Badge>
+                    ) : (
+                      <Badge className="bg-yellow-500">Needs Tuning</Badge>
+                    )}
                   </div>
-                </>
-              );
-            })()}
-          </CardContent>
-        </Card>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Target: 60%+ in flow. Recovery dips into boredom zone, spikes push toward frustration.
+                  </p>
+                </div>
 
-        {/* Best Practices */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Info className="h-4 w-4" />
-              Configuration Best Practices
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Balance Assessment */}
-            <div className="p-3 rounded-lg bg-muted/50">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium">Balance Assessment</span>
-                {stats.inFlow / Math.max(levels.length, 1) >= 0.6 ? (
-                  <Badge className="bg-green-500">Well Balanced</Badge>
-                ) : stats.inFrustration / Math.max(levels.length, 1) > 0.3 ? (
-                  <Badge className="bg-orange-500">Too Frustrating</Badge>
-                ) : stats.inBoredom / Math.max(levels.length, 1) > 0.3 ? (
-                  <Badge className="bg-cyan-500">Too Easy</Badge>
-                ) : levels.length === 0 ? (
-                  <Badge variant="outline">No Levels</Badge>
-                ) : (
-                  <Badge className="bg-yellow-500">Needs Tuning</Badge>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Target: 60%+ in flow, brief dips into boredom (recovery), peaks into frustration (challenge).
-              </p>
-            </div>
-
-            {/* Parameter Guidelines */}
-            <div className="space-y-3 text-xs">
-              <div className="space-y-1">
-                <p className="font-medium text-foreground">Connecting the Parameters</p>
-                <p className="text-muted-foreground">
-                  For balanced flow, skill growth should match difficulty progression:<br/>
-                  <span className="text-green-400">• Skill at level 100 ≈ Peak difficulty at level 100</span><br/>
-                  <span className="text-muted-foreground">• Formula: skillRate ≈ (9 + baselineIncrease × 10 - 2) / 100</span>
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <p className="font-medium text-foreground">Skill Growth Rate</p>
-                <p className="text-muted-foreground">
-                  <span className="text-cyan-400">0.05-0.08:</span> Slow mastery, more challenge<br/>
-                  <span className="text-cyan-400">0.08-0.12:</span> Balanced progression (recommended)<br/>
-                  <span className="text-cyan-400">0.12-0.20:</span> Fast mastery, easier late game
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <p className="font-medium text-foreground">Baseline Increase</p>
-                <p className="text-muted-foreground">
-                  <span className="text-purple-400">0.1-0.2:</span> Gentle ramp (+1-2 per 10 cycles)<br/>
-                  <span className="text-purple-400">0.2-0.4:</span> Standard ramp (recommended)<br/>
-                  <span className="text-purple-400">0.4-0.8:</span> Aggressive ramp, hardcore feel
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <p className="font-medium text-foreground">Key Principle</p>
-                <p className="text-muted-foreground">
-                  Skill line should weave through the sawtooth. Watch the Flow State Diagram - adjust until most dots are green (in flow channel).
-                </p>
-              </div>
-            </div>
-
-            {/* Quick Tips */}
-            <div className="pt-2 border-t border-muted space-y-1 text-xs text-muted-foreground">
-              <p><strong>Tips:</strong></p>
-              <p>• Hard spikes (5, 15, 25...) create achievement moments</p>
-              <p>• Recovery levels (1, 2, 11, 12...) let players feel skilled</p>
-              <p>• Super hard peaks (10, 20, 30...) test mastery before next cycle</p>
-              <p>• Click dots on the curve to edit specific levels</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+                <div className="grid grid-cols-3 gap-2 pt-2">
+                  <div className="p-2 bg-muted/50 rounded text-center">
+                    <p className="text-lg font-bold">{stats.total}</p>
+                    <p className="text-[10px] text-muted-foreground">Levels</p>
+                  </div>
+                  <div className="p-2 bg-muted/50 rounded text-center">
+                    <p className="text-lg font-bold text-green-400">{stats.matching}</p>
+                    <p className="text-[10px] text-muted-foreground">On Target</p>
+                  </div>
+                  <div className="p-2 bg-muted/50 rounded text-center">
+                    <p className="text-lg font-bold text-orange-400">{stats.tooHard + stats.tooEasy}</p>
+                    <p className="text-[10px] text-muted-foreground">Off Target</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        );
+      })()}
     </div>
   );
 }

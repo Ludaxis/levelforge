@@ -26,8 +26,8 @@ const games = [
   },
   {
     id: 'square-block',
-    title: 'Square Block Away',
-    description: 'Same puzzle on a rectangular grid. Tap blocks to slide them off in 4 directions.',
+    title: 'Tap Music',
+    description: 'Tap blocks to slide them off the grid in the direction of their arrows. Clear all blocks to win.',
     href: '/game/square-block',
     icon: Square,
     status: 'ready' as const,
