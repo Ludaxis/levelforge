@@ -1287,21 +1287,50 @@ export function SquareBlockLevelDesigner({
     setRows(newRows);
     setCols(newCols);
 
-    // Remove blocks outside new bounds
+    if (blocks.size === 0) return;
+
+    // Find bounding box of existing blocks
+    let minRow = Infinity, maxRow = -Infinity, minCol = Infinity, maxCol = -Infinity;
+    blocks.forEach((block) => {
+      minRow = Math.min(minRow, block.coord.row);
+      maxRow = Math.max(maxRow, block.coord.row);
+      minCol = Math.min(minCol, block.coord.col);
+      maxCol = Math.max(maxCol, block.coord.col);
+    });
+    holes.forEach((key) => {
+      const [r, c] = key.split(',').map(Number);
+      minRow = Math.min(minRow, r);
+      maxRow = Math.max(maxRow, r);
+      minCol = Math.min(minCol, c);
+      maxCol = Math.max(maxCol, c);
+    });
+
+    const artWidth = maxCol - minCol + 1;
+    const artHeight = maxRow - minRow + 1;
+
+    // Calculate shift to center artwork in new grid
+    const shiftRow = Math.max(0, Math.floor((newRows - artHeight) / 2)) - minRow;
+    const shiftCol = Math.max(0, Math.floor((newCols - artWidth) / 2)) - minCol;
+
+    // Shift blocks and keep only those in bounds
     const newBlocks = new Map<string, SquareBlock>();
-    blocks.forEach((block, key) => {
-      if (isInBounds(block.coord, newRows, newCols)) {
-        newBlocks.set(key, block);
+    blocks.forEach((block) => {
+      const newCoord = { row: block.coord.row + shiftRow, col: block.coord.col + shiftCol };
+      if (isInBounds(newCoord, newRows, newCols)) {
+        const newKey = gridKey(newCoord);
+        newBlocks.set(newKey, { ...block, coord: newCoord });
       }
     });
     setBlocks(newBlocks);
 
-    // Remove holes outside new bounds
+    // Shift holes and keep only those in bounds
     const newHoles = new Set<string>();
     holes.forEach(key => {
       const [row, col] = key.split(',').map(Number);
-      if (isInBounds({ row, col }, newRows, newCols)) {
-        newHoles.add(key);
+      const newRow = row + shiftRow;
+      const newCol = col + shiftCol;
+      if (isInBounds({ row: newRow, col: newCol }, newRows, newCols)) {
+        newHoles.add(gridKey({ row: newRow, col: newCol }));
       }
     });
     setHoles(newHoles);
