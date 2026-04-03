@@ -23,13 +23,26 @@ import { Slider } from '@/components/ui/slider';
 import { TrendingUp, Settings2, RotateCcw } from 'lucide-react';
 import {
   DesignedLevel,
-  DifficultyTier,
   FlowZone,
 } from '@/types/squareBlock';
 
 // ============================================================================
 // Types
 // ============================================================================
+
+/** Display tier for the chart — 5 tiers with configurable score boundaries. */
+export type DisplayTier = 'trivial' | 'easy' | 'medium' | 'hard' | 'superHard';
+
+export const DISPLAY_TIER_ORDER: DisplayTier[] = ['trivial', 'easy', 'medium', 'hard', 'superHard'];
+
+/** Score thresholds: score < trivialMax → trivial, < easyMax → easy, etc. */
+export interface TierThresholds {
+  trivialMax: number;   // e.g. 15  → scores 0-14 = trivial
+  easyMax: number;      // e.g. 30  → scores 15-29 = easy
+  mediumMax: number;    // e.g. 55  → scores 30-54 = medium
+  hardMax: number;      // e.g. 75  → scores 55-74 = hard
+  // scores 75+ = superHard
+}
 
 /**
  * A sawtooth phase defines a repeating cycle of difficulty values.
@@ -48,6 +61,8 @@ export interface SawtoothConfig {
   baselineIncrease: number;
   /** Skill growth rate per level for flow state analysis. */
   skillGrowthRate: number;
+  /** Configurable tier score boundaries. */
+  tierThresholds: TierThresholds;
 }
 
 // Defaults for Tap Music (Square Block):
@@ -63,6 +78,13 @@ export interface SawtoothConfig {
 //   Pos 8: 45 (rising tension)
 //   Pos 9: 55 (hard — sustained pressure)
 //   Pos 10: 70 (cycle peak — super hard)
+export const DEFAULT_TIER_THRESHOLDS: TierThresholds = {
+  trivialMax: 15,
+  easyMax: 30,
+  mediumMax: 55,
+  hardMax: 75,
+};
+
 export const DEFAULT_SAWTOOTH_CONFIG: SawtoothConfig = {
   onboardingLength: 10,
   onboarding: {
@@ -75,6 +97,7 @@ export const DEFAULT_SAWTOOTH_CONFIG: SawtoothConfig = {
   },
   baselineIncrease: 1,
   skillGrowthRate: 0.4,
+  tierThresholds: DEFAULT_TIER_THRESHOLDS,
 };
 
 interface CollectionCurveChartProps {
@@ -90,7 +113,7 @@ interface ChartDataPoint {
   difficulty: number | null;       // actual designed difficulty (0-100)
   expected: number;                // expected difficulty from sawtooth + envelope
   skillLevel: number;
-  actualTier?: DifficultyTier;
+  actualTier?: DisplayTier;
   actualLevel?: DesignedLevel;
   isOnboarding: boolean;
   targetMatch?: TargetMatch;       // actual vs expected sawtooth (for main chart)
@@ -101,18 +124,28 @@ interface ChartDataPoint {
 // Constants
 // ============================================================================
 
-const TIER_COLORS: Record<DifficultyTier, string> = {
+const TIER_COLORS: Record<DisplayTier, string> = {
+  trivial: 'bg-gray-500/20 text-gray-400',
   easy: 'bg-green-500/20 text-green-400',
   medium: 'bg-yellow-500/20 text-yellow-400',
   hard: 'bg-orange-500/20 text-orange-400',
   superHard: 'bg-red-500/20 text-red-400',
 };
 
-const TIER_DOT_COLORS: Record<DifficultyTier, string> = {
+const TIER_DOT_COLORS: Record<DisplayTier, string> = {
+  trivial: '#6b7280',
   easy: '#22c55e',
   medium: '#eab308',
   hard: '#f97316',
   superHard: '#ef4444',
+};
+
+const TIER_LABELS: Record<DisplayTier, string> = {
+  trivial: 'Trivial',
+  easy: 'Easy',
+  medium: 'Medium',
+  hard: 'Hard',
+  superHard: 'Super Hard',
 };
 
 const FLOW_ZONE_COLORS: Record<FlowZone, string> = {
@@ -125,10 +158,11 @@ const FLOW_ZONE_COLORS: Record<FlowZone, string> = {
 // Helpers
 // ============================================================================
 
-function scoreToTier(score: number): DifficultyTier {
-  if (score < 25) return 'easy';
-  if (score < 50) return 'medium';
-  if (score < 75) return 'hard';
+export function scoreToTierWithThresholds(score: number, t: TierThresholds): DisplayTier {
+  if (score < t.trivialMax) return 'trivial';
+  if (score < t.easyMax) return 'easy';
+  if (score < t.mediumMax) return 'medium';
+  if (score < t.hardMax) return 'hard';
   return 'superHard';
 }
 
@@ -182,6 +216,7 @@ function loadSavedConfig(): SawtoothConfig {
       ...parsed,
       onboarding: { ...DEFAULT_SAWTOOTH_CONFIG.onboarding, ...parsed.onboarding },
       main: { ...DEFAULT_SAWTOOTH_CONFIG.main, ...parsed.main },
+      tierThresholds: { ...DEFAULT_TIER_THRESHOLDS, ...parsed.tierThresholds },
     };
   } catch {
     return DEFAULT_SAWTOOTH_CONFIG;
@@ -196,10 +231,12 @@ function PhaseEditor({
   label,
   phase,
   onChange,
+  tierThresholds = DEFAULT_TIER_THRESHOLDS,
 }: {
   label: string;
   phase: SawtoothPhase;
   onChange: (phase: SawtoothPhase) => void;
+  tierThresholds?: TierThresholds;
 }) {
   const setCycleLength = (len: number) => {
     const clamped = Math.max(2, Math.min(20, len));
@@ -259,7 +296,7 @@ function PhaseEditor({
             className="flex-1 rounded-t-sm"
             style={{
               height: `${Math.max(4, (diff / 100) * 24)}px`,
-              backgroundColor: TIER_DOT_COLORS[scoreToTier(diff)],
+              backgroundColor: TIER_DOT_COLORS[scoreToTierWithThresholds(diff, tierThresholds)],
               opacity: 0.7,
             }}
           />
@@ -305,6 +342,7 @@ function SawtoothConfigEditor({
           label="Onboarding Pattern (difficulty scores 0-100)"
           phase={config.onboarding}
           onChange={(onboarding) => onChange({ ...config, onboarding })}
+          tierThresholds={config.tierThresholds}
         />
       )}
 
@@ -312,6 +350,7 @@ function SawtoothConfigEditor({
         label="Main Pattern (difficulty scores 0-100)"
         phase={config.main}
         onChange={(main) => onChange({ ...config, main })}
+        tierThresholds={config.tierThresholds}
       />
 
       <div className="grid grid-cols-2 gap-3">
@@ -338,6 +377,43 @@ function SawtoothConfigEditor({
             onChange={(e) => onChange({ ...config, skillGrowthRate: Math.max(0.1, Math.min(3, Number(e.target.value) || 0.4)) })}
             className="h-6 w-14 text-[10px] px-1 text-center"
           />
+        </div>
+      </div>
+
+      {/* Difficulty Tier Thresholds */}
+      <div className="space-y-2 pt-2 border-t border-border">
+        <span className="text-[10px] font-medium">Difficulty Tier Ranges (score 0-100)</span>
+        <div className="grid grid-cols-5 gap-1">
+          {([
+            { key: 'trivialMax' as const, label: 'Trivial', color: TIER_DOT_COLORS.trivial, range: `0-${config.tierThresholds.trivialMax - 1}` },
+            { key: 'easyMax' as const, label: 'Easy', color: TIER_DOT_COLORS.easy, range: `${config.tierThresholds.trivialMax}-${config.tierThresholds.easyMax - 1}` },
+            { key: 'mediumMax' as const, label: 'Medium', color: TIER_DOT_COLORS.medium, range: `${config.tierThresholds.easyMax}-${config.tierThresholds.mediumMax - 1}` },
+            { key: 'hardMax' as const, label: 'Hard', color: TIER_DOT_COLORS.hard, range: `${config.tierThresholds.mediumMax}-${config.tierThresholds.hardMax - 1}` },
+            { key: null, label: 'S.Hard', color: TIER_DOT_COLORS.superHard, range: `${config.tierThresholds.hardMax}-100` },
+          ]).map(({ key, label, color, range }) => (
+            <div key={label} className="space-y-0.5 text-center">
+              <div className="flex items-center justify-center gap-1">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+                <span className="text-[9px] font-medium" style={{ color }}>{label}</span>
+              </div>
+              {key ? (
+                <Input
+                  type="number"
+                  min={1}
+                  max={99}
+                  value={config.tierThresholds[key]}
+                  onChange={(e) => {
+                    const v = Math.max(1, Math.min(99, Number(e.target.value) || 0));
+                    onChange({ ...config, tierThresholds: { ...config.tierThresholds, [key]: v } });
+                  }}
+                  className="h-5 w-full text-[9px] px-0.5 text-center"
+                />
+              ) : (
+                <div className="h-5 flex items-center justify-center text-[9px] text-muted-foreground">{config.tierThresholds.hardMax}+</div>
+              )}
+              <div className="text-[8px] text-muted-foreground">{range}</div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -373,6 +449,8 @@ export function CollectionCurveChart({
     setSavedConfig(DEFAULT_SAWTOOTH_CONFIG);
     localStorage.removeItem(STORAGE_KEY);
   }, []);
+
+  const scoreToTier = useCallback((score: number) => scoreToTierWithThresholds(score, config.tierThresholds), [config.tierThresholds]);
 
   // Level lookup
   const levelMap = useMemo(() => {
@@ -455,11 +533,13 @@ export function CollectionCurveChart({
 
   const tickInterval = visibleCount <= 30 ? 1 : visibleCount <= 60 ? 5 : visibleCount <= 200 ? 10 : visibleCount <= 500 ? 20 : 50;
 
-  // Tier bands
+  // Tier bands from config thresholds
+  const t = config.tierThresholds;
   const tierBands = [
-    { label: 'easy', y: 25, color: TIER_DOT_COLORS.easy },
-    { label: 'medium', y: 50, color: TIER_DOT_COLORS.medium },
-    { label: 'hard', y: 75, color: TIER_DOT_COLORS.hard },
+    { label: 'trivial', y: t.trivialMax, color: TIER_DOT_COLORS.trivial },
+    { label: 'easy', y: t.easyMax, color: TIER_DOT_COLORS.easy },
+    { label: 'medium', y: t.mediumMax, color: TIER_DOT_COLORS.medium },
+    { label: 'hard', y: t.hardMax, color: TIER_DOT_COLORS.hard },
   ];
 
   const onboardingEnd = config.onboardingLength;
@@ -473,13 +553,13 @@ export function CollectionCurveChart({
       <div className="bg-popover border rounded-lg p-3 shadow-lg text-sm">
         <p className="font-medium">Level {d.level}</p>
         <p className="text-muted-foreground text-xs">
-          {d.isOnboarding ? 'Onboarding' : 'Main'} — Expected: {d.expected.toFixed(0)} <Badge className={`ml-1 scale-90 ${TIER_COLORS[expectedTier]}`}>{expectedTier}</Badge>
+          {d.isOnboarding ? 'Onboarding' : 'Main'} — Expected: {d.expected.toFixed(0)} <Badge className={`ml-1 scale-90 ${TIER_COLORS[expectedTier]}`}>{TIER_LABELS[expectedTier]}</Badge>
         </p>
         {d.actualLevel && (
           <>
             <p className="text-muted-foreground text-xs mt-1">
               Actual: <span className="font-mono">{d.difficulty}/100</span>
-              <Badge className={`ml-1 scale-90 ${TIER_COLORS[d.actualTier!]}`}>{d.actualTier}</Badge>
+              <Badge className={`ml-1 scale-90 ${TIER_COLORS[d.actualTier!]}`}>{TIER_LABELS[d.actualTier!]}</Badge>
             </p>
             {d.targetMatch && (
               <p className="text-xs mt-1 font-medium" style={{ color: d.targetMatch === 'on-target' ? '#22c55e' : d.targetMatch === 'too-easy' ? '#06b6d4' : '#f97316' }}>

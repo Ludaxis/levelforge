@@ -7,7 +7,6 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import {
   DesignedLevel,
-  DifficultyTier,
   LevelMetrics,
   calculateFlowZone,
   getSawtoothPosition,
@@ -88,8 +87,8 @@ interface SquareBlockLevelCollectionProps {
 // Re-export SawtoothConfig from chart component
 export type { SawtoothConfig } from './CollectionCurveChart';
 export { DEFAULT_SAWTOOTH_CONFIG } from './CollectionCurveChart';
-import type { SawtoothConfig } from './CollectionCurveChart';
-import { DEFAULT_SAWTOOTH_CONFIG } from './CollectionCurveChart';
+import type { SawtoothConfig, DisplayTier } from './CollectionCurveChart';
+import { DEFAULT_SAWTOOTH_CONFIG, DEFAULT_TIER_THRESHOLDS, scoreToTierWithThresholds } from './CollectionCurveChart';
 
 // ============================================================================
 // Constants
@@ -99,7 +98,8 @@ const STORAGE_KEY = 'square-block-level-collection';
 const MAX_LEVELS = 10000;
 const PAGE_SIZE = 50;
 
-const DIFFICULTY_BADGE_COLORS: Record<DifficultyTier, string> = {
+const DIFFICULTY_BADGE_COLORS: Record<DisplayTier, string> = {
+  trivial: 'bg-gray-500/20 text-gray-400 border-gray-500/50',
   easy: 'bg-green-500/20 text-green-400 border-green-500/50',
   medium: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/50',
   hard: 'bg-orange-500/20 text-orange-400 border-orange-500/50',
@@ -291,12 +291,9 @@ export function SquareBlockLevelCollection({
     }
   }, [isSupabaseAvailable, isAuthenticated]);
 
-  // Simple tier helper using standard thresholds
-  const getTierFromScore = useCallback((score: number): DifficultyTier => {
-    if (score < 25) return 'easy';
-    if (score < 50) return 'medium';
-    if (score < 75) return 'hard';
-    return 'superHard';
+  // Tier helper using configurable thresholds
+  const getTierFromScore = useCallback((score: number): DisplayTier => {
+    return scoreToTierWithThresholds(score, DEFAULT_TIER_THRESHOLDS);
   }, []);
 
   // Filter levels by search
@@ -884,6 +881,9 @@ export function SquareBlockLevelCollection({
           <div className="flex items-center gap-4 text-sm">
             <span className="text-muted-foreground">Levels:</span>
             <div className="flex items-center gap-3">
+              <span className="text-gray-400 font-medium">
+                {levels.filter((l) => getTierFromScore(l.metrics.difficultyScore) === 'trivial').length} <span className="text-muted-foreground font-normal">triv</span>
+              </span>
               <span className="text-green-400 font-medium">
                 {levels.filter((l) => getTierFromScore(l.metrics.difficultyScore) === 'easy').length} <span className="text-muted-foreground font-normal">easy</span>
               </span>
@@ -942,7 +942,8 @@ export function SquareBlockLevelCollection({
           <div className="grid grid-cols-2 gap-2 max-h-[500px] overflow-y-auto">
             {pagedLevels.map((level) => {
               const tier = getTierFromScore(level.metrics.difficultyScore);
-              const tierColors = {
+              const tierColors: Record<DisplayTier, { border: string; text: string }> = {
+                trivial: { border: 'border-gray-500/50', text: 'text-gray-400' },
                 easy: { border: 'border-green-500/50', text: 'text-green-400' },
                 medium: { border: 'border-yellow-500/50', text: 'text-yellow-400' },
                 hard: { border: 'border-orange-500/50', text: 'text-orange-400' },
@@ -1037,7 +1038,8 @@ export function SquareBlockLevelCollection({
           <div className="space-y-2 max-h-[500px] overflow-y-auto">
             {pagedLevels.map((level) => {
               const tier = getTierFromScore(level.metrics.difficultyScore);
-              const tierColors = {
+              const tierColors: Record<DisplayTier, { border: string; text: string }> = {
+                trivial: { border: 'border-gray-500/50', text: 'text-gray-400' },
                 easy: { border: 'border-green-500/50', text: 'text-green-400' },
                 medium: { border: 'border-yellow-500/50', text: 'text-yellow-400' },
                 hard: { border: 'border-orange-500/50', text: 'text-orange-400' },
