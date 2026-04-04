@@ -4,7 +4,7 @@ import { SquareBlock } from '@/types/squareBlock';
 import { gridKey, gridToPixel, getBlocksAheadColor } from '@/lib/squareGrid';
 import { toGrayscale } from '@/lib/utils';
 import { DirectionArrow } from './DirectionArrow';
-import { DEFAULT_BLOCK_COLOR } from './types';
+
 import type { GridCanvasProps } from './types';
 
 export function GridCanvas({
@@ -20,9 +20,11 @@ export function GridCanvas({
   clearableKeys,
   deadlockInfo,
   selectedDirection,
+  selectedColor,
   selectedLocked,
   selectedIceCount,
   selectedMirror,
+  eraserMode,
   showBlocksAhead,
   blocksAheadMap,
   viewBox,
@@ -112,14 +114,14 @@ export function GridCanvas({
                 )}
 
                 {/* Preview block */}
-                {isHovered && !hasBlock && !hasHole && (
+                {isHovered && !hasBlock && !hasHole && !eraserMode && (
                   <g opacity={0.5} pointerEvents="none">
                     <rect
                       x={pixel.x - cellSize / 2 + 4}
                       y={pixel.y - cellSize / 2 + 4}
                       width={cellSize - 8}
                       height={cellSize - 8}
-                      fill={DEFAULT_BLOCK_COLOR}
+                      fill={selectedColor}
                       rx={4}
                     />
                     <DirectionArrow cx={pixel.x} cy={pixel.y} direction={selectedDirection} size={cellSize * 0.5} />

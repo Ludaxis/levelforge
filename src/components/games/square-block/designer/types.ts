@@ -72,9 +72,11 @@ export interface GridCanvasProps {
   clearableKeys: Set<string>;
   deadlockInfo: DeadlockInfo;
   selectedDirection: BlockDirection;
+  selectedColor: string;
   selectedLocked: boolean;
   selectedIceCount: number;
   selectedMirror: boolean;
+  eraserMode: boolean;
   showBlocksAhead: boolean;
   blocksAheadMap: Map<string, number>;
   viewBox: string;
@@ -101,6 +103,9 @@ export interface ToolBarProps {
   setSelectedMirror: (mirror: boolean) => void;
   eraserMode: boolean;
   setEraserMode: (eraser: boolean) => void;
+  selectedColor: string;
+  setSelectedColor: (color: string) => void;
+  blockPalette: string[];
   zoom: number;
   handleZoomIn: () => void;
   handleZoomOut: () => void;

@@ -86,6 +86,7 @@ export function SquareBlockLevelDesigner({
   const [selectedIceCount, setSelectedIceCount] = useState<number>(0);
   const [selectedMirror, setSelectedMirror] = useState(false);
   const [eraserMode, setEraserMode] = useState(false);
+  const [selectedColor, setSelectedColor] = useState<string>(DEFAULT_BLOCK_COLOR);
 
 
   // Placed blocks and holes
@@ -439,6 +440,17 @@ export function SquareBlockLevelDesigner({
       ice: blocksArray.filter(b => b.iceCount && b.iceCount > 0).length,
       mirror: blocksArray.filter(b => b.mirror).length,
     };
+  }, [blocks]);
+
+  // Extract unique colors from current blocks for palette
+  const blockPalette = useMemo(() => {
+    const colorSet = new Set<string>();
+    for (const block of blocks.values()) {
+      if (block.color && block.color !== DEFAULT_BLOCK_COLOR) {
+        colorSet.add(block.color.toLowerCase());
+      }
+    }
+    return Array.from(colorSet).sort();
   }, [blocks]);
 
   // Deep puzzle analysis for difficulty scoring — debounced (heaviest computation)
@@ -962,11 +974,12 @@ export function SquareBlockLevelDesigner({
         newBlocks.delete(key);
         setBlocks(newBlocks);
       } else {
-        // Different settings → update block in-place, preserving its color
+        // Different settings → update block with current tool settings
         const newBlocks = new Map(blocks);
         newBlocks.set(key, {
           ...existingBlock,
           direction: selectedDirection,
+          color: selectedColor,
           locked: newLocked,
           iceCount: newIceCount,
           mirror: newMirror,
@@ -979,7 +992,7 @@ export function SquareBlockLevelDesigner({
         id: `block-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         coord,
         direction: selectedDirection,
-        color: DEFAULT_BLOCK_COLOR,
+        color: selectedColor,
         locked: selectedLocked || undefined,
         iceCount: selectedIceCount > 0 ? selectedIceCount : undefined,
         mirror: selectedMirror || undefined,
@@ -1359,6 +1372,9 @@ export function SquareBlockLevelDesigner({
             setSelectedMirror={setSelectedMirror}
             eraserMode={eraserMode}
             setEraserMode={setEraserMode}
+            selectedColor={selectedColor}
+            setSelectedColor={setSelectedColor}
+            blockPalette={blockPalette}
             zoom={zoom}
             handleZoomIn={handleZoomIn}
             handleZoomOut={handleZoomOut}
@@ -1378,9 +1394,11 @@ export function SquareBlockLevelDesigner({
             clearableKeys={clearableKeys}
             deadlockInfo={deadlockInfo}
             selectedDirection={selectedDirection}
+            selectedColor={selectedColor}
             selectedLocked={selectedLocked}
             selectedIceCount={selectedIceCount}
             selectedMirror={selectedMirror}
+            eraserMode={eraserMode}
             showBlocksAhead={showBlocksAhead}
             blocksAheadMap={blocksAheadMap}
             viewBox={viewBox}
