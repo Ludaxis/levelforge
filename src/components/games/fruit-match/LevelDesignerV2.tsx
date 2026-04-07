@@ -119,7 +119,12 @@ export function LevelDesignerV2({
   const [waitingStandSlots, setWaitingStandSlots] = useState(5);
   const [activeLauncherCount, setActiveLauncherCount] = useState(2);
   const [sinkWidth, setSinkWidth] = useState(6);
-  const [blockingOffset, setBlockingOffset] = useState(0);
+  const [blockingOffset, setBlockingOffsetRaw] = useState(0);
+  // When blocking changes, clear pins so the blocking algorithm takes control
+  const setBlockingOffset = useCallback((valOrFn: number | ((prev: number) => number)) => {
+    setBlockingOffsetRaw(valOrFn);
+    setPinnedItemIds(new Set());
+  }, []);
   const [seed, setSeed] = useState<number | undefined>(undefined);
   const [moveLimit, setMoveLimit] = useState<number | undefined>(undefined);
   const [simulationResult, setSimulationResult] = useState<StudioSimulationResult | null>(null);
@@ -192,7 +197,7 @@ export function LevelDesignerV2({
     setLaunchers(snap.launchers);
     setSelectableItems(snap.selectableItems);
     setMaxSelectableItems(snap.maxSelectableItems);
-    setBlockingOffset(snap.blockingOffset);
+    setBlockingOffsetRaw(snap.blockingOffset); // Use raw to avoid clearing pins
     setActiveLauncherCount(snap.activeLauncherCount);
     setPinnedItemIds(snap.pinnedItemIds);
     // Allow next tick to re-enable capturing
@@ -1120,14 +1125,16 @@ export function LevelDesignerV2({
       const [moved] = sorted.splice(fromIndex, 1);
       sorted.splice(toIndex, 0, moved);
       // Determine the target layer from the item at the drop position
-      // (the item that was displaced)
       const targetItem = sorted[toIndex === sorted.length ? toIndex - 1 : toIndex];
       const targetLayer = targetItem ? targetItem.layer : moved.layer;
-      return sorted.map((item, idx) => ({
+      const updated = sorted.map((item, idx) => ({
         ...item,
         order: idx,
         layer: item === moved ? targetLayer : item.layer,
       }));
+      // Pin all items so the reorder is preserved in the arrangement
+      setPinnedItemIds(new Set(updated.map((item) => item.id)));
+      return updated;
     });
   }, []);
 
@@ -1391,7 +1398,7 @@ export function LevelDesignerV2({
     setArtHeight(editingLevel.pixelArtHeight);
     setSinkWidth(editingLevel.sinkWidth);
     setSelectedGroupId(null);
-    setBlockingOffset(editingLevel.studioBlockingOffset ?? 0);
+    setBlockingOffsetRaw(editingLevel.studioBlockingOffset ?? 0);
     setWaitingStandSlots(editingLevel.studioWaitingStandSlots ?? editingLevel.waitingStandSlots ?? 5);
     setActiveLauncherCount(editingLevel.studioActiveLauncherCount ?? 2);
     setSeed(editingLevel.studioSeed);
