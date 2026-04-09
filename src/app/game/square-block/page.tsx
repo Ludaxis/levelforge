@@ -202,21 +202,32 @@ function SquareBlockPageContent() {
     saveLevelsForCollection,
   } = useLevelCollection();
 
-  // Debounced sync: persist levels to active collection storage after changes settle
+  // Debounced sync: persist levels to active collection storage after changes settle.
+  // Uses a ref to always write the LATEST state, avoiding stale closure races.
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const levelsRef = useRef<DesignedLevel[]>(levels);
+  levelsRef.current = levels; // always track latest
+
+  const cancelPendingSync = useCallback(() => {
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleSyncToStorage = useCallback(() => {
+    cancelPendingSync();
+    syncTimeoutRef.current = setTimeout(() => {
+      if (activeCollectionId) {
+        saveLevelsForCollection(activeCollectionId, levelsRef.current);
+      }
+    }, 300);
+  }, [activeCollectionId, saveLevelsForCollection, cancelPendingSync]);
+
   const setLevelsAndSync = useCallback((levelsOrUpdater: DesignedLevel[] | ((prev: DesignedLevel[]) => DesignedLevel[])) => {
-    setLevels((prev: DesignedLevel[]) => {
-      const next = typeof levelsOrUpdater === 'function' ? levelsOrUpdater(prev) : levelsOrUpdater;
-      // Debounce localStorage write to avoid lag during rapid edits
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-      syncTimeoutRef.current = setTimeout(() => {
-        if (activeCollectionId) {
-          saveLevelsForCollection(activeCollectionId, next);
-        }
-      }, 300);
-      return next;
-    });
-  }, [setLevels, activeCollectionId, saveLevelsForCollection]);
+    setLevels(levelsOrUpdater);
+    scheduleSyncToStorage();
+  }, [setLevels, scheduleSyncToStorage]);
 
   // On initial load or collection switch, load levels from multi-collection storage
   useEffect(() => {
@@ -277,6 +288,8 @@ function SquareBlockPageContent() {
 
   // Handle adding/updating level in collection
   const handleAddToCollection = (level: DesignedLevel, collectionId?: string) => {
+    // Cancel any pending debounced sync to prevent it from overwriting this save
+    cancelPendingSync();
     const targetId = collectionId || activeCollectionId;
 
     if (editingLevel) {
