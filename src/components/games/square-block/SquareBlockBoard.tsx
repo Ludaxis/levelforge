@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useEffect, useState, useCallback, useRef } from 'react';
+import { useMemo, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ZoomIn, ZoomOut, Maximize, Move } from 'lucide-react';
 import { SquareBlockState, SquareBlock, BlockDirection, MAX_MISTAKES } from '@/types/squareBlock';
@@ -56,18 +56,7 @@ export function SquareBlockBoard({
 }: SquareBlockBoardProps) {
   const { level, blocks, holes, animatingBlock, animationPhase, animationData, mistakes, lastMistakeBlockId } = state;
   const { rows, cols } = level;
-
-  // Track shaking block for animation
-  const [shakingBlockId, setShakingBlockId] = useState<string | null>(null);
-
-  // Trigger shake animation when a mistake occurs
-  useEffect(() => {
-    if (lastMistakeBlockId) {
-      setShakingBlockId(lastMistakeBlockId);
-      const timer = setTimeout(() => setShakingBlockId(null), 500);
-      return () => clearTimeout(timer);
-    }
-  }, [lastMistakeBlockId]);
+  const shakingBlockId = lastMistakeBlockId;
 
   // Zoom and pan state
   const [zoom, setZoom] = useState(1);

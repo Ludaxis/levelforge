@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import {
   ComposedChart,
   ScatterChart,
@@ -306,6 +306,61 @@ function PhaseEditor({
   );
 }
 
+interface CurveTooltipProps {
+  active?: boolean;
+  payload?: Array<{ payload: ChartDataPoint }>;
+}
+
+function SquareCurveTooltip({
+  active,
+  payload,
+  scoreToTier,
+}: CurveTooltipProps & { scoreToTier: (score: number) => DisplayTier }) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  const dataPoint = payload[0].payload;
+  const expectedTier = scoreToTier(dataPoint.expected);
+
+  return (
+    <div className="bg-popover border rounded-lg p-3 shadow-lg text-sm">
+      <p className="font-medium">Level {dataPoint.level}</p>
+      <p className="text-muted-foreground text-xs">
+        {dataPoint.isOnboarding ? 'Onboarding' : 'Main'} — Expected: {dataPoint.expected.toFixed(0)}{' '}
+        <Badge className={`ml-1 scale-90 ${TIER_COLORS[expectedTier]}`}>{TIER_LABELS[expectedTier]}</Badge>
+      </p>
+      {dataPoint.actualLevel && (
+        <>
+          <p className="text-muted-foreground text-xs mt-1">
+            Actual: <span className="font-mono">{dataPoint.difficulty}/100</span>
+            <Badge className={`ml-1 scale-90 ${TIER_COLORS[dataPoint.actualTier!]}`}>{TIER_LABELS[dataPoint.actualTier!]}</Badge>
+          </p>
+          {dataPoint.targetMatch && (
+            <p
+              className="text-xs mt-1 font-medium"
+              style={{
+                color:
+                  dataPoint.targetMatch === 'on-target'
+                    ? '#22c55e'
+                    : dataPoint.targetMatch === 'too-easy'
+                      ? '#06b6d4'
+                      : '#f97316',
+              }}
+            >
+              {dataPoint.targetMatch === 'on-target' && 'On Target'}
+              {dataPoint.targetMatch === 'too-easy' && 'Below Expected'}
+              {dataPoint.targetMatch === 'too-hard' && 'Above Expected'}
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground mt-1">
+            {dataPoint.actualLevel.metrics.cellCount} blocks, {dataPoint.actualLevel.metrics.holeCount} holes
+          </p>
+        </>
+      )}
+      {!dataPoint.actualLevel && <p className="text-xs text-muted-foreground mt-1">Not yet designed</p>}
+    </div>
+  );
+}
+
 function SawtoothConfigEditor({
   config,
   onChange,
@@ -429,12 +484,8 @@ export function CollectionCurveChart({
   onLevelClick,
   config: externalConfig,
 }: CollectionCurveChartProps) {
-  const [savedConfig, setSavedConfig] = useState<SawtoothConfig>(DEFAULT_SAWTOOTH_CONFIG);
+  const [savedConfig, setSavedConfig] = useState<SawtoothConfig>(() => loadSavedConfig());
   const [showSettings, setShowSettings] = useState(false);
-
-  useEffect(() => {
-    setSavedConfig(loadSavedConfig());
-  }, []);
 
   const config = externalConfig ?? savedConfig;
 
@@ -467,12 +518,10 @@ export function CollectionCurveChart({
   // Range selector
   const [rangeStart, setRangeStart] = useState(1);
   const [rangeEnd, setRangeEnd] = useState(100);
-  useEffect(() => {
-    if (globalMax > rangeEnd) setRangeEnd(Math.min(globalMax + 10, 10000));
-  }, [globalMax]);
+  const effectiveRangeEnd = Math.max(rangeEnd, Math.min(globalMax + 10, 10000));
 
   const visibleStart = Math.max(1, rangeStart);
-  const visibleEnd = Math.max(visibleStart + 1, rangeEnd);
+  const visibleEnd = Math.max(visibleStart + 1, effectiveRangeEnd);
   const visibleCount = visibleEnd - visibleStart + 1;
 
   // Chart data — windowed + sampled for large ranges
@@ -516,7 +565,7 @@ export function CollectionCurveChart({
     }
 
     return data;
-  }, [visibleStart, visibleEnd, visibleCount, config, levelMap, levels]);
+  }, [visibleStart, visibleEnd, visibleCount, config, levelMap, levels, scoreToTier]);
 
   // Stats (all levels, not just visible)
   const stats = useMemo(() => {
@@ -543,40 +592,6 @@ export function CollectionCurveChart({
   ];
 
   const onboardingEnd = config.onboardingLength;
-
-  // Tooltip
-  const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ payload: ChartDataPoint }> }) => {
-    if (!active || !payload || payload.length === 0) return null;
-    const d = payload[0].payload;
-    const expectedTier = scoreToTier(d.expected);
-    return (
-      <div className="bg-popover border rounded-lg p-3 shadow-lg text-sm">
-        <p className="font-medium">Level {d.level}</p>
-        <p className="text-muted-foreground text-xs">
-          {d.isOnboarding ? 'Onboarding' : 'Main'} — Expected: {d.expected.toFixed(0)} <Badge className={`ml-1 scale-90 ${TIER_COLORS[expectedTier]}`}>{TIER_LABELS[expectedTier]}</Badge>
-        </p>
-        {d.actualLevel && (
-          <>
-            <p className="text-muted-foreground text-xs mt-1">
-              Actual: <span className="font-mono">{d.difficulty}/100</span>
-              <Badge className={`ml-1 scale-90 ${TIER_COLORS[d.actualTier!]}`}>{TIER_LABELS[d.actualTier!]}</Badge>
-            </p>
-            {d.targetMatch && (
-              <p className="text-xs mt-1 font-medium" style={{ color: d.targetMatch === 'on-target' ? '#22c55e' : d.targetMatch === 'too-easy' ? '#06b6d4' : '#f97316' }}>
-                {d.targetMatch === 'on-target' && 'On Target'}
-                {d.targetMatch === 'too-easy' && 'Below Expected'}
-                {d.targetMatch === 'too-hard' && 'Above Expected'}
-              </p>
-            )}
-            <p className="text-xs text-muted-foreground mt-1">
-              {d.actualLevel.metrics.cellCount} blocks, {d.actualLevel.metrics.holeCount} holes
-            </p>
-          </>
-        )}
-        {!d.actualLevel && <p className="text-xs text-muted-foreground mt-1">Not yet designed</p>}
-      </div>
-    );
-  };
 
   return (
     <div className="space-y-4">
@@ -615,18 +630,18 @@ export function CollectionCurveChart({
             <span className="text-muted-foreground whitespace-nowrap">Levels</span>
             <Input
               type="number" min={1} max={10000} value={rangeStart}
-              onChange={(e) => setRangeStart(Math.max(1, Math.min(rangeEnd - 1, Number(e.target.value) || 1)))}
+              onChange={(e) => setRangeStart(Math.max(1, Math.min(effectiveRangeEnd - 1, Number(e.target.value) || 1)))}
               className="h-7 w-20 text-xs text-center"
             />
             <div className="flex-1">
               <Slider
-                value={[rangeStart, rangeEnd]}
+                value={[rangeStart, effectiveRangeEnd]}
                 onValueChange={([s, e]) => { setRangeStart(s); setRangeEnd(e); }}
-                min={1} max={Math.max(globalMax + 50, rangeEnd, 100)} step={1} minStepsBetweenThumbs={5}
+                min={1} max={Math.max(globalMax + 50, effectiveRangeEnd, 100)} step={1} minStepsBetweenThumbs={5}
               />
             </div>
             <Input
-              type="number" min={1} max={10000} value={rangeEnd}
+              type="number" min={1} max={10000} value={effectiveRangeEnd}
               onChange={(e) => setRangeEnd(Math.max(rangeStart + 1, Math.min(10000, Number(e.target.value) || 100)))}
               className="h-7 w-20 text-xs text-center"
             />
@@ -657,7 +672,7 @@ export function CollectionCurveChart({
                   label={{ value: 'Level', position: 'bottom', offset: 15, fontSize: 12 }} />
                 <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false}
                   label={{ value: 'Difficulty', angle: -90, position: 'insideLeft', offset: 5, fontSize: 12 }} />
-                <Tooltip content={<CustomTooltip />} />
+                <Tooltip content={<SquareCurveTooltip scoreToTier={scoreToTier} />} />
 
                 {/* Tier boundary lines */}
                 {tierBands.map((band) => (

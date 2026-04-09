@@ -560,7 +560,7 @@ describe('Blocks Ahead Analysis', () => {
       const holes = new Set<string>();
       const count = getMinBlocksAhead(
         { q: 0, r: 0 },
-        'E_W' as any,
+        'E_W',
         stacks,
         holes,
         2,

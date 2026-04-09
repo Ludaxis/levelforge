@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { AuthModal } from '@/components/auth/AuthModal';
@@ -11,23 +11,17 @@ function AuthPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isAuthenticated, isLoading } = useAuth();
-  const [showModal, setShowModal] = useState(false);
 
   const error = searchParams.get('error');
   const next = searchParams.get('next') ?? '/';
 
   useEffect(() => {
-    if (!isLoading) {
-      if (isAuthenticated) {
-        router.push(next);
-      } else {
-        setShowModal(true);
-      }
+    if (!isLoading && isAuthenticated) {
+      router.push(next);
     }
   }, [isAuthenticated, isLoading, router, next]);
 
   const handleModalClose = (open: boolean) => {
-    setShowModal(open);
     if (!open) {
       router.push('/');
     }
@@ -65,7 +59,7 @@ function AuthPageContent() {
           </CardContent>
         </Card>
       )}
-      <AuthModal open={showModal} onOpenChange={handleModalClose} />
+      <AuthModal open={!isLoading && !isAuthenticated} onOpenChange={handleModalClose} />
     </div>
   );
 }

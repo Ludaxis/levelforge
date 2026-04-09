@@ -554,6 +554,32 @@ describe('Studio export format', () => {
     expect(exported.ActiveLauncherCount).toBe(2);
     expect(exported.Seed).toBe(42);
   });
+
+  it('exports selectable items in arrangement order while preserving canonical order metadata', () => {
+    const exported = exportStudioLevel({
+      palette: ['4C9EF2'],
+      levelId: 'Level1_1',
+      levelIndex: 1,
+      difficulty: 'medium',
+      graphicId: 'graphic_test',
+      width: 4,
+      height: 4,
+      pixels: [],
+      selectableItems: [
+        { colorType: 0, variant: 0, layer: 'C', order: 2, displayOrder: 4 },
+        { colorType: 1, variant: 1, layer: 'A', order: 0, displayOrder: 0 },
+        { colorType: 2, variant: 2, layer: 'B', order: 1, displayOrder: 2 },
+      ],
+      requirements: [],
+      launchers: [],
+      unlockStageData: [],
+      maxSelectableItems: 10,
+    });
+
+    expect(exported.SelectableItems.map((item) => item.ColorType)).toEqual([1, 2, 0]);
+    expect(exported.SelectableItems.map((item) => item.Layer)).toEqual([0, 1, 2]);
+    expect(exported.SelectableItems.map((item) => item.Order)).toEqual([0, 1, 2]);
+  });
 });
 
 // ============================================================================

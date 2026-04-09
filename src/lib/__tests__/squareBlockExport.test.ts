@@ -235,7 +235,7 @@ describe('Mechanic Encoding', () => {
       const refFormat: ReferenceFormat = {
         rows: 1,
         cols: 1,
-        cells: [{ direction: 1, colorHex: '#FF0000', mechanic: 1, mechanicExtras: 7 as any }],
+        cells: [{ direction: 1, colorHex: '#FF0000', mechanic: 1, mechanicExtras: 7 as unknown as string }],
       };
       const imported = importFromReferenceFormat(refFormat);
       expect(imported.blocks[0].iceCount).toBe(7);

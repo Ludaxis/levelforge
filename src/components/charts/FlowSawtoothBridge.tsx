@@ -482,7 +482,7 @@ export function FlowSawtoothBridge() {
             <div className="space-y-2">
               <p className="font-medium">The Key Insight</p>
               <p className="text-xs text-muted-foreground">
-                The sawtooth pattern isn't just about varying difficulty—it's about creating a
+                The sawtooth pattern isn&apos;t just about varying difficulty. It&apos;s about creating a
                 controlled path through the flow state space. Recovery levels let players feel
                 skilled, hard spikes create achievement moments, and the overall trajectory
                 keeps players in flow as both their skill and the difficulty increase together.

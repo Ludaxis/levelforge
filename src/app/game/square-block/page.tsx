@@ -206,7 +206,10 @@ function SquareBlockPageContent() {
   // Uses a ref to always write the LATEST state, avoiding stale closure races.
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const levelsRef = useRef<DesignedLevel[]>(levels);
-  levelsRef.current = levels; // always track latest
+
+  useEffect(() => {
+    levelsRef.current = levels;
+  }, [levels]);
 
   const cancelPendingSync = useCallback(() => {
     if (syncTimeoutRef.current) {
@@ -234,20 +237,28 @@ function SquareBlockPageContent() {
     if (!isLoaded || !activeCollectionId) return;
     const stored = getLevelsForCollection(activeCollectionId);
     setLevels(stored);
-  }, [activeCollectionId, isLoaded]);
+  }, [activeCollectionId, getLevelsForCollection, isLoaded, setLevels]);
 
   // Handle shared import
   useEffect(() => {
     if (searchParams.get('import') !== 'shared') return;
+
     const raw = localStorage.getItem('shared-import-pending');
     if (!raw) return;
+
     try {
       const { gameType, levels: sharedLevels } = JSON.parse(raw);
       if (gameType !== 'square-block' || !Array.isArray(sharedLevels)) return;
+
       localStorage.removeItem('shared-import-pending');
       importLevels(sharedLevels as DesignedLevel[]);
-      setActiveTab('collection');
       window.history.replaceState({}, '', '/game/square-block');
+
+      const frameId = window.requestAnimationFrame(() => {
+        setActiveTab('collection');
+      });
+
+      return () => window.cancelAnimationFrame(frameId);
     } catch {
       // Invalid data, ignore
     }

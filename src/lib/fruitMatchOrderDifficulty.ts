@@ -547,7 +547,7 @@ function runSingleSimulation(
   const queue = [...launcherQueue];
 
   // Initialize launchers (first 4)
-  let activeLaunchers = queue.splice(0, Math.min(4, queue.length));
+  const activeLaunchers = queue.splice(0, Math.min(4, queue.length));
 
   // Game state
   const waitingStand: FruitType[] = [];

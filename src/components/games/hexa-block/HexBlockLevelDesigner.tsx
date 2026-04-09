@@ -56,6 +56,14 @@ import {
   EmbeddedMetricsPanel,
 } from './designer';
 
+function createDesignerLevelId(prefix: string): string {
+  return `${prefix}-${crypto.randomUUID()}`;
+}
+
+function getCurrentTimestamp(): number {
+  return Date.now();
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -499,31 +507,33 @@ export function HexBlockLevelDesigner({
   const solvability = solveLevel(stacks, holes, pauses, carousels);
 
   // Get valid directions for a stack (directions that lead to grid exit or hole)
-  const getValidDirections = useCallback(
-    (coord: AxialCoord, currentStacks: Map<string, HexStack>, currentHoles: Set<string>, mode: GameMode): StackDirection[] => {
-      const validDirs: StackDirection[] = [];
+  const getValidDirections = (
+    coord: AxialCoord,
+    currentStacks: Map<string, HexStack>,
+    currentHoles: Set<string>,
+    mode: GameMode
+  ): StackDirection[] => {
+    const validDirs: StackDirection[] = [];
 
-      // Check single directions
-      for (const dir of DIRECTION_ORDER) {
-        if (isDirectionClear(coord, dir, currentStacks, currentHoles)) {
-          validDirs.push(dir);
+    // Check single directions
+    for (const dir of DIRECTION_ORDER) {
+      if (isDirectionClear(coord, dir, currentStacks, currentHoles)) {
+        validDirs.push(dir);
+      }
+    }
+
+    // Check bidirectional axes only in push mode (valid if either direction is clear)
+    if (mode === 'push') {
+      for (const axis of AXIS_ORDER) {
+        const [dir1, dir2] = getAxisDirections(axis);
+        if (isDirectionClear(coord, dir1, currentStacks, currentHoles) || isDirectionClear(coord, dir2, currentStacks, currentHoles)) {
+          validDirs.push(axis);
         }
       }
+    }
 
-      // Check bidirectional axes only in push mode (valid if either direction is clear)
-      if (mode === 'push') {
-        for (const axis of AXIS_ORDER) {
-          const [dir1, dir2] = getAxisDirections(axis);
-          if (isDirectionClear(coord, dir1, currentStacks, currentHoles) || isDirectionClear(coord, dir2, currentStacks, currentHoles)) {
-            validDirs.push(axis);
-          }
-        }
-      }
-
-      return validDirs;
-    },
-    [gridRadius]
-  );
+    return validDirs;
+  };
 
   // Calculate initial clearability ratio (how many stacks can be cleared immediately)
   const getInitialClearability = (
@@ -620,7 +630,7 @@ export function HexBlockLevelDesigner({
   };
 
   // Generate random solvable level with target difficulty
-  const generateRandomLevel = useCallback(() => {
+  const generateRandomLevel = () => {
     // For large levels, reduce attempts to keep it fast
     const maxAttempts = targetStackCount > 50 ? 10 : 30;
     let bestCandidate: Map<string, HexStack> | null = null;
@@ -655,7 +665,7 @@ export function HexBlockLevelDesigner({
     } else {
       setStacks(generateSingleLevel());
     }
-  }, [gridCoords, targetStackCount, targetDifficulty, holes, gridRadius]);
+  };
 
   // Calculate blocks ahead for all stacks (for visualization)
   const blocksAheadMap = useMemo(() => {
@@ -676,7 +686,7 @@ export function HexBlockLevelDesigner({
   }, [stacks, holes, gridRadius]);
 
   // Smart Fill: Fill all empty cells while maintaining solvability
-  const smartFillLevel = useCallback(() => {
+  const smartFillLevel = () => {
     // Get all empty cells (not holes, not occupied)
     const emptyCoords = gridCoords.filter(
       (coord) => !holes.has(hexKey(coord)) && !stacks.has(hexKey(coord))
@@ -729,7 +739,7 @@ export function HexBlockLevelDesigner({
     }
 
     setStacks(newStacks);
-  }, [gridCoords, stacks, holes, gameMode]);
+  };
 
   // Apply a level template (ensures solvability)
   const applyTemplate = useCallback((template: LevelTemplate) => {
@@ -912,7 +922,7 @@ export function HexBlockLevelDesigner({
   }, [importCode]);
 
   // Export level as JSON
-  const handleExportJSON = useCallback(() => {
+  const handleExportJSON = () => {
     if (stacks.size === 0) return;
 
     const holeCoords: AxialCoord[] = [];
@@ -953,7 +963,7 @@ export function HexBlockLevelDesigner({
     const carouselArray = Array.from(carousels.values());
 
     const designedLevel: DesignedLevel = {
-      id: `level-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: createDesignerLevelId('level'),
       name: `Level ${levelNumber}`,
       levelNumber,
       gridRadius,
@@ -963,11 +973,11 @@ export function HexBlockLevelDesigner({
       carousels: carouselArray.length > 0 ? carouselArray : undefined,
       gameMode,
       metrics,
-      createdAt: Date.now(),
+      createdAt: getCurrentTimestamp(),
     };
 
     downloadLevelJSON(designedLevel);
-  }, [stacks, holes, pauses, carousels, gridRadius, gameMode, levelNumber, extraMoves]);
+  };
 
   // Import level from JSON file
   const handleImportJSON = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1152,7 +1162,7 @@ export function HexBlockLevelDesigner({
     const carouselArray = Array.from(carousels.values());
 
     const level: HexaBlockLevel = {
-      id: `custom-${Date.now()}`,
+      id: createDesignerLevelId('custom'),
       name: 'Custom Level',
       gridRadius,
       difficulty: 'medium',
@@ -1206,7 +1216,7 @@ export function HexBlockLevelDesigner({
     };
 
     const designedLevel: DesignedLevel = {
-      id: editingLevel?.id || `level-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: editingLevel?.id || createDesignerLevelId('level'),
       name: `Level ${levelNumber}`,
       levelNumber,
       gridRadius,
@@ -1216,7 +1226,7 @@ export function HexBlockLevelDesigner({
       carousels: carouselArray.length > 0 ? carouselArray : undefined,
       gameMode,
       metrics,
-      createdAt: editingLevel?.createdAt || Date.now(),
+      createdAt: editingLevel?.createdAt || getCurrentTimestamp(),
     };
 
     onAddToCollection(designedLevel);

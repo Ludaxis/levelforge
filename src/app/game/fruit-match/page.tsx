@@ -12,9 +12,9 @@ import {
   SolvabilityChecker,
 } from '@/components/games/fruit-match';
 import { FruitMatchCurveChart } from '@/components/games/fruit-match/FruitMatchCurveChart';
-import { FruitMatchLevel, DesignedFruitMatchLevel } from '@/types/fruitMatch';
+import { DesignedFruitMatchLevel } from '@/types/fruitMatch';
 import { generateSinkStacks, getRequiredFruitCounts } from '@/lib/fruitMatchUtils';
-import { ArrowLeft, Palette, Layers, Play, BookOpen, Search } from 'lucide-react';
+import { ArrowLeft, Palette, Layers, BookOpen, Search } from 'lucide-react';
 import Link from 'next/link';
 import { ErrorBoundary } from '@/components/layout/ErrorBoundary';
 
@@ -29,20 +29,28 @@ function FruitMatchPageContent() {
   const [editingLevel, setEditingLevel] = useState<DesignedFruitMatchLevel | null>(null);
 
   // Level collection state
-  const { levels, setLevels, isLoaded, addLevel, importLevels, syncState, forceSync } = useFruitMatchLevelCollection();
+  const { levels, setLevels, addLevel, importLevels, syncState, forceSync } = useFruitMatchLevelCollection();
 
   // Handle shared import
   useEffect(() => {
     if (searchParams.get('import') !== 'shared') return;
+
     const raw = localStorage.getItem('shared-import-pending');
     if (!raw) return;
+
     try {
       const { gameType, levels: sharedLevels } = JSON.parse(raw);
       if (gameType !== 'fruit-match' || !Array.isArray(sharedLevels)) return;
+
       localStorage.removeItem('shared-import-pending');
       importLevels(sharedLevels as DesignedFruitMatchLevel[]);
-      setActiveTab('collection');
       window.history.replaceState({}, '', '/game/fruit-match');
+
+      const frameId = window.requestAnimationFrame(() => {
+        setActiveTab('collection');
+      });
+
+      return () => window.cancelAnimationFrame(frameId);
     } catch {
       // Invalid data, ignore
     }
@@ -56,7 +64,7 @@ function FruitMatchPageContent() {
   };
 
   // Handle adding/updating level in collection
-  const handleAddToCollection = (level: DesignedFruitMatchLevel, collectionId?: string) => {
+  const handleAddToCollection = (level: DesignedFruitMatchLevel) => {
     if (editingLevel) {
       // Update existing level - use functional update to avoid stale closure
       setLevels((prev: DesignedFruitMatchLevel[]) => prev.map((l) => (l.id === level.id ? level : l)));
@@ -68,23 +76,6 @@ function FruitMatchPageContent() {
       // Auto-increment level number
       setLevelNumber(prev => prev + 1);
     }
-  };
-
-  // Convert DesignedFruitMatchLevel to FruitMatchLevel for the play tab grid
-  const designedLevelToPlayable = (level: DesignedFruitMatchLevel): FruitMatchLevel => {
-    const fruitCounts = getRequiredFruitCounts(level.pixelArt);
-    const sinkStacks = generateSinkStacks(level.sinkWidth, fruitCounts, 2, 4);
-    return {
-      id: level.id,
-      name: level.name,
-      pixelArt: level.pixelArt.map((c) => ({ ...c, filled: false })),
-      pixelArtWidth: level.pixelArtWidth,
-      pixelArtHeight: level.pixelArtHeight,
-      sinkWidth: level.sinkWidth,
-      sinkStacks,
-      waitingStandSlots: level.waitingStandSlots,
-      difficulty: level.metrics.difficulty,
-    };
   };
 
   // Handle playing from collection play tab - edit the level in studio play mode

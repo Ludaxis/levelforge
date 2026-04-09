@@ -3,6 +3,49 @@
 import { useState, useEffect, useCallback } from 'react';
 import { BaseLevel, CollectionMetadata, CollectionIndex, GameType } from './types';
 
+const EMPTY_COLLECTION_INDEX: CollectionIndex = { collections: [], activeCollectionId: null };
+
+function loadInitialCollectionIndex(gameType: GameType, indexKey: string): CollectionIndex {
+  if (typeof window === 'undefined') {
+    return EMPTY_COLLECTION_INDEX;
+  }
+
+  const stored = localStorage.getItem(indexKey);
+  if (stored) {
+    try {
+      return JSON.parse(stored) as CollectionIndex;
+    } catch {
+      return EMPTY_COLLECTION_INDEX;
+    }
+  }
+
+  const legacyKey = `${gameType}-level-collection`;
+  const legacyData = localStorage.getItem(legacyKey);
+  if (!legacyData) {
+    return EMPTY_COLLECTION_INDEX;
+  }
+
+  try {
+    const levels = JSON.parse(legacyData);
+    const defaultCollection: CollectionMetadata = {
+      id: 'default',
+      name: 'Default Collection',
+      gameType,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      levelCount: Array.isArray(levels) ? levels.length : 0,
+    };
+    const index: CollectionIndex = { collections: [defaultCollection], activeCollectionId: 'default' };
+
+    localStorage.setItem(`${gameType}-collection-default`, legacyData);
+    localStorage.setItem(indexKey, JSON.stringify(index));
+
+    return index;
+  } catch {
+    return EMPTY_COLLECTION_INDEX;
+  }
+}
+
 /**
  * Hook for managing multiple collections per game type
  */
@@ -11,47 +54,10 @@ export function useMultipleCollections<T extends BaseLevel>(
   maxLevels: number = 100
 ) {
   const indexKey = `${gameType}-collections-index`;
-  const [collectionIndex, setCollectionIndex] = useState<CollectionIndex>({ collections: [], activeCollectionId: null });
-  const [isLoaded, setIsLoaded] = useState(false);
-
-  // Load on mount (with legacy migration)
-  useEffect(() => {
-    const stored = localStorage.getItem(indexKey);
-    if (stored) {
-      try {
-        setCollectionIndex(JSON.parse(stored));
-      } catch {
-        // Invalid JSON, start fresh
-        setCollectionIndex({ collections: [], activeCollectionId: null });
-      }
-    } else {
-      // Migrate from legacy single collection
-      const legacyKey = `${gameType}-level-collection`;
-      const legacyData = localStorage.getItem(legacyKey);
-      if (legacyData) {
-        try {
-          const levels = JSON.parse(legacyData);
-          const defaultCollection: CollectionMetadata = {
-            id: 'default',
-            name: 'Default Collection',
-            gameType,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            levelCount: Array.isArray(levels) ? levels.length : 0,
-          };
-          // Save to new key
-          localStorage.setItem(`${gameType}-collection-default`, legacyData);
-          const index: CollectionIndex = { collections: [defaultCollection], activeCollectionId: 'default' };
-          localStorage.setItem(indexKey, JSON.stringify(index));
-          setCollectionIndex(index);
-        } catch {
-          // Invalid legacy data, start fresh
-          setCollectionIndex({ collections: [], activeCollectionId: null });
-        }
-      }
-    }
-    setIsLoaded(true);
-  }, [gameType, indexKey]);
+  const [collectionIndex, setCollectionIndex] = useState<CollectionIndex>(() =>
+    loadInitialCollectionIndex(gameType, indexKey)
+  );
+  const isLoaded = true;
 
   // Save index on change
   useEffect(() => {

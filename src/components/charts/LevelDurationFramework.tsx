@@ -315,14 +315,14 @@ export function LevelDurationFramework() {
                   <p className="font-medium">Early Game (1-30)</p>
                   <p className="text-xs text-muted-foreground mt-1">
                     30-90 seconds per level. Focus on teaching one mechanic at a time.
-                    High win rates, let players "feel smart" quickly.
+                    High win rates, let players &quot;feel smart&quot; quickly.
                   </p>
                 </div>
                 <div className="p-3 bg-muted/50 rounded-lg">
                   <p className="font-medium">Core Game (31-200)</p>
                   <p className="text-xs text-muted-foreground mt-1">
                     2-3 minutes per level. 15-20 moves with 2-3 objectives.
-                    "Decision density" increases ~20% as players progress.
+                    &quot;Decision density&quot; increases ~20% as players progress.
                   </p>
                 </div>
                 <div className="p-3 bg-muted/50 rounded-lg">
@@ -542,7 +542,7 @@ export function LevelDurationFramework() {
                 </div>
                 <div className="space-y-3">
                   <div className="p-3 bg-muted/50 rounded-lg">
-                    <p className="font-medium">"Snacking" Paradigm</p>
+                    <p className="font-medium">&quot;Snacking&quot; Paradigm</p>
                     <p className="text-xs text-muted-foreground">
                       Players engage during commutes, breaks, before sleep. Deliver dopamine
                       hits within seconds, full completion in 1-4 minutes.
@@ -552,7 +552,7 @@ export function LevelDurationFramework() {
                     <p className="font-medium">Device Patterns</p>
                     <p className="text-xs text-muted-foreground">
                       Phones drive morning commute sessions. Tablets enable longer evening
-                      "couch sessions" of 10+ minutes.
+                      &quot;couch sessions&quot; of 10+ minutes.
                     </p>
                   </div>
                 </div>
@@ -623,8 +623,8 @@ export function LevelDurationFramework() {
                 </div>
                 <div className="pt-2 border-t text-xs text-muted-foreground">
                   <p>• Removed timed levels in 2018</p>
-                  <p>• Key metric: "time to abandon" + "time to pass"</p>
-                  <p>• "If a level must be hard, make it short"</p>
+                  <p>• Key metric: &quot;time to abandon&quot; + &quot;time to pass&quot;</p>
+                  <p>• &quot;If a level must be hard, make it short&quot;</p>
                 </div>
               </CardContent>
             </Card>
@@ -657,7 +657,7 @@ export function LevelDurationFramework() {
                 <div className="pt-2 border-t text-xs text-muted-foreground">
                   <p>• {CASE_STUDIES.homescapes.newLevels} new levels</p>
                   <p>• Has adaptive difficulty (eases after failures)</p>
-                  <p>• Gardenscapes plays "harder" (no adaptive)</p>
+                  <p>• Gardenscapes plays &quot;harder&quot; (no adaptive)</p>
                 </div>
               </CardContent>
             </Card>
@@ -673,13 +673,13 @@ export function LevelDurationFramework() {
                   <Info className="h-5 w-5 text-primary mt-0.5" />
                   <div className="text-sm">
                     <p className="font-medium mb-2">
-                      "Retention always wins" — Jan Wedekind, King (Head of Central Insights)
+                      &quot;Retention always wins&quot; — Jan Wedekind, King (Head of Central Insights)
                     </p>
                     <p className="text-muted-foreground">
-                      Royal Match generates <strong>2x more "near-loss moments"</strong> than Candy Crush and
-                      <strong> 2x more "almost-win moments"</strong> than Homescapes. King's analysis showed
+                      Royal Match generates <strong>2x more &quot;near-loss moments&quot;</strong> than Candy Crush and
+                      <strong> 2x more &quot;almost-win moments&quot;</strong> than Homescapes. King&apos;s analysis showed
                       that making Level 65 easier retained players longer with compound benefits—prioritizing
-                      lifetime value over single-level conversion. "Crazy hard levels never pay off in the long term."
+                      lifetime value over single-level conversion. &quot;Crazy hard levels never pay off in the long term.&quot;
                     </p>
                   </div>
                 </div>

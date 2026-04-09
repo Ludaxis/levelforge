@@ -315,9 +315,6 @@ export function SquareBlockLevelCollection({
     return filteredLevels.slice(start, start + PAGE_SIZE);
   }, [filteredLevels, safePage]);
 
-  // Reset page when search changes
-  useEffect(() => { setPage(0); }, [searchQuery]);
-
   // Export single level as reference format JSON
   const handleExportLevel = (level: DesignedLevel) => {
     const referenceFormat = exportToReferenceFormat({
@@ -870,7 +867,10 @@ export function SquareBlockLevelCollection({
           <Input
             placeholder="Search levels..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setPage(0);
+            }}
             className="pl-8"
           />
         </div>

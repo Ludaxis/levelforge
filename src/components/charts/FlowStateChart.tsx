@@ -101,7 +101,7 @@ export function FlowStateChart() {
           </CardTitle>
           <CardDescription>
             Visualize where your levels fall on the flow channel. The goal is to keep players in the
-            "flow" zone - challenged enough to stay engaged, but not so much they get frustrated.
+            &quot;flow&quot; zone - challenged enough to stay engaged, but not so much they get frustrated.
           </CardDescription>
         </CardHeader>
         <CardContent>

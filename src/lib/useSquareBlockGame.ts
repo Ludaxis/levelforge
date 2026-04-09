@@ -295,7 +295,7 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
         return;
       }
 
-      const { blocked, path, blockerCoord, lastFreeCoord, chosenDirection, holeCoord } = getBlockPath(block);
+      const { blocked, path, lastFreeCoord, chosenDirection, holeCoord } = getBlockPath(block);
 
       // If there's a hole in the path, block falls in!
       if (holeCoord) {
@@ -477,7 +477,7 @@ export function useSquareBlockGame(initialLevel: SquareBlockLevel) {
         });
       }, 600);
     },
-    [state.blocks, state.holes, state.isComplete, state.isLost, state.animatingBlock, state.mistakes, getBlockPath, clearMistakeHighlight, gameMode, state.level.rows, state.level.cols]
+    [state.blocks, state.holes, state.isComplete, state.isLost, state.animatingBlock, state.mistakes, getBlockPath, clearMistakeHighlight, gameMode, state.level.rows, state.level.cols, isBlockUnlocked, cellSize]
   );
 
   // Undo last move

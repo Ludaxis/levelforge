@@ -175,9 +175,12 @@ export function FruitMatchBoard({ game }: FruitMatchBoardProps) {
   useEffect(() => {
     // If game is over, clear all configs
     if (isComplete || isLost) {
+      configuredLaunchersRef.current.clear();
       if (shootingConfigs.length > 0) {
-        setShootingConfigs([]);
-        configuredLaunchersRef.current.clear();
+        const frameId = window.requestAnimationFrame(() => {
+          setShootingConfigs([]);
+        });
+        return () => window.cancelAnimationFrame(frameId);
       }
       return;
     }
@@ -212,7 +215,10 @@ export function FruitMatchBoard({ game }: FruitMatchBoardProps) {
       for (const config of configsToRemove) {
         configuredLaunchersRef.current.delete(config.launcherId);
       }
-      setShootingConfigs(prev => prev.filter(c => activeLauncherIds.has(c.launcherId)));
+      const frameId = window.requestAnimationFrame(() => {
+        setShootingConfigs(prev => prev.filter(c => activeLauncherIds.has(c.launcherId)));
+      });
+      return () => window.cancelAnimationFrame(frameId);
     }
   }, [animationState.activeShootings, shootingConfigs, createShootingConfigForLauncher, isComplete, isLost]);
 

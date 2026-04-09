@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   FruitType,
   FruitMatchLevel,
@@ -102,6 +102,7 @@ export function useFruitMatchGame(initialLevel: FruitMatchLevel) {
 
   // Map of resolve functions per launcher (for parallel shooting)
   const shootingResolveMapRef = useRef<Map<string, () => void>>(new Map());
+  const executeMatchRef = useRef<(launcherId: string) => Promise<void>>(async () => {});
 
   // Track which launchers are currently executing (for parallel shooting)
   const executingLaunchersRef = useRef<Set<string>>(new Set());
@@ -278,7 +279,9 @@ export function useFruitMatchGame(initialLevel: FruitMatchLevel) {
     if (willTriggerMatch && matchLauncherId) {
       // Small delay to let React process the state update
       await new Promise(resolve => setTimeout(resolve, 10));
-      executeMatch(matchLauncherId);
+      queueMicrotask(() => {
+        void executeMatchRef.current(matchLauncherId);
+      });
     }
   }, [state.sinkStacks, state.waitingStand, state.launchers, state.launcherProgress, state.isComplete, state.isLost, state.animationPhase, state.level.waitingStandSlots, animationState.activeShootings, findMatchingLauncher]);
 
@@ -323,10 +326,13 @@ export function useFruitMatchGame(initialLevel: FruitMatchLevel) {
 
   // Helper to get current state synchronously
   const stateRef = useRef(state);
-  stateRef.current = state;
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   // Execute a match for a specific launcher (supports parallel execution)
-  const executeMatch = useCallback(async (launcherId: string) => {
+  async function executeMatch(launcherId: string) {
     // Check if this specific launcher is already executing
     if (executingLaunchersRef.current.has(launcherId)) {
       return;
@@ -463,7 +469,7 @@ export function useFruitMatchGame(initialLevel: FruitMatchLevel) {
         matchingLauncherId
       );
 
-      let newProgress = prev.launcherProgress.filter(p => p.launcherId !== matchingLauncherId);
+      const newProgress = prev.launcherProgress.filter(p => p.launcherId !== matchingLauncherId);
 
       const newLauncher = newLaunchers.find(l =>
         !prev.launchers.some(ol => ol.id === l.id)
@@ -499,7 +505,7 @@ export function useFruitMatchGame(initialLevel: FruitMatchLevel) {
     await new Promise(resolve => setTimeout(resolve, hasOtherShootings ? 100 : 400));
 
     // Move tiles from waiting stand to matching launchers
-    let triggeredLauncherIds: string[] = [];
+    const triggeredLauncherIds: string[] = [];
 
     setState(prev => {
       let newWaitingStand = [...prev.waitingStand];
@@ -579,7 +585,11 @@ export function useFruitMatchGame(initialLevel: FruitMatchLevel) {
     for (const ready of readyLaunchers) {
       executeMatch(ready.launcherId);
     }
-  }, []);
+  }
+
+  useEffect(() => {
+    executeMatchRef.current = executeMatch;
+  }, [executeMatch]);
 
   // Reset the game
   const reset = useCallback(() => {

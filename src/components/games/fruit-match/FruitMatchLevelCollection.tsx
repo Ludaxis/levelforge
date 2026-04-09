@@ -283,9 +283,6 @@ export function FruitMatchLevelCollection({
     return filteredLevels.slice(start, start + PAGE_SIZE);
   }, [filteredLevels, safePage]);
 
-  // Reset page when search changes
-  useEffect(() => { setPage(0); }, [searchQuery]);
-
   // Single-pass tier stats
   const tierStats = useMemo(() => {
     const counts: Record<DifficultyTier, number> = { trivial: 0, easy: 0, medium: 0, hard: 0, expert: 0, nightmare: 0 };
@@ -779,7 +776,10 @@ export function FruitMatchLevelCollection({
           <Input
             placeholder="Search levels..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setPage(0);
+            }}
             className="pl-8"
           />
         </div>

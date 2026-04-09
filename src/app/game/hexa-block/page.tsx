@@ -109,20 +109,28 @@ function HexaBlockPageContent() {
   const [editingLevel, setEditingLevel] = useState<DesignedLevel | null>(null);
 
   // Level collection state
-  const { levels, setLevels, isLoaded, addLevel, importLevels, syncState, forceSync } = useLevelCollection();
+  const { levels, setLevels, addLevel, importLevels, syncState, forceSync } = useLevelCollection();
 
   // Handle shared import
   useEffect(() => {
     if (searchParams.get('import') !== 'shared') return;
+
     const raw = localStorage.getItem('shared-import-pending');
     if (!raw) return;
+
     try {
       const { gameType, levels: sharedLevels } = JSON.parse(raw);
       if (gameType !== 'hexa-block' || !Array.isArray(sharedLevels)) return;
+
       localStorage.removeItem('shared-import-pending');
       importLevels(sharedLevels as DesignedLevel[]);
-      setActiveTab('collection');
       window.history.replaceState({}, '', '/game/hexa-block');
+
+      const frameId = window.requestAnimationFrame(() => {
+        setActiveTab('collection');
+      });
+
+      return () => window.cancelAnimationFrame(frameId);
     } catch {
       // Invalid data, ignore
     }
@@ -161,7 +169,7 @@ function HexaBlockPageContent() {
   };
 
   // Handle adding/updating level in collection
-  const handleAddToCollection = (level: DesignedLevel, collectionId?: string) => {
+  const handleAddToCollection = (level: DesignedLevel) => {
     if (editingLevel) {
       // Update existing level - use functional update to avoid stale closure
       setLevels(prev => prev.map(l => l.id === level.id ? level : l));

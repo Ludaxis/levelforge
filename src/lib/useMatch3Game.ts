@@ -174,8 +174,8 @@ export function useMatch3Game(config: LevelConfig) {
     setIsProcessing(true);
 
     setGameState((prev) => {
-      let board = prev.board.map((row) => row.map((tile) => tile ? { ...tile } : null));
-      let objectives = prev.objectives.map((obj) => ({ ...obj }));
+      const board = prev.board.map((row) => row.map((tile) => tile ? { ...tile } : null));
+      const objectives = prev.objectives.map((obj) => ({ ...obj }));
       let score = prev.score;
       let cascadeCount = 0;
 

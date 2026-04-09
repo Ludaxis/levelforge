@@ -1648,7 +1648,7 @@ export function postFireCascade(
   extraMatches: number;
 } {
   let active = activeLaunchers.filter((l) => l.id !== firedLauncherId);
-  let queue = [...launcherQueue];
+  const queue = [...launcherQueue];
   let stand = [...waitingStand];
   let art = pixelArt;
   let extraMatches = 0;

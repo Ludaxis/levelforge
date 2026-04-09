@@ -295,7 +295,7 @@ export default function SharedCollectionPage() {
         <CardHeader>
           <CardTitle className="text-lg">Levels</CardTitle>
           <CardDescription>
-            Preview the levels in this collection. Click "Export All Levels" to download them.
+            Preview the levels in this collection. Click &quot;Export All Levels&quot; to download them.
           </CardDescription>
         </CardHeader>
         <CardContent>

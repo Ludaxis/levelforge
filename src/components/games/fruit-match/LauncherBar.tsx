@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import gsap from 'gsap';
 import { Launcher, FruitType, FRUIT_EMOJI, FRUIT_COLORS, LauncherProgress } from '@/types/fruitMatch';
 
@@ -28,7 +28,7 @@ export function LauncherBar({
 }: LauncherBarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const launcherRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const [prevLaunchers, setPrevLaunchers] = useState<Launcher[]>(launchers);
+  const prevLaunchersRef = useRef<Launcher[]>(launchers);
   const isAnimatingRef = useRef(false);
 
   // Get collected tile count for a launcher
@@ -41,6 +41,7 @@ export function LauncherBar({
   useEffect(() => {
     if (animationPhase !== 'conveyor' || isAnimatingRef.current) return;
 
+    const prevLaunchers = prevLaunchersRef.current;
     const removedLauncher = prevLaunchers.find(
       pl => !launchers.some(l => l.id === pl.id)
     );
@@ -49,7 +50,7 @@ export function LauncherBar({
     );
 
     if (!removedLauncher && !newLauncher) {
-      setPrevLaunchers(launchers);
+      prevLaunchersRef.current = launchers;
       return;
     }
 
@@ -64,7 +65,7 @@ export function LauncherBar({
     const tl = gsap.timeline({
       onComplete: () => {
         isAnimatingRef.current = false;
-        setPrevLaunchers(launchers);
+        prevLaunchersRef.current = launchers;
       },
     });
 
@@ -95,7 +96,7 @@ export function LauncherBar({
     return () => {
       tl.kill();
     };
-  }, [launchers, prevLaunchers, animationPhase]);
+  }, [launchers, animationPhase]);
 
   // Register launcher ref
   const setLauncherRef = (launcherId: string, el: HTMLDivElement | null) => {

@@ -60,18 +60,34 @@ export function ShareModal({
 
   // Load existing share info when modal opens
   useEffect(() => {
-    if (open && collectionId && isAuthenticated) {
+    if (!(open && collectionId && isAuthenticated)) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    const loadShareInfo = async () => {
       setIsLoading(true);
       setError(null);
-      getShareInfo(collectionId).then((info) => {
-        setShareInfo(info);
-        if (info) {
-          setTitle(info.title || '');
-          setDescription(info.description || '');
-        }
-        setIsLoading(false);
-      });
-    }
+
+      const info = await getShareInfo(collectionId);
+      if (isCancelled) {
+        return;
+      }
+
+      setShareInfo(info);
+      if (info) {
+        setTitle(info.title || '');
+        setDescription(info.description || '');
+      }
+      setIsLoading(false);
+    };
+
+    void loadShareInfo();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [open, collectionId, isAuthenticated]);
 
   const handleShare = async () => {
