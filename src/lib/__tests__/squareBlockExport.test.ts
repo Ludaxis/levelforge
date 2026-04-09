@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import {
   exportToReferenceFormat,
   importFromReferenceFormat,
+  normalizeSquareBlock,
   parseAndImportLevel,
   isReferenceFormat,
   ReferenceFormat,
-  ReferenceCell,
 } from '../squareBlockExport';
-import { SquareBlock, BlockDirection } from '@/types/squareBlock';
-import { createTestBlock, createTestLevel } from './helpers/squareBlockTestHelpers';
+import { SquareBlock } from '@/types/squareBlock';
+import { createTestBlock } from './helpers/squareBlockTestHelpers';
 
 // ============================================================================
 // Direction Mapping
@@ -210,6 +210,59 @@ describe('Mechanic Encoding', () => {
       expect(imported.blocks[0].locked).toBe(true);
       expect(imported.blocks[0].unlockAfterMoves).toBe(10);
     });
+
+    it('should treat zero-padded gate extras as a locked gate, not a timed unlock', () => {
+      const refFormat: ReferenceFormat = {
+        rows: 1,
+        cols: 1,
+        cells: [{ direction: 1, colorHex: '#FF0000', mechanic: 2, mechanicExtras: '00' }],
+      };
+      const imported = importFromReferenceFormat(refFormat);
+      expect(imported.blocks[0].locked).toBe(true);
+      expect(imported.blocks[0].unlockAfterMoves).toBeUndefined();
+    });
+
+    it('should encode gate plus mirror using mechanic extras', () => {
+      const blocks = [createTestBlock(0, 0, 'N', { locked: true, mirror: true })];
+      const exported = exportToReferenceFormat({ rows: 1, cols: 1, blocks });
+      expect(exported.cells[0].mechanic).toBe(2);
+      expect(exported.cells[0].mechanicExtras).toBe('M');
+    });
+
+    it('should encode timed gate plus mirror using mechanic extras', () => {
+      const blocks = [createTestBlock(0, 0, 'N', { locked: true, mirror: true, unlockAfterMoves: 5 })];
+      const exported = exportToReferenceFormat({ rows: 1, cols: 1, blocks });
+      expect(exported.cells[0].mechanic).toBe(2);
+      expect(exported.cells[0].mechanicExtras).toBe('5,M');
+    });
+
+    it('should import gate plus mirror from mechanic extras', () => {
+      const refFormat: ReferenceFormat = {
+        rows: 1,
+        cols: 1,
+        cells: [{ direction: 1, colorHex: '#FF0000', mechanic: 2, mechanicExtras: 'M' }],
+      };
+      const imported = importFromReferenceFormat(refFormat);
+      expect(imported.blocks[0].locked).toBe(true);
+      expect(imported.blocks[0].mirror).toBe(true);
+    });
+
+    it('should preserve raw zero-padded gate extras on export', () => {
+      const exported = exportToReferenceFormat({
+        rows: 1,
+        cols: 1,
+        blocks: [
+          {
+            ...createTestBlock(0, 0, 'N'),
+            mechanic: 2,
+            mechanicExtras: '00',
+          },
+        ],
+      });
+
+      expect(exported.cells[0].mechanic).toBe(2);
+      expect(exported.cells[0].mechanicExtras).toBe('00');
+    });
   });
 
   describe('Mirror blocks (mechanic 3)', () => {
@@ -226,6 +279,24 @@ describe('Mechanic Encoding', () => {
         cells: [{ direction: 1, colorHex: '#FF0000', mechanic: 3 }],
       };
       const imported = importFromReferenceFormat(refFormat);
+      expect(imported.blocks[0].mirror).toBe(true);
+    });
+
+    it('should encode iced plus mirror using mechanic extras', () => {
+      const blocks = [createTestBlock(0, 0, 'N', { iceCount: 5, mirror: true })];
+      const exported = exportToReferenceFormat({ rows: 1, cols: 1, blocks });
+      expect(exported.cells[0].mechanic).toBe(1);
+      expect(exported.cells[0].mechanicExtras).toBe('5,M');
+    });
+
+    it('should import iced plus mirror from mechanic extras', () => {
+      const refFormat: ReferenceFormat = {
+        rows: 1,
+        cols: 1,
+        cells: [{ direction: 1, colorHex: '#FF0000', mechanic: 1, mechanicExtras: '5,M' }],
+      };
+      const imported = importFromReferenceFormat(refFormat);
+      expect(imported.blocks[0].iceCount).toBe(5);
       expect(imported.blocks[0].mirror).toBe(true);
     });
   });
@@ -412,6 +483,57 @@ describe('Import Round-trip', () => {
 
     expect(imported.blocks[0].mirror).toBe(true);
   });
+
+  it('should round-trip gate plus mirror blocks', () => {
+    const original = [createTestBlock(0, 0, 'N', { locked: true, mirror: true, unlockAfterMoves: 5 })];
+    const exported = exportToReferenceFormat({ rows: 1, cols: 1, blocks: original });
+    const imported = importFromReferenceFormat(exported);
+
+    expect(imported.blocks[0].locked).toBe(true);
+    expect(imported.blocks[0].mirror).toBe(true);
+    expect(imported.blocks[0].unlockAfterMoves).toBe(5);
+  });
+
+  it('should round-trip iced plus mirror blocks', () => {
+    const original = [createTestBlock(0, 0, 'N', { iceCount: 5, mirror: true })];
+    const exported = exportToReferenceFormat({ rows: 1, cols: 1, blocks: original });
+    const imported = importFromReferenceFormat(exported);
+
+    expect(imported.blocks[0].iceCount).toBe(5);
+    expect(imported.blocks[0].mirror).toBe(true);
+  });
+});
+
+// ============================================================================
+// Normalization
+// ============================================================================
+
+describe('Normalization', () => {
+  it('should surface hidden gate state from raw mechanic data', () => {
+    const normalized = normalizeSquareBlock({
+      ...createTestBlock(0, 0, 'N'),
+      mechanic: 2,
+      mechanicExtras: '00',
+      locked: undefined,
+      unlockAfterMoves: undefined,
+    });
+
+    expect(normalized.locked).toBe(true);
+    expect(normalized.unlockAfterMoves).toBeUndefined();
+  });
+
+  it('should surface hidden mirror state from raw mechanic extras', () => {
+    const normalized = normalizeSquareBlock({
+      ...createTestBlock(0, 0, 'N'),
+      mechanic: 2,
+      mechanicExtras: 'M',
+      locked: undefined,
+      mirror: undefined,
+    });
+
+    expect(normalized.locked).toBe(true);
+    expect(normalized.mirror).toBe(true);
+  });
 });
 
 // ============================================================================
@@ -484,6 +606,28 @@ describe('parseAndImportLevel', () => {
     expect(result).not.toBeNull();
     expect(result!.rows).toBe(3);
     expect(result!.blocks).toHaveLength(1);
+  });
+
+  it('should normalize hidden mechanics in internal format JSON', () => {
+    const json = JSON.stringify({
+      rows: 1,
+      cols: 1,
+      blocks: [
+        {
+          id: 'b1',
+          coord: { row: 0, col: 0 },
+          direction: 'N',
+          color: '#ff0000',
+          mechanic: 2,
+          mechanicExtras: '00',
+        },
+      ],
+    });
+    const result = parseAndImportLevel(json);
+
+    expect(result).not.toBeNull();
+    expect(result!.blocks[0].locked).toBe(true);
+    expect(result!.blocks[0].unlockAfterMoves).toBeUndefined();
   });
 
   it('should return null for invalid JSON', () => {

@@ -2,7 +2,6 @@
 // Converts internal level format to reference JSON format
 
 import { SquareBlock, BlockDirection } from '@/types/squareBlock';
-import { GridCoord } from '@/lib/squareGrid';
 
 // ============================================================================
 // Reference Format Types
@@ -12,7 +11,7 @@ export interface ReferenceCell {
   direction: number;      // 0=empty, 1=N, 2=E, 3=S, 4=W, 5=N_S, 6=E_W
   colorHex: string;       // 8-char hex with alpha (e.g., "#06B6D4FF")
   mechanic?: number;      // 0=normal, 1=iced, 2=gate, 3=mirror
-  mechanicExtras?: string;// Optional extras (e.g., gate unlock moves, ice count)
+  mechanicExtras?: string;// Optional extras (e.g., gate unlock moves, ice count, ",M" for mirror combos)
 }
 
 export interface ReferenceFormat {
@@ -84,6 +83,9 @@ function blockToReferenceCell(block: SquareBlock): ReferenceCell {
     mechanic = 2;
     if (block.unlockAfterMoves !== undefined && block.unlockAfterMoves > 0) {
       mechanicExtras = String(block.unlockAfterMoves);
+    } else if (block.mechanic === 2 && block.mechanicExtras) {
+      // Preserve imported raw extras such as "00" so round-trip stays faithful.
+      mechanicExtras = block.mechanicExtras;
     }
   } else if (block.mirror) {
     // Mirror block: mechanic 3
@@ -93,6 +95,12 @@ function blockToReferenceCell(block: SquareBlock): ReferenceCell {
     // Preserve original mechanic if set
     mechanic = block.mechanic;
     mechanicExtras = block.mechanicExtras || '';
+  }
+
+  // Mirror can combine with ice or gate in reference format via extras suffix ",M".
+  // Mirror-only blocks continue to use mechanic 3.
+  if (block.mirror && mechanic !== 3 && !mechanicExtras.includes('M')) {
+    mechanicExtras = mechanicExtras ? `${mechanicExtras},M` : 'M';
   }
 
   return {
@@ -120,16 +128,67 @@ export interface ExportableLevelData {
   blocks: SquareBlock[];
 }
 
+function parsePositiveMechanicValue(value: string): number | undefined {
+  if (value === '') return undefined;
+  const parsed = Number(value);
+  if (Number.isNaN(parsed) || parsed <= 0) return undefined;
+  return parsed;
+}
+
+export function normalizeSquareBlock(block: SquareBlock): SquareBlock {
+  const mechanic = typeof block.mechanic === 'number' ? block.mechanic : 0;
+  const mechanicExtras = block.mechanicExtras != null ? String(block.mechanicExtras) : '';
+  const extrasWithoutMirror = mechanicExtras.replace(/,?M/g, '').trim();
+  const parsedExtraValue = parsePositiveMechanicValue(extrasWithoutMirror);
+
+  const iceCount =
+    block.iceCount !== undefined && block.iceCount > 0
+      ? block.iceCount
+      : mechanic === 1
+        ? parsedExtraValue
+        : undefined;
+
+  const unlockAfterMoves =
+    block.unlockAfterMoves !== undefined && block.unlockAfterMoves > 0
+      ? block.unlockAfterMoves
+      : mechanic === 2
+        ? parsedExtraValue
+        : undefined;
+
+  const locked = iceCount !== undefined
+    ? undefined
+    : (block.locked === true || mechanic === 2 ? true : undefined);
+
+  const mirror = block.mirror === true || mechanic === 3 || mechanicExtras.includes('M')
+    ? true
+    : undefined;
+
+  return {
+    ...block,
+    locked,
+    iceCount,
+    mirror,
+    unlockAfterMoves,
+    mechanic: typeof block.mechanic === 'number' ? block.mechanic : undefined,
+    mechanicExtras: mechanicExtras || undefined,
+  };
+}
+
+export function normalizeSquareBlocks(blocks: SquareBlock[]): SquareBlock[] {
+  return blocks.map(normalizeSquareBlock);
+}
+
 /**
  * Export level data to reference JSON format
  * Creates a cells array with one entry per grid cell in row-major order
  */
 export function exportToReferenceFormat(level: ExportableLevelData): ReferenceFormat {
   const { rows, cols, blocks } = level;
+  const normalizedBlocks = normalizeSquareBlocks(blocks);
 
   // Create a map of blocks by coordinate for O(1) lookup
   const blockMap = new Map<string, SquareBlock>();
-  for (const block of blocks) {
+  for (const block of normalizedBlocks) {
     const key = coordKey(block.coord.row, block.coord.col);
     blockMap.set(key, block);
   }
@@ -239,31 +298,6 @@ export function importFromReferenceFormat(data: ReferenceFormat): ExportableLeve
       continue;
     }
 
-    const mechanic = typeof cell.mechanic === 'number' ? cell.mechanic : 0;
-    // Handle both string and number values for mechanicExtras (dev exports as number)
-    const mechanicExtras = cell.mechanicExtras != null ? String(cell.mechanicExtras) : '';
-
-    // Mechanic codes: 0=normal, 1=iced, 2=gate, 3=mirror
-    // Mirror: mechanic 3 OR extras contains "M"
-    const hasMirror = mechanic === 3 || mechanicExtras.includes('M');
-    const extrasWithoutMirror = mechanicExtras.replace(/,?M/g, '').trim();
-
-    // Gate: mechanic 2 (neighbor-based if no extras, timed if extras has a number)
-    const isGate = mechanic === 2;
-
-    // Parse mechanic-specific properties
-    // Timed gate (mechanic 2 with extras): extras contains unlock moves count
-    const unlockAfterMoves =
-      mechanic === 2 && extrasWithoutMirror !== '' && !Number.isNaN(Number(extrasWithoutMirror))
-        ? Number(extrasWithoutMirror)
-        : undefined;
-
-    // Iced blocks (mechanic 1): extras contains ice count
-    const iceCount =
-      mechanic === 1 && extrasWithoutMirror !== '' && !Number.isNaN(Number(extrasWithoutMirror))
-        ? Number(extrasWithoutMirror)
-        : undefined;
-
     const direction = NUMBER_TO_DIRECTION[cell.direction];
     if (!direction) continue;
 
@@ -272,15 +306,11 @@ export function importFromReferenceFormat(data: ReferenceFormat): ExportableLeve
       coord: { row, col },
       direction,
       color: convertHex8ToColor(cell.colorHex),
-      locked: isGate ? true : undefined,
-      iceCount,
-      mirror: hasMirror ? true : undefined,
-      mechanic,
-      mechanicExtras,
-      unlockAfterMoves,
+      mechanic: typeof cell.mechanic === 'number' ? cell.mechanic : 0,
+      mechanicExtras: cell.mechanicExtras != null ? String(cell.mechanicExtras) : '',
     };
 
-    blocks.push(block);
+    blocks.push(normalizeSquareBlock(block));
   }
 
   return {
@@ -308,7 +338,7 @@ export function parseAndImportLevel(jsonString: string): ExportableLevelData | n
       return {
         rows: data.rows || 5,
         cols: data.cols || 5,
-        blocks: data.blocks,
+        blocks: normalizeSquareBlocks(data.blocks as SquareBlock[]),
       };
     }
 

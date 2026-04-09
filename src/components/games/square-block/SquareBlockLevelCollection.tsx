@@ -15,7 +15,12 @@ import {
   analyzePuzzle,
   calculateDifficultyScore,
 } from '@/lib/puzzleAnalyzer';
-import { isReferenceFormat, importFromReferenceFormat, exportToReferenceFormat } from '@/lib/squareBlockExport';
+import {
+  isReferenceFormat,
+  importFromReferenceFormat,
+  exportToReferenceFormat,
+  normalizeSquareBlocks,
+} from '@/lib/squareBlockExport';
 import {
   gridKey,
   createRectangularGrid,
@@ -106,6 +111,13 @@ const DIFFICULTY_BADGE_COLORS: Record<DisplayTier, string> = {
   superHard: 'bg-red-500/20 text-red-400 border-red-500/50',
 };
 
+function normalizeDesignedLevel(level: DesignedLevel): DesignedLevel {
+  return {
+    ...level,
+    blocks: normalizeSquareBlocks(level.blocks),
+  };
+}
+
 
 
 // ============================================================================
@@ -117,10 +129,19 @@ export function useLevelCollection() {
     gameType: 'square-block',
     localStorageKey: STORAGE_KEY,
     maxLevels: MAX_LEVELS,
+    migrate: normalizeDesignedLevel,
   });
 
   // Multiple collections support
   const multiCollections = useMultipleCollections<DesignedLevel>('square-block', MAX_LEVELS);
+
+  const getLevelsForCollection = useCallback((id: string) => {
+    return multiCollections.getLevelsForCollection(id).map(normalizeDesignedLevel);
+  }, [multiCollections]);
+
+  const saveLevelsForCollection = useCallback((id: string, levels: DesignedLevel[]) => {
+    multiCollections.saveLevelsForCollection(id, levels.map(normalizeDesignedLevel));
+  }, [multiCollections]);
 
   // Add duplicateLevel for backwards compatibility
   const duplicateLevel = useCallback((level: DesignedLevel) => {
@@ -148,8 +169,8 @@ export function useLevelCollection() {
     renameCollection: multiCollections.renameCollection,
     deleteCollection: multiCollections.deleteCollection,
     setActiveCollection: multiCollections.setActiveCollection,
-    getLevelsForCollection: multiCollections.getLevelsForCollection,
-    saveLevelsForCollection: multiCollections.saveLevelsForCollection,
+    getLevelsForCollection,
+    saveLevelsForCollection,
     collectionsLoaded: multiCollections.isLoaded,
   };
 }

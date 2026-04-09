@@ -33,7 +33,7 @@ import {
   getMinBlocksAhead,
 } from '@/lib/squareGrid';
 import { Settings } from 'lucide-react';
-import { downloadLevelAsJSON, parseAndImportLevel } from '@/lib/squareBlockExport';
+import { downloadLevelAsJSON, normalizeSquareBlocks, parseAndImportLevel } from '@/lib/squareBlockExport';
 import { DeadlockInfo, StuckReason, RootCauseType } from '@/lib/useSquareBlockGame';
 import {
   FIXED_CELL_SIZE,
@@ -105,7 +105,7 @@ export function SquareBlockLevelDesigner({
 
       // Convert blocks array to Map
       const blockMap = new Map<string, SquareBlock>();
-      for (const block of editingLevel.blocks) {
+      for (const block of normalizeSquareBlocks(editingLevel.blocks)) {
         const key = gridKey(block.coord);
         blockMap.set(key, block);
       }
@@ -944,6 +944,9 @@ export function SquareBlockLevelDesigner({
           locked: newLocked,
           iceCount: newIceCount,
           mirror: newMirror,
+          mechanic: undefined,
+          mechanicExtras: undefined,
+          unlockAfterMoves: undefined,
         });
         setBlocks(newBlocks);
       }
