@@ -6,6 +6,8 @@ import {
   parseAndImportLevel,
   isReferenceFormat,
   ReferenceFormat,
+  sanitizeSquareBlockForDesigner,
+  sanitizeSquareBlocksForDesigner,
 } from '../squareBlockExport';
 import { SquareBlock } from '@/types/squareBlock';
 import { createTestBlock } from './helpers/squareBlockTestHelpers';
@@ -533,6 +535,55 @@ describe('Normalization', () => {
 
     expect(normalized.locked).toBe(true);
     expect(normalized.mirror).toBe(true);
+  });
+
+  it('should strip hidden raw mechanic state for designer-authored blocks', () => {
+    const sanitized = sanitizeSquareBlockForDesigner({
+      ...createTestBlock(0, 0, 'N'),
+      mechanic: 1,
+      mechanicExtras: '8',
+    });
+
+    expect(sanitized.iceCount).toBeUndefined();
+    expect(sanitized.mechanic).toBeUndefined();
+    expect(sanitized.mechanicExtras).toBeUndefined();
+    expect(sanitized.unlockAfterMoves).toBeUndefined();
+  });
+
+  it('should preserve visible designer mechanics while stripping raw fields', () => {
+    const sanitized = sanitizeSquareBlockForDesigner({
+      ...createTestBlock(0, 0, 'N'),
+      locked: true,
+      iceCount: 5,
+      mirror: true,
+      mechanic: 2,
+      mechanicExtras: '00,M',
+      unlockAfterMoves: 10,
+    });
+
+    expect(sanitized.locked).toBe(true);
+    expect(sanitized.iceCount).toBe(5);
+    expect(sanitized.mirror).toBe(true);
+    expect(sanitized.mechanic).toBeUndefined();
+    expect(sanitized.mechanicExtras).toBeUndefined();
+    expect(sanitized.unlockAfterMoves).toBeUndefined();
+  });
+
+  it('should export the designer-visible state instead of stale hidden mechanics', () => {
+    const exported = exportToReferenceFormat({
+      rows: 1,
+      cols: 1,
+      blocks: sanitizeSquareBlocksForDesigner([
+        {
+          ...createTestBlock(0, 0, 'N'),
+          mechanic: 1,
+          mechanicExtras: '8',
+        },
+      ]),
+    });
+
+    expect(exported.cells[0].mechanic).toBe(0);
+    expect(exported.cells[0].mechanicExtras).toBe('');
   });
 });
 

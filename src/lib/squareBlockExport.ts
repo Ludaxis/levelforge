@@ -178,6 +178,22 @@ export function normalizeSquareBlocks(blocks: SquareBlock[]): SquareBlock[] {
   return blocks.map(normalizeSquareBlock);
 }
 
+export function sanitizeSquareBlockForDesigner(block: SquareBlock): SquareBlock {
+  return {
+    ...block,
+    locked: block.locked === true ? true : undefined,
+    iceCount: block.iceCount !== undefined && block.iceCount > 0 ? block.iceCount : undefined,
+    mirror: block.mirror === true ? true : undefined,
+    mechanic: undefined,
+    mechanicExtras: undefined,
+    unlockAfterMoves: undefined,
+  };
+}
+
+export function sanitizeSquareBlocksForDesigner(blocks: SquareBlock[]): SquareBlock[] {
+  return blocks.map(sanitizeSquareBlockForDesigner);
+}
+
 /**
  * Export level data to reference JSON format
  * Creates a cells array with one entry per grid cell in row-major order

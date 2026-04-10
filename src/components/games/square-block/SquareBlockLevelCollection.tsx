@@ -19,7 +19,7 @@ import {
   isReferenceFormat,
   importFromReferenceFormat,
   exportToReferenceFormat,
-  normalizeSquareBlocks,
+  sanitizeSquareBlocksForDesigner,
 } from '@/lib/squareBlockExport';
 import {
   gridKey,
@@ -111,10 +111,10 @@ const DIFFICULTY_BADGE_COLORS: Record<DisplayTier, string> = {
   superHard: 'bg-red-500/20 text-red-400 border-red-500/50',
 };
 
-function normalizeDesignedLevel(level: DesignedLevel): DesignedLevel {
+function sanitizeDesignedLevel(level: DesignedLevel): DesignedLevel {
   return {
     ...level,
-    blocks: normalizeSquareBlocks(level.blocks),
+    blocks: sanitizeSquareBlocksForDesigner(level.blocks),
   };
 }
 
@@ -129,18 +129,18 @@ export function useLevelCollection() {
     gameType: 'square-block',
     localStorageKey: STORAGE_KEY,
     maxLevels: MAX_LEVELS,
-    migrate: normalizeDesignedLevel,
+    migrate: sanitizeDesignedLevel,
   });
 
   // Multiple collections support
   const multiCollections = useMultipleCollections<DesignedLevel>('square-block', MAX_LEVELS);
 
   const getLevelsForCollection = useCallback((id: string) => {
-    return multiCollections.getLevelsForCollection(id).map(normalizeDesignedLevel);
+    return multiCollections.getLevelsForCollection(id).map(sanitizeDesignedLevel);
   }, [multiCollections]);
 
   const saveLevelsForCollection = useCallback((id: string, levels: DesignedLevel[]) => {
-    multiCollections.saveLevelsForCollection(id, levels.map(normalizeDesignedLevel));
+    multiCollections.saveLevelsForCollection(id, levels.map(sanitizeDesignedLevel));
   }, [multiCollections]);
 
   // Add duplicateLevel for backwards compatibility
@@ -341,7 +341,7 @@ export function SquareBlockLevelCollection({
     const referenceFormat = exportToReferenceFormat({
       rows: level.rows,
       cols: level.cols,
-      blocks: level.blocks,
+      blocks: sanitizeSquareBlocksForDesigner(level.blocks),
     });
     const dataStr = JSON.stringify(referenceFormat, null, 4);
     const blob = new Blob([dataStr], { type: 'application/json' });
@@ -358,7 +358,7 @@ export function SquareBlockLevelCollection({
     const referenceLevels = levels.map(level => exportToReferenceFormat({
       rows: level.rows,
       cols: level.cols,
-      blocks: level.blocks,
+      blocks: sanitizeSquareBlocksForDesigner(level.blocks),
     }));
     const dataStr = JSON.stringify(referenceLevels, null, 4);
     const blob = new Blob([dataStr], { type: 'application/json' });
@@ -377,7 +377,7 @@ export function SquareBlockLevelCollection({
       const referenceFormat = exportToReferenceFormat({
         rows: level.rows,
         cols: level.cols,
-        blocks: level.blocks,
+        blocks: sanitizeSquareBlocksForDesigner(level.blocks),
       });
       const dataStr = JSON.stringify(referenceFormat, null, 4);
       const blob = new Blob([dataStr], { type: 'application/json' });
@@ -396,9 +396,10 @@ export function SquareBlockLevelCollection({
 
   // Helper function to create a DesignedLevel from reference format data
   const createDesignedLevelFromReference = (levelData: { rows: number; cols: number; blocks: typeof levels[0]['blocks'] }, levelNumber: number): DesignedLevel => {
+    const sanitizedBlocks = sanitizeSquareBlocksForDesigner(levelData.blocks);
     // Create block map for analysis
     const blockMap = new Map();
-    for (const block of levelData.blocks) {
+    for (const block of sanitizedBlocks) {
       blockMap.set(gridKey(block.coord), block);
     }
 
@@ -407,12 +408,12 @@ export function SquareBlockLevelCollection({
     const breakdown = analysis.solvable ? calculateDifficultyScore(analysis) : null;
     const sawtoothPosition = getSawtoothPosition(levelNumber);
     const flowZone = breakdown ? calculateFlowZone(breakdown.tier, levelNumber) : 'flow';
-    const lockedCount = levelData.blocks.filter(b => b.locked).length;
-    const icedCount = levelData.blocks.filter(b => b.iceCount && b.iceCount > 0).length;
-    const mirrorCount = levelData.blocks.filter(b => b.mirror === true).length;
+    const lockedCount = sanitizedBlocks.filter(b => b.locked).length;
+    const icedCount = sanitizedBlocks.filter(b => b.iceCount && b.iceCount > 0).length;
+    const mirrorCount = sanitizedBlocks.filter(b => b.mirror === true).length;
 
     const metrics: LevelMetrics = {
-      cellCount: levelData.blocks.length,
+      cellCount: sanitizedBlocks.length,
       holeCount: 0,
       lockedCount,
       icedCount,
@@ -436,7 +437,7 @@ export function SquareBlockLevelCollection({
       levelNumber,
       rows: levelData.rows,
       cols: levelData.cols,
-      blocks: levelData.blocks,
+      blocks: sanitizedBlocks,
       gameMode: 'classic',
       metrics,
       createdAt: Date.now(),

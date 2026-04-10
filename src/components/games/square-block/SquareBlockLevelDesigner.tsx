@@ -33,7 +33,12 @@ import {
   getMinBlocksAhead,
 } from '@/lib/squareGrid';
 import { Settings } from 'lucide-react';
-import { downloadLevelAsJSON, normalizeSquareBlocks, parseAndImportLevel } from '@/lib/squareBlockExport';
+import {
+  downloadLevelAsJSON,
+  parseAndImportLevel,
+  sanitizeSquareBlockForDesigner,
+  sanitizeSquareBlocksForDesigner,
+} from '@/lib/squareBlockExport';
 import { DeadlockInfo, StuckReason, RootCauseType } from '@/lib/useSquareBlockGame';
 import {
   FIXED_CELL_SIZE,
@@ -64,6 +69,14 @@ export function SquareBlockLevelDesigner({
   collections,
   activeCollectionId,
 }: SquareBlockLevelDesignerProps) {
+  const applyDesignerBlockChange = useCallback(
+    (block: SquareBlock, overrides: Partial<SquareBlock>): SquareBlock => ({
+      ...sanitizeSquareBlockForDesigner(block),
+      ...overrides,
+    }),
+    []
+  );
+
   // Grid configuration
   const [rows, setRows] = useState(5);
   const [cols, setCols] = useState(5);
@@ -105,7 +118,7 @@ export function SquareBlockLevelDesigner({
 
       // Convert blocks array to Map
       const blockMap = new Map<string, SquareBlock>();
-      for (const block of normalizeSquareBlocks(editingLevel.blocks)) {
+      for (const block of sanitizeSquareBlocksForDesigner(editingLevel.blocks)) {
         const key = gridKey(block.coord);
         blockMap.set(key, block);
       }
@@ -549,12 +562,13 @@ export function SquareBlockLevelDesigner({
         const randomDir = otherDirs[Math.floor(Math.random() * otherDirs.length)];
         const originalDir = block.direction;
 
-        newBlocks.set(key, { ...block, direction: randomDir });
+        const sanitizedBlock = sanitizeSquareBlockForDesigner(block);
+        newBlocks.set(key, { ...sanitizedBlock, direction: randomDir });
 
         if (analyzerQuickSolve(newBlocks, holes, rows, cols).solvable) {
           flipped++;
         } else {
-          newBlocks.set(key, { ...block, direction: originalDir });
+          newBlocks.set(key, { ...sanitizedBlock, direction: originalDir });
         }
       }
 
@@ -575,13 +589,14 @@ export function SquareBlockLevelDesigner({
         if (block.locked) continue;
 
         // Try adding lock
-        newBlocks.set(key, { ...block, locked: true });
+        const sanitizedBlock = sanitizeSquareBlockForDesigner(block);
+        newBlocks.set(key, { ...sanitizedBlock, locked: true });
 
         if (analyzerQuickSolve(newBlocks, holes, rows, cols).solvable) {
           locked++;
         } else {
           // Revert if not solvable
-          newBlocks.set(key, { ...block, locked: undefined });
+          newBlocks.set(key, { ...sanitizedBlock, locked: undefined });
         }
       }
 
@@ -613,8 +628,8 @@ export function SquareBlockLevelDesigner({
         for (const newDir of hardDirs) {
           if (newDir === currentDir) continue;
 
-          const originalBlock = { ...block };
-          newBlocks.set(key, { ...block, direction: newDir });
+          const originalBlock = sanitizeSquareBlockForDesigner(block);
+          newBlocks.set(key, { ...originalBlock, direction: newDir });
 
           if (analyzerQuickSolve(newBlocks, holes, rows, cols).solvable) {
             setBlocks(newBlocks);
@@ -641,8 +656,8 @@ export function SquareBlockLevelDesigner({
       shuffleArray(normalBlocks);
 
       for (const [key, block] of normalBlocks) {
-        const originalBlock = { ...block };
-        newBlocks.set(key, { ...block, locked: true });
+        const originalBlock = sanitizeSquareBlockForDesigner(block);
+        newBlocks.set(key, { ...originalBlock, locked: true });
 
         if (analyzerQuickSolve(newBlocks, holes, rows, cols).solvable) {
           setBlocks(newBlocks);
@@ -667,8 +682,8 @@ export function SquareBlockLevelDesigner({
 
       for (const [key, block] of nonIcedBlocks) {
         const iceCount = Math.floor(Math.random() * 5) + 3; // 3-7
-        const originalBlock = { ...block };
-        newBlocks.set(key, { ...block, iceCount });
+        const originalBlock = sanitizeSquareBlockForDesigner(block);
+        newBlocks.set(key, { ...originalBlock, iceCount });
 
         if (analyzerQuickSolve(newBlocks, holes, rows, cols).solvable) {
           setBlocks(newBlocks);
@@ -692,8 +707,8 @@ export function SquareBlockLevelDesigner({
       shuffleArray(nonMirrorBlocks);
 
       for (const [key, block] of nonMirrorBlocks) {
-        const originalBlock = { ...block };
-        newBlocks.set(key, { ...block, mirror: true });
+        const originalBlock = sanitizeSquareBlockForDesigner(block);
+        newBlocks.set(key, { ...originalBlock, mirror: true });
 
         if (analyzerQuickSolve(newBlocks, holes, rows, cols).solvable) {
           setBlocks(newBlocks);
@@ -743,8 +758,7 @@ export function SquareBlockLevelDesigner({
       shuffleArray(mirrorBlocks);
 
       for (const [key, block] of mirrorBlocks) {
-        const { mirror: _, ...blockWithoutMirror } = block;
-        newBlocks.set(key, blockWithoutMirror);
+        newBlocks.set(key, applyDesignerBlockChange(block, { mirror: undefined }));
 
         const newAnalysis = analyzePuzzle(newBlocks, holes, rows, cols);
         const newBreakdown = newAnalysis.solvable ? calculateDifficultyScore(newAnalysis) : null;
@@ -765,8 +779,7 @@ export function SquareBlockLevelDesigner({
       shuffleArray(icedBlocks);
 
       for (const [key, block] of icedBlocks) {
-        const { iceCount: _, ...blockWithoutIce } = block;
-        newBlocks.set(key, blockWithoutIce);
+        newBlocks.set(key, applyDesignerBlockChange(block, { iceCount: undefined }));
 
         const newAnalysis = analyzePuzzle(newBlocks, holes, rows, cols);
         const newBreakdown = newAnalysis.solvable ? calculateDifficultyScore(newAnalysis) : null;
@@ -787,8 +800,7 @@ export function SquareBlockLevelDesigner({
       shuffleArray(lockedBlocks);
 
       for (const [key, block] of lockedBlocks) {
-        const { locked: _, ...blockWithoutLocked } = block;
-        newBlocks.set(key, blockWithoutLocked);
+        newBlocks.set(key, applyDesignerBlockChange(block, { locked: undefined }));
 
         const newAnalysis = analyzePuzzle(newBlocks, holes, rows, cols);
         const newBreakdown = newAnalysis.solvable ? calculateDifficultyScore(newAnalysis) : null;
@@ -820,7 +832,7 @@ export function SquareBlockLevelDesigner({
         for (const dir of allDirections) {
           if (dir === block.direction) continue;
 
-          const modifiedBlock = { ...block, direction: dir as BlockDirection };
+          const modifiedBlock = applyDesignerBlockChange(block, { direction: dir as BlockDirection });
           newBlocks.set(key, modifiedBlock);
 
           // Check if now clearable AND puzzle still solvable
@@ -855,7 +867,8 @@ export function SquareBlockLevelDesigner({
         for (const newDir of easyDirs) {
           if (newDir === currentDir) continue;
 
-          newBlocks.set(key, { ...block, direction: newDir });
+          const originalBlock = sanitizeSquareBlockForDesigner(block);
+          newBlocks.set(key, { ...originalBlock, direction: newDir });
 
           if (analyzerQuickSolve(newBlocks, holes, rows, cols).solvable) {
             const newAnalysis = analyzePuzzle(newBlocks, holes, rows, cols);
@@ -875,7 +888,7 @@ export function SquareBlockLevelDesigner({
           }
 
           // Revert if didn't help
-          newBlocks.set(key, block);
+          newBlocks.set(key, originalBlock);
         }
       }
 
@@ -889,7 +902,7 @@ export function SquareBlockLevelDesigner({
     } finally {
       setIsAdjusting(false);
     }
-  }, [blocks, holes, rows, cols, difficultyBreakdown, getDirectionPreference, canClearBlock]);
+  }, [blocks, holes, rows, cols, difficultyBreakdown, getDirectionPreference, canClearBlock, applyDesignerBlockChange]);
 
   // Computed values for difficulty adjustment button states
   const canIncreaseDifficulty = useMemo(() => {
@@ -937,17 +950,13 @@ export function SquareBlockLevelDesigner({
       } else {
         // Different settings → update block with current tool settings
         const newBlocks = new Map(blocks);
-        newBlocks.set(key, {
-          ...existingBlock,
+        newBlocks.set(key, applyDesignerBlockChange(existingBlock, {
           direction: selectedDirection,
           color: selectedColor,
           locked: newLocked,
           iceCount: newIceCount,
           mirror: newMirror,
-          mechanic: undefined,
-          mechanicExtras: undefined,
-          unlockAfterMoves: undefined,
-        });
+        }));
         setBlocks(newBlocks);
       }
     } else if (!holes.has(key)) {
@@ -988,7 +997,7 @@ export function SquareBlockLevelDesigner({
       cols,
       difficulty: 'medium',
       gameMode: 'classic',
-      blocks: Array.from(blocks.values()),
+      blocks: sanitizeSquareBlocksForDesigner(Array.from(blocks.values())),
       holes: holeCoords.length > 0 ? holeCoords : undefined,
     };
     onPlayLevel(level);
@@ -1001,7 +1010,7 @@ export function SquareBlockLevelDesigner({
     const levelData = {
       rows,
       cols,
-      blocks: Array.from(blocks.values()),
+      blocks: sanitizeSquareBlocksForDesigner(Array.from(blocks.values())),
     };
 
     const filename = `grid_Level${levelNumber}_1.json`;
@@ -1027,7 +1036,7 @@ export function SquareBlockLevelDesigner({
 
             // Convert blocks array to Map
             const newBlocks = new Map<string, SquareBlock>();
-            for (const block of imported.blocks) {
+            for (const block of sanitizeSquareBlocksForDesigner(imported.blocks)) {
               const key = gridKey(block.coord);
               newBlocks.set(key, block);
             }
@@ -1060,8 +1069,9 @@ export function SquareBlockLevelDesigner({
           const content = await file.text();
           const imported = parseAndImportLevel(content);
           if (imported) {
+            const sanitizedBlocks = sanitizeSquareBlocksForDesigner(imported.blocks);
             const blockMap = new Map<string, SquareBlock>();
-            for (const block of imported.blocks) {
+            for (const block of sanitizedBlocks) {
               blockMap.set(gridKey(block.coord), block);
             }
             const result = analyzerQuickSolve(blockMap, new Set(), imported.rows, imported.cols);
@@ -1078,8 +1088,8 @@ export function SquareBlockLevelDesigner({
             newStaged.push({
               id: `staged-${Date.now()}-${i}`,
               filename: file.name,
-              levelData: imported,
-              blockCount: imported.blocks.length,
+              levelData: { ...imported, blocks: sanitizedBlocks },
+              blockCount: sanitizedBlocks.length,
               solvable: result.solvable,
               difficultyScore,
               difficultyTier,
@@ -1129,20 +1139,21 @@ export function SquareBlockLevelDesigner({
       if (fileMatch) {
         currentLevelNum = parseInt(fileMatch[1], 10);
       }
+      const sanitizedBlocks = sanitizeSquareBlocksForDesigner(staged.levelData.blocks);
       const blockMap = new Map<string, SquareBlock>();
-      for (const block of staged.levelData.blocks) {
+      for (const block of sanitizedBlocks) {
         blockMap.set(gridKey(block.coord), block);
       }
       const analysis = analyzePuzzle(blockMap, new Set(), staged.levelData.rows, staged.levelData.cols);
       const breakdown = analysis.solvable ? calculateDifficultyScore(analysis) : null;
       const sawtoothPosition = getSawtoothPosition(currentLevelNum);
       const flowZone = breakdown ? calculateFlowZone(breakdown.tier, currentLevelNum) : 'flow';
-      const lockedCount = staged.levelData.blocks.filter(b => b.locked).length;
-      const icedCount = staged.levelData.blocks.filter(b => b.iceCount && b.iceCount > 0).length;
-      const mirrorCount = staged.levelData.blocks.filter(b => b.mirror).length;
+      const lockedCount = sanitizedBlocks.filter(b => b.locked).length;
+      const icedCount = sanitizedBlocks.filter(b => b.iceCount && b.iceCount > 0).length;
+      const mirrorCount = sanitizedBlocks.filter(b => b.mirror).length;
 
       const metrics: LevelMetrics = {
-        cellCount: staged.levelData.blocks.length,
+        cellCount: sanitizedBlocks.length,
         holeCount: 0,
         lockedCount,
         icedCount,
@@ -1166,7 +1177,7 @@ export function SquareBlockLevelDesigner({
         levelNumber: currentLevelNum,
         rows: staged.levelData.rows,
         cols: staged.levelData.cols,
-        blocks: staged.levelData.blocks,
+        blocks: sanitizedBlocks,
         gameMode: 'classic',
         metrics,
         createdAt: Date.now(),
@@ -1193,12 +1204,13 @@ export function SquareBlockLevelDesigner({
 
     const sawtoothPosition = getSawtoothPosition(levelNumber);
     const flowZone = calculateFlowZone(difficultyBreakdown.tier, levelNumber);
-    const lockedCount = Array.from(blocks.values()).filter(b => b.locked).length;
-    const icedCount = Array.from(blocks.values()).filter(b => b.iceCount && b.iceCount > 0).length;
-    const mirrorCount = Array.from(blocks.values()).filter(b => b.mirror).length;
+    const sanitizedBlocks = sanitizeSquareBlocksForDesigner(Array.from(blocks.values()));
+    const lockedCount = sanitizedBlocks.filter(b => b.locked).length;
+    const icedCount = sanitizedBlocks.filter(b => b.iceCount && b.iceCount > 0).length;
+    const mirrorCount = sanitizedBlocks.filter(b => b.mirror).length;
 
     const metrics: LevelMetrics = {
-      cellCount: blocks.size,
+      cellCount: sanitizedBlocks.length,
       holeCount: holes.size,
       lockedCount,
       icedCount,
@@ -1222,7 +1234,7 @@ export function SquareBlockLevelDesigner({
       levelNumber,
       rows,
       cols,
-      blocks: Array.from(blocks.values()),
+      blocks: sanitizedBlocks,
       holes: holeCoords.length > 0 ? holeCoords : undefined,
       gameMode: 'classic',
       metrics,
@@ -1271,7 +1283,7 @@ export function SquareBlockLevelDesigner({
       const newCoord = { row: block.coord.row + shiftRow, col: block.coord.col + shiftCol };
       if (isInBounds(newCoord, newRows, newCols)) {
         const newKey = gridKey(newCoord);
-        newBlocks.set(newKey, { ...block, coord: newCoord });
+        newBlocks.set(newKey, { ...sanitizeSquareBlockForDesigner(block), coord: newCoord });
       }
     });
     setBlocks(newBlocks);
