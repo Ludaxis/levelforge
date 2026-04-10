@@ -134,14 +134,26 @@ export function useLevelCollection() {
 
   // Multiple collections support
   const multiCollections = useMultipleCollections<DesignedLevel>('square-block', MAX_LEVELS);
+  const {
+    collections,
+    activeCollectionId,
+    activeCollection,
+    createCollection,
+    renameCollection,
+    deleteCollection,
+    setActiveCollection,
+    getLevelsForCollection: getStoredLevelsForCollection,
+    saveLevelsForCollection: saveStoredLevelsForCollection,
+    isLoaded: collectionsLoaded,
+  } = multiCollections;
 
   const getLevelsForCollection = useCallback((id: string) => {
-    return multiCollections.getLevelsForCollection(id).map(sanitizeDesignedLevel);
-  }, [multiCollections]);
+    return getStoredLevelsForCollection(id).map(sanitizeDesignedLevel);
+  }, [getStoredLevelsForCollection]);
 
   const saveLevelsForCollection = useCallback((id: string, levels: DesignedLevel[]) => {
-    multiCollections.saveLevelsForCollection(id, levels.map(sanitizeDesignedLevel));
-  }, [multiCollections]);
+    saveStoredLevelsForCollection(id, levels.map(sanitizeDesignedLevel));
+  }, [saveStoredLevelsForCollection]);
 
   // Add duplicateLevel for backwards compatibility
   const duplicateLevel = useCallback((level: DesignedLevel) => {
@@ -162,16 +174,16 @@ export function useLevelCollection() {
     ...collection,
     duplicateLevel,
     // Multiple collections
-    collections: multiCollections.collections,
-    activeCollectionId: multiCollections.activeCollectionId,
-    activeCollection: multiCollections.activeCollection,
-    createCollection: multiCollections.createCollection,
-    renameCollection: multiCollections.renameCollection,
-    deleteCollection: multiCollections.deleteCollection,
-    setActiveCollection: multiCollections.setActiveCollection,
+    collections,
+    activeCollectionId,
+    activeCollection,
+    createCollection,
+    renameCollection,
+    deleteCollection,
+    setActiveCollection,
     getLevelsForCollection,
     saveLevelsForCollection,
-    collectionsLoaded: multiCollections.isLoaded,
+    collectionsLoaded,
   };
 }
 
