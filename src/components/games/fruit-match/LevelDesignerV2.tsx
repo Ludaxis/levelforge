@@ -19,6 +19,7 @@ import {
 } from '@/types/fruitMatch';
 import {
   calculateLevelMetrics,
+  calculateColorVariantDensity,
   generateSinkStacks,
   getRequiredFruitCounts,
 } from '@/lib/fruitMatchUtils';
@@ -302,6 +303,9 @@ export function LevelDesignerV2({
     const groupCount = groups.length;
     const totalTiles = selectableItems.length;
     const uniqueVariants = new Set(selectableItems.map((s) => `${s.colorType}:${s.variant}`)).size;
+    // Spatial metric: how clustered same-color-different-variant tiles are
+    // in the pixel art. Computed from the current pixel layout + item pool.
+    const colorVariantDensity = calculateColorVariantDensity(pixelCellArray, selectableItems);
     return {
       totalPixels: pixelArray.length,
       uniqueColors,
@@ -311,8 +315,9 @@ export function LevelDesignerV2({
       totalTiles,
       blockingOffset,
       uniqueVariants,
+      colorVariantDensity,
     };
-  }, [pixelArray, launchers, groups.length, selectableItems, maxSelectableItems, blockingOffset]);
+  }, [pixelArray, pixelCellArray, launchers, groups.length, selectableItems, maxSelectableItems, blockingOffset]);
 
   // Studio difficulty result
   const difficultyResult = useMemo((): StudioDifficultyResult | null => {
@@ -1276,6 +1281,8 @@ export function LevelDesignerV2({
       waitingStandSlots,
       activeLauncherCount,
       moveLimit,
+      difficultyScore: difficultyResult?.score,
+      colorVariantDensity: studioDifficultyParams?.colorVariantDensity,
     };
 
     const result = exportStudioLevel(exportData);
@@ -1286,7 +1293,7 @@ export function LevelDesignerV2({
     a.download = `${fileName.trim() || levelId}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [palette, levelId, levelNumber, fileName, difficultyResult, artWidth, artHeight, pixelArray, itemsWithLayers, itemDisplayOrder, launchers, groups, maxSelectableItems, seed, blockingOffset, waitingStandSlots, activeLauncherCount, moveLimit]);
+  }, [palette, levelId, levelNumber, fileName, difficultyResult, studioDifficultyParams, artWidth, artHeight, pixelArray, itemsWithLayers, itemDisplayOrder, launchers, groups, maxSelectableItems, seed, blockingOffset, waitingStandSlots, activeLauncherCount, moveLimit]);
 
   const handleExportJSON = useCallback(() => {
     if (existingLevelIds.includes(levelId) && !editingLevel) {

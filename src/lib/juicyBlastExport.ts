@@ -672,6 +672,12 @@ export interface StudioExportLevel {
   WaitingStandSlots?: number;
   ActiveLauncherCount?: number;
   MoveLimit?: number;
+  /** Computed difficulty score 0-100 — the composite tier from LevelForge. */
+  DifficultyScore?: number;
+  /** Spatial clustering metric (0.0-1.0) for same-color-different-variant
+   *  tiles in the pixel art. Computed by LevelForge. Games pass this to
+   *  Cadence BeginSession() as a design parameter. */
+  ColorVariantDensity?: number;
   /** Palette enables full round-trip re-import via the studio format path. */
   Palette?: string[];
   Artwork: {
@@ -723,6 +729,10 @@ export interface StudioExportData {
   waitingStandSlots?: number;
   activeLauncherCount?: number;
   moveLimit?: number;
+  /** Computed composite difficulty score (0-100) from LevelForge. */
+  difficultyScore?: number;
+  /** Spatial clustering metric (0.0-1.0) computed from the pixel art layout. */
+  colorVariantDensity?: number;
 }
 
 /**
@@ -796,6 +806,8 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
     WaitingStandSlots: data.waitingStandSlots,
     ActiveLauncherCount: data.activeLauncherCount,
     MoveLimit: data.moveLimit,
+    DifficultyScore: data.difficultyScore,
+    ColorVariantDensity: data.colorVariantDensity,
     Palette: data.palette,
     Artwork: {
       Width: data.width,

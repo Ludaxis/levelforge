@@ -14,7 +14,7 @@ import {
   FruitType,
   DifficultyTier,
 } from '@/types/fruitMatch';
-import { pixelKey, migrateFruitType } from '@/lib/fruitMatchUtils';
+import { pixelKey, migrateFruitType, calculateColorVariantDensity } from '@/lib/fruitMatchUtils';
 import { calculateStudioDifficulty } from '@/lib/studioGameLogic';
 import {
   exportToReferenceFormat,
@@ -348,6 +348,8 @@ export function FruitMatchLevelCollection({
         activeLauncherCount: level.studioActiveLauncherCount,
         seed: level.studioSeed,
         moveLimit: level.studioMoveLimit,
+        difficultyScore: level.metrics.difficultyScore,
+        colorVariantDensity: calculateColorVariantDensity(level.pixelArt, level.studioSelectableItems),
       });
     }
 

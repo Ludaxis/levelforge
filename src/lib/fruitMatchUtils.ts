@@ -17,6 +17,7 @@ import {
   calculateStudioDifficulty,
 } from '@/lib/useStudioGame';
 import type { StudioDifficultyParams } from '@/lib/useStudioGame';
+import { FRUIT_TO_COLOR_TYPE } from '@/lib/juicyBlastExport';
 
 // ============================================================================
 // Fruit Type Migration (for backward compatibility with old type names)
@@ -592,6 +593,108 @@ export function calculateLevelMetrics(
     difficultyScore: score,
     difficulty: tier,
   };
+}
+
+// ============================================================================
+// Color Variant Density
+// ============================================================================
+
+/**
+ * Calculates how spatially clustered same-color-different-variant tiles are
+ * in the pixel art. Returns a 0–1 density score.
+ *
+ * The metric answers: "When the player sees two adjacent same-color pixels,
+ * how often do they belong to a color that has multiple visual variants in
+ * the item pool?" High density = player frequently has to distinguish
+ * between e.g. Blueberry / Fig / Grape within the same blue color.
+ *
+ * Algorithm:
+ *   1. Build a per-color variant count from the item pool
+ *   2. For each pixel, count its 4-neighbor same-color adjacencies
+ *   3. Of those, count how many belong to multi-variant colors
+ *   4. density = multiVariantAdjacencies / totalSameColorAdjacencies
+ *
+ * Returns 0 when:
+ *   - Pixel art is empty
+ *   - No colors have multiple variants
+ *   - Same-color pixels are scattered (no adjacencies)
+ *
+ * Returns 1 when:
+ *   - Every same-color adjacency belongs to a multi-variant color
+ *
+ * This is a spatial metric — two levels with the same item pool but
+ * different artwork layouts will get different scores. Levels where
+ * multi-variant colors form dense clusters score higher than levels
+ * where those colors are scattered.
+ */
+export function calculateColorVariantDensity(
+  pixelArt: PixelCell[],
+  selectableItems: Array<{ colorType: number; variant: number }>,
+): number {
+  if (pixelArt.length === 0 || selectableItems.length === 0) return 0;
+
+  // Step 1: Count unique variants per colorType in the item pool
+  const variantsPerColor = new Map<number, Set<number>>();
+  for (const item of selectableItems) {
+    if (!variantsPerColor.has(item.colorType)) {
+      variantsPerColor.set(item.colorType, new Set());
+    }
+    variantsPerColor.get(item.colorType)!.add(item.variant);
+  }
+
+  // Early exit: if no color has multiple variants, density is 0
+  const hasMultiVariantColors = Array.from(variantsPerColor.values()).some((s) => s.size > 1);
+  if (!hasMultiVariantColors) return 0;
+
+  // Step 2: Build a spatial grid for fast neighbor lookup.
+  // Key: "row,col" → colorType (normalized to item pool color space)
+  const grid = new Map<string, number>();
+  for (const pixel of pixelArt) {
+    // PixelCell may have an explicit colorType (from imported artwork) or
+    // only a fruitType. Normalize to the item-pool color space.
+    const colorType = pixel.colorType ?? FRUIT_TO_COLOR_TYPE[pixel.fruitType];
+    if (colorType === undefined) continue;
+    grid.set(`${pixel.row},${pixel.col}`, colorType);
+  }
+
+  // Step 3: Walk the grid counting 4-neighbor same-color adjacencies.
+  // We count each edge once by only checking right + down neighbors
+  // (prevents double-counting since each adjacency has two endpoints).
+  let totalSameColorAdjacencies = 0;
+  let multiVariantAdjacencies = 0;
+
+  for (const pixel of pixelArt) {
+    const colorType = pixel.colorType ?? FRUIT_TO_COLOR_TYPE[pixel.fruitType];
+    if (colorType === undefined) continue;
+
+    // Check right and down only (each edge counted once)
+    const neighborsToCheck = [
+      { row: pixel.row, col: pixel.col + 1 }, // right
+      { row: pixel.row + 1, col: pixel.col }, // down
+    ];
+
+    for (const n of neighborsToCheck) {
+      const neighborColor = grid.get(`${n.row},${n.col}`);
+      if (neighborColor === undefined) continue;
+      if (neighborColor !== colorType) continue;
+
+      // Same-color adjacency found
+      totalSameColorAdjacencies++;
+
+      // Does this color have multiple variants in the item pool?
+      const variantSet = variantsPerColor.get(colorType);
+      if (variantSet && variantSet.size > 1) {
+        // Weight by (variants - 1) / 2 so 2 variants = 0.5 intensity,
+        // 3 variants = 1.0 intensity. This reflects that 3 lookalikes
+        // are more confusing than 2.
+        const intensity = Math.min(1, (variantSet.size - 1) / 2);
+        multiVariantAdjacencies += intensity;
+      }
+    }
+  }
+
+  if (totalSameColorAdjacencies === 0) return 0;
+  return Math.min(1, multiVariantAdjacencies / totalSameColorAdjacencies);
 }
 
 // ============================================================================

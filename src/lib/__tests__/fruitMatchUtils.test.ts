@@ -19,6 +19,7 @@ import {
   removeMatchingTriplet,
   checkGameOver,
   calculateLevelMetrics,
+  calculateColorVariantDensity,
   emojiPatternToPixelArt,
 } from '../fruitMatchUtils';
 import {
@@ -554,6 +555,120 @@ describe('Level Metrics', () => {
 
       expect(metrics.fruitDistribution.apple).toBe(2);
       expect(metrics.fruitDistribution.orange).toBe(1);
+    });
+  });
+
+  describe('calculateColorVariantDensity', () => {
+    it('returns 0 for empty pixel art', () => {
+      expect(calculateColorVariantDensity([], [])).toBe(0);
+    });
+
+    it('returns 0 when no items in pool', () => {
+      const pixelArt = createTestPixelArt([['blueberry', 'blueberry']]);
+      expect(calculateColorVariantDensity(pixelArt, [])).toBe(0);
+    });
+
+    it('returns 0 when every color has only a single variant', () => {
+      // Two adjacent blueberries, but only variant 0 exists in the item pool
+      const pixelArt = createTestPixelArt([['blueberry', 'blueberry']]);
+      const items = [{ colorType: 0, variant: 0 }]; // blueberry = colorType 0
+      expect(calculateColorVariantDensity(pixelArt, items)).toBe(0);
+    });
+
+    it('returns 0 when same-color pixels are scattered (no adjacencies)', () => {
+      // Blueberries are far apart — no adjacent same-color pairs
+      const pixelArt = createTestPixelArt([
+        ['blueberry', 'orange', 'blueberry'],
+      ]);
+      const items = [
+        { colorType: 0, variant: 0 },
+        { colorType: 0, variant: 1 },
+        { colorType: 0, variant: 2 },
+      ];
+      expect(calculateColorVariantDensity(pixelArt, items)).toBe(0);
+    });
+
+    it('returns high density when multi-variant colors cluster together', () => {
+      // A cluster of 4 blueberries where blueberry has 3 variants
+      const pixelArt = createTestPixelArt([
+        ['blueberry', 'blueberry'],
+        ['blueberry', 'blueberry'],
+      ]);
+      const items = [
+        { colorType: 0, variant: 0 },
+        { colorType: 0, variant: 1 },
+        { colorType: 0, variant: 2 },
+      ];
+      // 4 adjacencies (2 horizontal + 2 vertical), all in multi-variant color
+      // with 3 variants → intensity 1.0 per adjacency → density = 1.0
+      const density = calculateColorVariantDensity(pixelArt, items);
+      expect(density).toBe(1);
+    });
+
+    it('returns medium density when only some adjacencies are multi-variant', () => {
+      // Mix: blueberries cluster (multi-variant), oranges cluster (single-variant)
+      const pixelArt = createTestPixelArt([
+        ['blueberry', 'blueberry', 'orange', 'orange'],
+      ]);
+      const items = [
+        { colorType: 0, variant: 0 },
+        { colorType: 0, variant: 1 }, // blueberry has 2 variants
+        { colorType: 1, variant: 0 }, // orange has 1 variant
+      ];
+      // Same-color adjacencies: 1 blueberry pair + 1 orange pair = 2 total
+      // Multi-variant adjacencies: 1 blueberry pair (2 variants, intensity 0.5)
+      // density = 0.5 / 2 = 0.25
+      const density = calculateColorVariantDensity(pixelArt, items);
+      expect(density).toBeCloseTo(0.25, 2);
+    });
+
+    it('weights 3 variants higher than 2 variants', () => {
+      // Same geometry, different variant count → different density
+      const pixelArt = createTestPixelArt([['blueberry', 'blueberry']]);
+
+      const twoVariants = [
+        { colorType: 0, variant: 0 },
+        { colorType: 0, variant: 1 },
+      ];
+      const threeVariants = [
+        { colorType: 0, variant: 0 },
+        { colorType: 0, variant: 1 },
+        { colorType: 0, variant: 2 },
+      ];
+
+      const density2 = calculateColorVariantDensity(pixelArt, twoVariants);
+      const density3 = calculateColorVariantDensity(pixelArt, threeVariants);
+
+      // 2 variants → intensity 0.5, 3 variants → intensity 1.0
+      expect(density2).toBeCloseTo(0.5, 2);
+      expect(density3).toBe(1);
+      expect(density3).toBeGreaterThan(density2);
+    });
+
+    it('only counts same-color adjacencies (not cross-color)', () => {
+      // Blueberry and orange adjacent, but they're different colors
+      const pixelArt = createTestPixelArt([['blueberry', 'orange']]);
+      const items = [
+        { colorType: 0, variant: 0 },
+        { colorType: 0, variant: 1 },
+        { colorType: 1, variant: 0 },
+      ];
+      // No same-color adjacencies → density = 0
+      expect(calculateColorVariantDensity(pixelArt, items)).toBe(0);
+    });
+
+    it('clamps result to [0, 1]', () => {
+      const pixelArt = createTestPixelArt([
+        ['blueberry', 'blueberry', 'blueberry'],
+      ]);
+      const items = [
+        { colorType: 0, variant: 0 },
+        { colorType: 0, variant: 1 },
+        { colorType: 0, variant: 2 },
+      ];
+      const density = calculateColorVariantDensity(pixelArt, items);
+      expect(density).toBeGreaterThanOrEqual(0);
+      expect(density).toBeLessThanOrEqual(1);
     });
   });
 });

@@ -16,6 +16,11 @@ export interface StudioDifficultyParams {
   /** Total unique (colorType, variant) pairs in the item pool.
    *  When omitted, variant complexity is assumed to be 0 (1 variant per color). */
   uniqueVariants?: number;
+  /** Spatial clustering of same-color-different-variant tiles in the pixel art.
+   *  0 = variants are scattered / no clustering. 1 = same-color variants are
+   *  densely clustered together, creating maximum visual confusion.
+   *  Computed from the pixel art layout via calculateColorVariantDensity(). */
+  colorVariantDensity?: number;
   /** @deprecated Legacy field preserved for compatibility with older saved levels/tests. */
   mismatchDepth?: number;
 }
@@ -72,6 +77,7 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
     maxSelectableItems,
     totalTiles,
     uniqueVariants,
+    colorVariantDensity: colorVariantDensityInput,
   } = params;
   const blockingOffset = resolveBlockingOffset(params);
 
@@ -99,7 +105,7 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
   // Total launchers the player must complete
   const launcherSequence = clamp01((launcherCount - 4) / 12);
 
-  // ── 6. Variant Complexity (0.08) ────────────────────────────────────
+  // ── 6. Variant Complexity (0.07) ────────────────────────────────────
   // How many different variants per color are used?
   // 1 variant/color = 0 (match by color only), 3 variants/color = 1 (must
   // distinguish between e.g. Blueberry, Fig, and Grape within the blue color).
@@ -108,13 +114,21 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
     : 1;
   const variantComplexity = clamp01((avgVariantsPerColor - 1) / 2);
 
+  // ── 7. Color Variant Density (0.07) ─────────────────────────────────
+  // Spatial clustering of same-color-different-variant tiles in the pixel art.
+  // High density = same-color variants are visually adjacent, causing
+  // "which blueberry is which?" confusion. Computed separately via
+  // calculateColorVariantDensity() in fruitMatchUtils.ts.
+  const colorVariantDensity = clamp01(colorVariantDensityInput ?? 0);
+
   const raw =
-    blockingFactor * 0.40 +
+    blockingFactor * 0.38 +
     colorVariety * 0.08 +
-    surfaceSize * 0.22 +
-    hiddenRatio * 0.13 +
-    launcherSequence * 0.09 +
-    variantComplexity * 0.08;
+    surfaceSize * 0.21 +
+    hiddenRatio * 0.12 +
+    launcherSequence * 0.07 +
+    variantComplexity * 0.07 +
+    colorVariantDensity * 0.07;
 
   const score = Math.round(raw * 100);
 
@@ -145,8 +159,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Blocking',
       description: 'How far the matching fruits for the active blenders are stretched through the unlock window. Higher = more non-matching fruits must be processed first.',
       score: blockingFactor,
-      weight: 0.40,
-      contribution: blockingFactor * 0.40,
+      weight: 0.38,
+      contribution: blockingFactor * 0.38,
       explanation: blockingOffset === 0
         ? `Unlock distance ${unlockDistance} items — matching fruits stay within Layer A + Layer B, so the active blenders can be completed without digging into Layer C.`
         : blockingOffset <= 3
@@ -161,8 +175,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Surface Size',
       description: 'Number of fruits visible on top (Layer A) — how many choices the player has per move',
       score: surfaceSize,
-      weight: 0.22,
-      contribution: surfaceSize * 0.22,
+      weight: 0.21,
+      contribution: surfaceSize * 0.21,
       explanation: maxSelectableItems >= 10
         ? `${maxSelectableItems} fruits on surface — player has many options to choose from.`
         : maxSelectableItems >= 6
@@ -175,8 +189,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Hidden Items',
       description: 'Fruits below the surface: Layer B (dimmed, visible as hint) and Layer C (fully hidden)',
       score: hiddenRatio,
-      weight: 0.13,
-      contribution: hiddenRatio * 0.13,
+      weight: 0.12,
+      contribution: hiddenRatio * 0.12,
       explanation: layerCCount === 0
         ? `${layerBCount} fruits in Layer B (visible as hints), 0 in Layer C. Player can see everything and plan ahead.`
         : layerCCount <= 5
@@ -203,8 +217,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Blender Count',
       description: 'Total blenders to complete — determines level length and sustained concentration',
       score: launcherSequence,
-      weight: 0.09,
-      contribution: launcherSequence * 0.09,
+      weight: 0.07,
+      contribution: launcherSequence * 0.07,
       explanation: launcherCount <= 6
         ? `${launcherCount} blenders — short level, quick completion.`
         : launcherCount <= 12
@@ -217,14 +231,30 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Variant Complexity',
       description: 'How many visual variants per color are used. More variants means the player must distinguish between similar-looking fruits of the same color (e.g. Blueberry vs Fig vs Grape).',
       score: variantComplexity,
-      weight: 0.08,
-      contribution: variantComplexity * 0.08,
+      weight: 0.07,
+      contribution: variantComplexity * 0.07,
       explanation: avgVariantsPerColor <= 1
         ? `${usedVariants} variant${usedVariants === 1 ? '' : 's'} across ${uniqueColors} colors (1 per color) — matching by color alone is enough.`
         : avgVariantsPerColor <= 2
         ? `${usedVariants} variants across ${uniqueColors} colors (~${avgVariantsPerColor.toFixed(1)} per color) — player must sometimes distinguish between variants of the same color.`
         : `${usedVariants} variants across ${uniqueColors} colors (~${avgVariantsPerColor.toFixed(1)} per color) — maximum variant confusion. Every color has multiple look-alikes.`,
       impact: impactOf(variantComplexity),
+    },
+    {
+      id: 'colorVariantDensity',
+      name: 'Variant Density',
+      description: 'Spatial clustering of same-color-different-variant tiles in the pixel art. High density means the player sees e.g. Blueberry next to Fig next to Grape — all blue but visually distinct — creating cognitive load.',
+      score: colorVariantDensity,
+      weight: 0.07,
+      contribution: colorVariantDensity * 0.07,
+      explanation: colorVariantDensity < 0.15
+        ? `Same-color variants are scattered across the artwork — no significant visual confusion.`
+        : colorVariantDensity < 0.4
+        ? `Some same-color variants sit next to each other — moderate confusion where ${Math.round(colorVariantDensity * 100)}% of same-color neighbors use different variants.`
+        : colorVariantDensity < 0.7
+        ? `Same-color variants frequently cluster together (${Math.round(colorVariantDensity * 100)}% of same-color neighbors are different variants) — high visual confusion.`
+        : `Dense same-color variant clustering (${Math.round(colorVariantDensity * 100)}% of same-color neighbors are different variants) — maximum cognitive load.`,
+      impact: impactOf(colorVariantDensity),
     },
   ];
 
