@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ZoomIn, ZoomOut, Maximize, Move } from 'lucide-react';
 import { SquareBlockState, SquareBlock, BlockDirection, MAX_MISTAKES } from '@/types/squareBlock';
