@@ -105,20 +105,23 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
   // Total launchers the player must complete
   const launcherSequence = clamp01((launcherCount - 4) / 12);
 
-  // ── 6. Variant Complexity (0.07) ────────────────────────────────────
+  // ── 6. Variant Complexity (0.09) ────────────────────────────────────
   // How many different variants per color are used?
   // 1 variant/color = 0 (match by color only), 3 variants/color = 1 (must
   // distinguish between e.g. Blueberry, Fig, and Grape within the blue color).
+  // Complexity is the prerequisite for confusion — without it, density has
+  // nothing to amplify. Weighted higher than density accordingly.
   const avgVariantsPerColor = (uniqueVariants != null && uniqueColors > 0)
     ? uniqueVariants / uniqueColors
     : 1;
   const variantComplexity = clamp01((avgVariantsPerColor - 1) / 2);
 
-  // ── 7. Color Variant Density (0.07) ─────────────────────────────────
+  // ── 7. Color Variant Density (0.05) ─────────────────────────────────
   // Spatial clustering of same-color-different-variant tiles in the pixel art.
   // High density = same-color variants are visually adjacent, causing
   // "which blueberry is which?" confusion. Computed separately via
   // calculateColorVariantDensity() in fruitMatchUtils.ts.
+  // Amplifies complexity — weighted lower since it has no effect without it.
   const colorVariantDensity = clamp01(colorVariantDensityInput ?? 0);
 
   const raw =
@@ -127,8 +130,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
     surfaceSize * 0.21 +
     hiddenRatio * 0.12 +
     launcherSequence * 0.07 +
-    variantComplexity * 0.07 +
-    colorVariantDensity * 0.07;
+    variantComplexity * 0.09 +
+    colorVariantDensity * 0.05;
 
   const score = Math.round(raw * 100);
 
@@ -231,8 +234,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Variant Complexity',
       description: 'How many visual variants per color are used. More variants means the player must distinguish between similar-looking fruits of the same color (e.g. Blueberry vs Fig vs Grape).',
       score: variantComplexity,
-      weight: 0.07,
-      contribution: variantComplexity * 0.07,
+      weight: 0.09,
+      contribution: variantComplexity * 0.09,
       explanation: avgVariantsPerColor <= 1
         ? `${usedVariants} variant${usedVariants === 1 ? '' : 's'} across ${uniqueColors} colors (1 per color) — matching by color alone is enough.`
         : avgVariantsPerColor <= 2
@@ -245,8 +248,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Variant Density',
       description: 'Spatial clustering of same-color-different-variant tiles in the pixel art. High density means the player sees e.g. Blueberry next to Fig next to Grape — all blue but visually distinct — creating cognitive load.',
       score: colorVariantDensity,
-      weight: 0.07,
-      contribution: colorVariantDensity * 0.07,
+      weight: 0.05,
+      contribution: colorVariantDensity * 0.05,
       explanation: colorVariantDensity < 0.15
         ? `Same-color variants are scattered across the artwork — no significant visual confusion.`
         : colorVariantDensity < 0.4

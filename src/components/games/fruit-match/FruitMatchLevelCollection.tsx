@@ -350,6 +350,12 @@ export function FruitMatchLevelCollection({
         moveLimit: level.studioMoveLimit,
         difficultyScore: level.metrics.difficultyScore,
         colorVariantDensity: calculateColorVariantDensity(level.pixelArt, level.studioSelectableItems),
+        variantComplexity: (() => {
+          const uColors = new Set(level.studioSelectableItems.map((s) => s.colorType)).size;
+          const uVariants = new Set(level.studioSelectableItems.map((s) => `${s.colorType}:${s.variant}`)).size;
+          const avg = uColors > 0 ? uVariants / uColors : 1;
+          return Math.max(0, Math.min(1, (avg - 1) / 2));
+        })(),
       });
     }
 

@@ -678,6 +678,9 @@ export interface StudioExportLevel {
    *  tiles in the pixel art. Computed by LevelForge. Games pass this to
    *  Cadence BeginSession() as a design parameter. */
   ColorVariantDensity?: number;
+  /** Average variants per color, normalized 0.0-1.0. Observational context
+   *  for Cadence — not an adjustable lever. */
+  VariantComplexity?: number;
   /** Palette enables full round-trip re-import via the studio format path. */
   Palette?: string[];
   Artwork: {
@@ -733,6 +736,8 @@ export interface StudioExportData {
   difficultyScore?: number;
   /** Spatial clustering metric (0.0-1.0) computed from the pixel art layout. */
   colorVariantDensity?: number;
+  /** Average variants per color, normalized 0.0-1.0. Observational for Cadence. */
+  variantComplexity?: number;
 }
 
 /**
@@ -808,6 +813,7 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
     MoveLimit: data.moveLimit,
     DifficultyScore: data.difficultyScore,
     ColorVariantDensity: data.colorVariantDensity,
+    VariantComplexity: data.variantComplexity,
     Palette: data.palette,
     Artwork: {
       Width: data.width,

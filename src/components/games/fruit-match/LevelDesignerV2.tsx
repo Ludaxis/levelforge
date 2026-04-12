@@ -1283,6 +1283,7 @@ export function LevelDesignerV2({
       moveLimit,
       difficultyScore: difficultyResult?.score,
       colorVariantDensity: studioDifficultyParams?.colorVariantDensity,
+      variantComplexity: difficultyResult?.breakdown.find((c) => c.id === 'variantComplexity')?.score,
     };
 
     const result = exportStudioLevel(exportData);
