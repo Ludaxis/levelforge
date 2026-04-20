@@ -75,6 +75,10 @@ import { LauncherSection } from './designer/LauncherSection';
 import { GamePreviewCanvas } from './designer/GamePreviewCanvas';
 import { ItemPoolSection } from './designer/ItemPoolSection';
 import { DifficultyAnalysis } from './designer/DifficultyAnalysis';
+import {
+  BulkVariantGenerator,
+  type ResolvedVariant,
+} from './designer/BulkVariantGenerator';
 import { StudioArrangementPreview } from './StudioArrangementPreview';
 
 // ============================================================================
@@ -1306,6 +1310,103 @@ export function LevelDesignerV2({
     doExportJSON();
   }, [levelId, existingLevelIds, editingLevel, doExportJSON]);
 
+  const handleBulkVariantExport = useCallback(
+    (variants: ResolvedVariant[]) => {
+      for (const variant of variants) {
+        const variantLevelId = `Level${levelNumber}_${variant.variantNumber}`;
+        const exportData: StudioExportData = {
+          palette,
+          levelId: variantLevelId,
+          levelIndex: levelNumber,
+          difficulty: difficultyResult?.tier || 'medium',
+          graphicId: `graphic_${artWidth}x${artHeight}`,
+          width: artWidth,
+          height: artHeight,
+          pixels: pixelArray.map((p) => ({
+            row: p.row,
+            col: p.col,
+            colorType: p.colorType,
+            colorGroup: p.colorGroup,
+            colorHex: p.colorHex,
+            group: p.group,
+          })),
+          selectableItems: itemsWithLayers.map((item) => ({
+            colorType: item.colorType,
+            variant: item.variant,
+            layer: item.layer,
+            order: item.order,
+            displayOrder: itemDisplayOrder?.get(item.id),
+          })),
+          requirements: launchers
+            .sort((a, b) => a.order - b.order)
+            .map((l) => ({
+              colorType: l.colorType,
+              value: l.pixelCount,
+              group: l.group,
+            })),
+          launchers: launchers
+            .sort((a, b) => a.order - b.order)
+            .map((l) => ({
+              colorType: l.colorType,
+              pixelCount: l.pixelCount,
+              group: l.group,
+              order: l.order,
+              isLocked: l.isLocked,
+            })),
+          unlockStageData: [{ requiredCompletedGroups: groups.map((g) => g.id) }],
+          maxSelectableItems:
+            variant.values.maxSelectableItems ?? maxSelectableItems,
+          seed,
+          blockingOffset: variant.values.blockingOffset ?? blockingOffset,
+          mismatchDepth:
+            (variant.values.blockingOffset ?? blockingOffset) / 10,
+          waitingStandSlots:
+            variant.values.waitingStandSlots ?? waitingStandSlots,
+          activeLauncherCount:
+            variant.values.activeLauncherCount ?? activeLauncherCount,
+          moveLimit: variant.values.moveLimit ?? moveLimit,
+          difficultyScore: difficultyResult?.score,
+          colorVariantDensity: studioDifficultyParams?.colorVariantDensity,
+          variantComplexity: difficultyResult?.breakdown.find(
+            (c) => c.id === 'variantComplexity'
+          )?.score,
+        };
+
+        const result = exportStudioLevel(exportData);
+        const blob = new Blob([JSON.stringify(result, null, 4)], {
+          type: 'application/json',
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${variantLevelId}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    },
+    [
+      palette,
+      levelNumber,
+      difficultyResult,
+      studioDifficultyParams,
+      artWidth,
+      artHeight,
+      pixelArray,
+      itemsWithLayers,
+      itemDisplayOrder,
+      launchers,
+      groups,
+      maxSelectableItems,
+      seed,
+      blockingOffset,
+      waitingStandSlots,
+      activeLauncherCount,
+      moveLimit,
+    ]
+  );
+
   // ============================================================================
   // Add to Collection
   // ============================================================================
@@ -1758,6 +1859,22 @@ export function LevelDesignerV2({
           colorTypeToHex={colorTypeToHex}
           pinnedItemIds={pinnedItemIds}
           onClearPins={() => setPinnedItemIds(new Set())}
+        />
+      )}
+
+      {/* 8b. Bulk Variant Generator */}
+      {hasData && (
+        <BulkVariantGenerator
+          base={{
+            maxSelectableItems,
+            blockingOffset,
+            activeLauncherCount,
+            waitingStandSlots,
+            moveLimit,
+            maxActiveLaunchers,
+          }}
+          levelNumber={levelNumber}
+          onExport={handleBulkVariantExport}
         />
       )}
 
