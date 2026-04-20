@@ -15,6 +15,7 @@ import {
   Plus,
   Trash2,
   AlertTriangle,
+  Info,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -46,12 +47,24 @@ export interface ResolvedVariant {
   variantNumber: number;
   values: Record<DifficultyElementKey, number | undefined>;
   deltas: Array<{ element: DifficultyElementKey; delta: number }>;
+  /** Cells the auto-clamp touched, for highlighting in the preview. */
+  clampedKeys: Set<DifficultyElementKey>;
 }
 
-export interface VariantViolation {
+export interface VariantAdjustment {
   variantNumber: number;
   element: DifficultyElementKey;
-  resolved: number;
+  /** What the delta math produced before bounds were applied. */
+  requested: number;
+  /** What actually ends up exported. */
+  applied: number;
+  /** User-facing one-line explanation. */
+  reason: string;
+}
+
+export interface VariantError {
+  variantNumber: number;
+  element: DifficultyElementKey;
   reason: string;
 }
 
@@ -109,13 +122,28 @@ function saveRules(rules: VariantRule[]) {
   }
 }
 
+interface ResolveOutput {
+  variants: ResolvedVariant[];
+  adjustments: VariantAdjustment[];
+  errors: VariantError[];
+}
+
 function resolveVariants(
   rules: VariantRule[],
   base: BaseLevelValues
-): ResolvedVariant[] {
+): ResolveOutput {
   const byVariant = new Map<number, ResolvedVariant>();
+  const errors: VariantError[] = [];
+
   for (const rule of rules) {
-    if (!Number.isFinite(rule.variantNumber)) continue;
+    if (!Number.isInteger(rule.variantNumber) || rule.variantNumber < 1) {
+      errors.push({
+        variantNumber: rule.variantNumber,
+        element: rule.element,
+        reason: `Variant number must be a positive integer.`,
+      });
+      continue;
+    }
     let entry = byVariant.get(rule.variantNumber);
     if (!entry) {
       entry = {
@@ -128,69 +156,70 @@ function resolveVariants(
           moveLimit: base.moveLimit,
         },
         deltas: [],
+        clampedKeys: new Set(),
       };
       byVariant.set(rule.variantNumber, entry);
     }
+    const spec = DIFFICULTY_ELEMENTS.find((e) => e.key === rule.element);
+    if (!spec) continue;
     const current = entry.values[rule.element];
-    const baseVal = current ?? 0;
-    entry.values[rule.element] = baseVal + rule.delta;
-    entry.deltas.push({ element: rule.element, delta: rule.delta });
-  }
-  return [...byVariant.values()].sort(
-    (a, b) => a.variantNumber - b.variantNumber
-  );
-}
-
-function validateVariants(
-  resolved: ResolvedVariant[],
-  base: BaseLevelValues
-): VariantViolation[] {
-  const out: VariantViolation[] = [];
-  for (const v of resolved) {
-    if (!Number.isInteger(v.variantNumber) || v.variantNumber < 1) {
-      out.push({
-        variantNumber: v.variantNumber,
-        element: 'maxSelectableItems',
-        resolved: v.variantNumber,
-        reason: `Variant number must be a positive integer.`,
-      });
-      continue;
-    }
-    for (const spec of DIFFICULTY_ELEMENTS) {
-      const value = v.values[spec.key];
-      if (value === undefined) {
-        if (!spec.optional && v.deltas.some((d) => d.element === spec.key)) {
-          out.push({
-            variantNumber: v.variantNumber,
-            element: spec.key,
-            resolved: NaN,
-            reason: `${spec.label} has no base value — cannot apply delta.`,
-          });
-        }
-        continue;
-      }
-      if (value < spec.min) {
-        out.push({
-          variantNumber: v.variantNumber,
-          element: spec.key,
-          resolved: value,
-          reason: `${spec.label} ${value} < min (${spec.min}).`,
+    if (current === undefined) {
+      // Optional field with no base (e.g. moveLimit). Can't apply delta.
+      if (spec.optional) {
+        errors.push({
+          variantNumber: rule.variantNumber,
+          element: rule.element,
+          reason: `${spec.label} is not set on the base level — delta can't be applied. Set a base value or remove this row.`,
         });
       }
+      continue;
+    }
+    entry.values[rule.element] = current + rule.delta;
+    entry.deltas.push({ element: rule.element, delta: rule.delta });
+  }
+
+  const variants = [...byVariant.values()].sort(
+    (a, b) => a.variantNumber - b.variantNumber
+  );
+
+  // Second pass: clamp to bounds and record explanations.
+  const adjustments: VariantAdjustment[] = [];
+  for (const v of variants) {
+    for (const spec of DIFFICULTY_ELEMENTS) {
+      const value = v.values[spec.key];
+      if (value === undefined) continue;
       const dynamicMax =
         spec.key === 'activeLauncherCount' ? base.maxActiveLaunchers : undefined;
       const effectiveMax = dynamicMax ?? spec.max;
-      if (effectiveMax !== undefined && value > effectiveMax) {
-        out.push({
+
+      let clamped = value;
+      let reason: string | null = null;
+
+      if (value < spec.min) {
+        clamped = spec.min;
+        reason = `${spec.label} wanted ${value} but minimum is ${spec.min} — clamped to ${spec.min}. (Variant ${v.variantNumber} ends up matching the base on this element.)`;
+      } else if (effectiveMax !== undefined && value > effectiveMax) {
+        clamped = effectiveMax;
+        const capSource =
+          dynamicMax !== undefined ? 'the launcher count of this level' : 'the tool-wide cap';
+        reason = `${spec.label} wanted ${value} but maximum is ${effectiveMax} (${capSource}) — clamped to ${effectiveMax}.`;
+      }
+
+      if (reason !== null) {
+        v.values[spec.key] = clamped;
+        v.clampedKeys.add(spec.key);
+        adjustments.push({
           variantNumber: v.variantNumber,
           element: spec.key,
-          resolved: value,
-          reason: `${spec.label} ${value} > max (${effectiveMax}).`,
+          requested: value,
+          applied: clamped,
+          reason,
         });
       }
     }
   }
-  return out;
+
+  return { variants, adjustments, errors };
 }
 
 export function BulkVariantGenerator({
@@ -206,14 +235,13 @@ export function BulkVariantGenerator({
     saveRules(rules);
   }, [rules]);
 
-  const resolved = useMemo(() => resolveVariants(rules, base), [rules, base]);
-  const violations = useMemo(
-    () => validateVariants(resolved, base),
-    [resolved, base]
+  const { variants: resolved, adjustments, errors } = useMemo(
+    () => resolveVariants(rules, base),
+    [rules, base]
   );
 
   const distinctVariants = resolved.length;
-  const canExport = rules.length > 0 && violations.length === 0;
+  const canExport = distinctVariants > 0 && errors.length === 0;
 
   const addRow = useCallback(() => {
     setRules((prev) => {
@@ -399,9 +427,6 @@ export function BulkVariantGenerator({
                 </thead>
                 <tbody>
                   {resolved.map((v) => {
-                    const vViolations = violations.filter(
-                      (x) => x.variantNumber === v.variantNumber
-                    );
                     return (
                       <tr key={v.variantNumber} className="border-t border-border/40">
                         <td className="py-1 pr-2 font-mono">
@@ -420,19 +445,22 @@ export function BulkVariantGenerator({
                                     ? base.waitingStandSlots
                                     : base.moveLimit;
                           const changed = value !== baseVal;
-                          const violated = vViolations.some(
-                            (x) => x.element === el.key
-                          );
+                          const clamped = v.clampedKeys.has(el.key);
                           return (
                             <td
                               key={el.key}
                               className={`py-1 pr-2 font-mono ${
-                                violated
-                                  ? 'text-destructive font-semibold'
+                                clamped
+                                  ? 'text-amber-500 font-semibold'
                                   : changed
                                     ? 'text-primary'
                                     : 'text-muted-foreground'
                               }`}
+                              title={
+                                clamped
+                                  ? 'Auto-clamped to fit bounds — see banner below'
+                                  : undefined
+                              }
                             >
                               {value ?? '—'}
                             </td>
@@ -446,17 +474,34 @@ export function BulkVariantGenerator({
             </div>
           )}
 
-          {violations.length > 0 && (
+          {adjustments.length > 0 && (
+            <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2">
+              <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+                <Info className="h-3.5 w-3.5" />
+                Auto-adjusted to fit bounds ({adjustments.length})
+              </p>
+              <ul className="space-y-0.5 text-[11px] text-amber-700 dark:text-amber-300">
+                {adjustments.map((a, i) => (
+                  <li key={i}>
+                    <span className="font-mono">v{a.variantNumber}</span>:{' '}
+                    {a.reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {errors.length > 0 && (
             <div className="rounded-md border border-destructive/50 bg-destructive/10 p-2">
               <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-destructive">
                 <AlertTriangle className="h-3.5 w-3.5" />
-                Fix before exporting
+                Fix before exporting ({errors.length})
               </p>
               <ul className="space-y-0.5 text-[11px] text-destructive">
-                {violations.map((v, i) => (
+                {errors.map((e, i) => (
                   <li key={i}>
-                    <span className="font-mono">v{v.variantNumber}</span>:{' '}
-                    {v.reason}
+                    <span className="font-mono">v{e.variantNumber}</span>:{' '}
+                    {e.reason}
                   </li>
                 ))}
               </ul>
