@@ -47,11 +47,13 @@ import {
   Cloud,
   CloudOff,
   Share2,
+  Wand2,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { ShareModal } from '@/components/sharing/ShareModal';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { createSupabaseStorageProvider } from '@/lib/storage/supabase';
+import { CollectionBulkVariantDialog } from './CollectionBulkVariantDialog';
 
 // ============================================================================
 // Types
@@ -242,6 +244,7 @@ export function FruitMatchLevelCollection({
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showBulkVariantDialog, setShowBulkVariantDialog] = useState(false);
   const [collectionId, setCollectionId] = useState<string | null>(null);
 
   // Get collection ID for sharing
@@ -740,6 +743,15 @@ export function FruitMatchLevelCollection({
             <Button variant="outline" size="sm" onClick={handleExportAll} disabled={levels.length === 0} title="Export all as single file">
               <Download className="h-4 w-4" />
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowBulkVariantDialog(true)}
+              disabled={levels.length === 0}
+              title="Bulk generate variants for all levels"
+            >
+              <Wand2 className="h-4 w-4" />
+            </Button>
             <Button variant="outline" size="sm" onClick={handleImport}>
               <Upload className="h-4 w-4" />
             </Button>
@@ -777,6 +789,13 @@ export function FruitMatchLevelCollection({
 
       {/* Auth Modal */}
       <AuthModal open={showAuthModal} onOpenChange={setShowAuthModal} />
+
+      {/* Bulk Variant Dialog */}
+      <CollectionBulkVariantDialog
+        open={showBulkVariantDialog}
+        onOpenChange={setShowBulkVariantDialog}
+        levels={levels}
+      />
       <CardContent className="space-y-4">
         {/* Search */}
         <div className="relative">
