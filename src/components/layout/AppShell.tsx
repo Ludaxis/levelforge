@@ -12,6 +12,7 @@ import {
   Zap,
   Gamepad2,
   BookOpen,
+  Activity,
   Menu,
   X,
 } from 'lucide-react';
@@ -27,6 +28,7 @@ const navigation = [
   { name: 'Emotional Design', href: '/emotional', icon: Heart },
   { name: 'Level Calculator', href: '/calculator', icon: Calculator },
   { name: 'Game Demo', href: '/game', icon: Gamepad2 },
+  { name: 'Analysis', href: '/analysis', icon: Activity },
   { name: 'Glossary', href: '/glossary', icon: BookOpen },
 ];
 
