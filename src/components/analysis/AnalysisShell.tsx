@@ -9,6 +9,7 @@ import { WhatIfPanel } from './WhatIfPanel';
 import { ResultsOverview } from './ResultsOverview';
 import { UserTimeline } from './UserTimeline';
 import { FlowTransitions } from './FlowTransitions';
+import { FlowSankey } from './FlowSankey';
 import {
   getAdapter,
   DEFAULT_ADAPTER_ID,
@@ -86,6 +87,8 @@ export function AnalysisShell() {
       </div>
 
       <UserTimeline run={run} />
+
+      <FlowSankey run={run} />
 
       <FlowTransitions run={run} />
     </div>
