@@ -239,6 +239,8 @@ export async function runPipeline(
         lastGlobalAdjustmentAtMs,
         lastAdjustmentAtMsByParam,
         nowMs,
+        levelId: session.levelId,
+        playType: session.playType,
       });
 
       proposals.push(proposal);
@@ -247,8 +249,12 @@ export async function runPipeline(
         for (const d of proposal.deltas) {
           lastAdjustmentAtMsByParam[d.parameterKey] = nowMs;
         }
-        for (const d of proposal.deltas) {
-          ruleFireCounts[d.ruleName] = (ruleFireCounts[d.ruleName] ?? 0) + 1;
+        // Count each rule firing once per session, not once per ParameterDelta.
+        // Without the dedupe this counter is inflated by #levers (×4 on JB).
+        const firedRules = new Set<string>();
+        for (const d of proposal.deltas) firedRules.add(d.ruleName);
+        for (const name of firedRules) {
+          ruleFireCounts[name] = (ruleFireCounts[name] ?? 0) + 1;
         }
       }
 

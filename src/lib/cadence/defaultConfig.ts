@@ -35,6 +35,7 @@ export const DEFAULT_CADENCE_CONFIG: CadenceConfig = {
     exponentialAlpha: 0.3,
   },
   adjustmentEngine: {
+    cadenceStartLevel: 6,
     targetWinRateMin: 0.3,
     targetWinRateMax: 0.7,
     minSessionsBeforeActive: 5,

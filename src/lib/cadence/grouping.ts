@@ -1,5 +1,6 @@
 import type { GameAdapter } from './adapters/types';
 import type {
+  PlayType,
   SessionOutcome,
   SessionRow,
   SignalEntry,
@@ -30,6 +31,14 @@ const PLAYTIME_COL = 'playtime';
 interface GroupingResult {
   sessions: SessionRow[];
   warnings: string[];
+  /**
+   * Names of design-lever keys that were filled from the adapter's
+   * defaultLevelParameters because the SAT export did not carry them.
+   * The importer uses this to render a "Synthesized lever values"
+   * notice — Mai's 2026-04-20 call flagged that pre-DDA exports
+   * lack these fields.
+   */
+  synthesizedLeverKeys: string[];
 }
 
 export function groupRowsIntoSessions(
@@ -37,15 +46,21 @@ export function groupRowsIntoSessions(
   adapter: GameAdapter
 ): GroupingResult {
   const warnings: string[] = [];
+  const synthesizedLevers = new Set<string>();
   const buckets = new Map<string, Array<Record<string, unknown>>>();
 
   for (const row of rawRows) {
+    // Require at least one non-attempt key column to be present.
+    // Without this, rows missing both user_id and level_id bucket
+    // together under a phantom key and show up as a fake session.
+    const hasNonAttempt = adapter.sessionKeyColumns.some(
+      (col) => col !== 'attempt' && safeString(row[col]) !== ''
+    );
+    if (!hasNonAttempt) continue;
+
     const key = adapter.sessionKeyColumns
-      .map((col) => safeString(row[col]))
+      .map((col) => sessionKeyPart(col, row[col]))
       .join('|');
-    if (!key || key === adapter.sessionKeyColumns.map(() => '').join('|')) {
-      continue;
-    }
     if (!buckets.has(key)) buckets.set(key, []);
     buckets.get(key)!.push(row);
   }
@@ -73,6 +88,7 @@ export function groupRowsIntoSessions(
         r[EVENT_COL] === 'song_start' ||
         r[EVENT_COL] === 'me_start'
     );
+    const playType = parsePlayType(startRow?.['play_type']);
     const endRow = rows.find(
       (r) =>
         r[EVENT_COL] === 'song_result' ||
@@ -81,6 +97,16 @@ export function groupRowsIntoSessions(
     );
 
     const levelParameters = extractLevelParameters(startRow, adapter);
+    // Fill in adapter defaults for any lever the SAT export did not
+    // carry, so downstream rules can still produce proposals.
+    if (adapter.defaultLevelParameters) {
+      for (const [k, v] of Object.entries(adapter.defaultLevelParameters)) {
+        if (levelParameters[k] === undefined) {
+          levelParameters[k] = v;
+          synthesizedLevers.add(k);
+        }
+      }
+    }
     const outcome = determineOutcome(endRow);
 
     const startedAtUtc = numericOr(startRow?.[TIMESTAMP_COL], 0);
@@ -141,6 +167,7 @@ export function groupRowsIntoSessions(
       levelId,
       levelVariant: numericOrUndefined(firstRow['level_variant']),
       attempt,
+      playType,
       signals,
       levelParameters,
       outcome,
@@ -156,7 +183,15 @@ export function groupRowsIntoSessions(
   }
 
   sessions.sort((a, b) => a.startedAtUtc - b.startedAtUtc);
-  return { sessions, warnings };
+
+  const synthesizedLeverKeys = Array.from(synthesizedLevers);
+  if (synthesizedLeverKeys.length > 0 && sessions.length > 0) {
+    warnings.push(
+      `Level-design levers not found in export (${synthesizedLeverKeys.join(', ')}). Falling back to adapter defaults so DDA proposals can still fire. Ship DDA-tab fields on song_start to remove this warning.`
+    );
+  }
+
+  return { sessions, warnings, synthesizedLeverKeys };
 }
 
 function extractLevelParameters(
@@ -194,6 +229,25 @@ function determineOutcome(
 function safeString(v: unknown): string {
   if (v === null || v === undefined) return '';
   return String(v);
+}
+
+/**
+ * Build one segment of the session key. `attempt` is normalized to '1'
+ * when missing so SAT exports that leave it empty on per-move rows
+ * still bucket with their session-lifecycle events.
+ */
+function sessionKeyPart(col: string, v: unknown): string {
+  const s = safeString(v);
+  if (s !== '') return s;
+  if (col === 'attempt') return '1';
+  return '';
+}
+
+function parsePlayType(raw: unknown): PlayType | undefined {
+  if (raw === null || raw === undefined || raw === '') return undefined;
+  const s = String(raw).toLowerCase();
+  if (s === 'start' || s === 'restart' || s === 'replay') return s;
+  return undefined;
 }
 
 function numericOr(v: unknown, fallback: number): number {

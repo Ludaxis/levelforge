@@ -28,8 +28,42 @@ import type {
  *   4. New Player  (SDK)
  *   5. Session Fatigue  (SDK)
  *   6. Cooldown — applied as a filter, not a proposer
+ *
+ * Two short-circuit gates run before rule evaluation, matching the
+ * shipped SDK:
+ *   - CadenceStartLevel: DDA is off below the gate (default 6).
+ *   - play_type=replay: DDA is suppressed on replays of mastered levels.
  */
 export function evaluateAdjustment(ctx: AdjustmentContext): AdjustmentProposal {
+  const detectedStateFallback: FlowState = ctx.lastFlowReading?.state ?? 'unknown';
+  const emptyConfidence = contextConfidence(ctx);
+
+  // ── Gate 1: CadenceStartLevel ─────────────────────────────────────
+  const startLevel = ctx.config.adjustmentEngine.cadenceStartLevel ?? 0;
+  const lvl = parseLevelNumber(ctx.levelId);
+  if (startLevel > 0 && lvl !== undefined && lvl < startLevel) {
+    return {
+      deltas: [],
+      confidence: emptyConfidence,
+      reason: `Below CadenceStartLevel (level ${lvl} < ${startLevel}) — DDA disabled.`,
+      detectedState: detectedStateFallback,
+      timing: 'BeforeNextLevel',
+      rulesEvaluated: [],
+    };
+  }
+
+  // ── Gate 2: play_type=replay ──────────────────────────────────────
+  if (ctx.playType === 'replay') {
+    return {
+      deltas: [],
+      confidence: emptyConfidence,
+      reason: 'play_type=replay — DDA suppressed on replays.',
+      detectedState: detectedStateFallback,
+      timing: 'BeforeNextLevel',
+      rulesEvaluated: [],
+    };
+  }
+
   const rules = [
     flowChannelRule,
     streakDamperRule,
@@ -154,4 +188,21 @@ export function evaluateAdjustment(ctx: AdjustmentContext): AdjustmentProposal {
     timing,
     rulesEvaluated,
   };
+}
+
+/**
+ * Extract the leading integer from a level id. Handles:
+ *   - numeric ids: 15 → 15
+ *   - prefixed strings: "Level15_1" → 15, "lvl_06" → 6
+ *   - pure digit strings: "15" → 15
+ * Returns undefined when no integer is present — the caller treats this
+ * as "no gate information" and allows the proposal through.
+ */
+function parseLevelNumber(id: string | number | undefined): number | undefined {
+  if (id === undefined || id === null) return undefined;
+  if (typeof id === 'number') return Number.isFinite(id) ? id : undefined;
+  const match = /(\d+)/.exec(id);
+  if (!match) return undefined;
+  const n = Number.parseInt(match[1], 10);
+  return Number.isFinite(n) ? n : undefined;
 }

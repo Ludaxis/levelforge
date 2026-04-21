@@ -6,6 +6,7 @@ import type {
   FlowReading,
   FlowState,
   ParameterDelta,
+  PlayType,
   PlayerSkillProfile,
   SessionSummary,
 } from './types';
@@ -35,6 +36,16 @@ export interface AdjustmentContext {
   lastAdjustmentAtMsByParam: Record<string, number>;
   /** "Now" in epoch ms — caller-provided for determinism. */
   nowMs: number;
+  /**
+   * Level identifier of the upcoming session. Used by the
+   * CadenceStartLevel gate — DDA stays off below the threshold.
+   * Accepts either a raw number or a string like "Level15_1" that
+   * contains a leading integer. Optional for callers that have no
+   * level context (e.g. ad-hoc unit tests).
+   */
+  levelId?: string | number;
+  /** song_start.play_type. When `replay`, DDA adjustment is suppressed. */
+  playType?: PlayType;
 }
 
 export interface RuleFiring {
