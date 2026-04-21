@@ -63,13 +63,18 @@ export function makeRuleId(): string {
 }
 
 export function defaultVariantRules(): VariantRule[] {
+  // Convention: higher MaxSelectableItems = more surface = easier; higher
+  // BlockingOffset = deeper blockers = harder. Easier variants (1–4) raise
+  // MSI or drop BO; harder variants (6–9) do the reverse.
   return [
-    { id: makeRuleId(), variantNumber: 2, element: 'maxSelectableItems', delta: -2 },
-    { id: makeRuleId(), variantNumber: 3, element: 'maxSelectableItems', delta: -1 },
+    { id: makeRuleId(), variantNumber: 2, element: 'maxSelectableItems', delta: 2 },
+    { id: makeRuleId(), variantNumber: 3, element: 'maxSelectableItems', delta: 1 },
     { id: makeRuleId(), variantNumber: 4, element: 'blockingOffset', delta: -1 },
     { id: makeRuleId(), variantNumber: 6, element: 'blockingOffset', delta: 1 },
-    { id: makeRuleId(), variantNumber: 7, element: 'maxSelectableItems', delta: 1 },
-    { id: makeRuleId(), variantNumber: 8, element: 'maxSelectableItems', delta: 2 },
+    { id: makeRuleId(), variantNumber: 7, element: 'maxSelectableItems', delta: -1 },
+    { id: makeRuleId(), variantNumber: 7, element: 'blockingOffset', delta: 1 },
+    { id: makeRuleId(), variantNumber: 8, element: 'maxSelectableItems', delta: -2 },
+    { id: makeRuleId(), variantNumber: 8, element: 'blockingOffset', delta: 1 },
   ];
 }
 
@@ -102,6 +107,85 @@ export function saveVariantRules(rules: VariantRule[]): void {
   } catch {
     /* storage quota / private mode — silently skip */
   }
+}
+
+// ─── Named templates ──────────────────────────────────────────────────────
+
+export interface VariantTemplate {
+  id: string;
+  name: string;
+  rules: VariantRule[];
+  createdAt: number;
+}
+
+export const VARIANT_TEMPLATES_STORAGE_KEY =
+  'juicyblast.bulkVariantGenerator.templates.v1';
+
+export function loadVariantTemplates(): VariantTemplate[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(VARIANT_TEMPLATES_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as VariantTemplate[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (t): t is VariantTemplate =>
+        typeof t === 'object' &&
+        t !== null &&
+        typeof t.id === 'string' &&
+        typeof t.name === 'string' &&
+        Array.isArray(t.rules)
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function persistVariantTemplates(templates: VariantTemplate[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      VARIANT_TEMPLATES_STORAGE_KEY,
+      JSON.stringify(templates)
+    );
+  } catch {
+    /* silently skip */
+  }
+}
+
+export function saveVariantTemplate(
+  name: string,
+  rules: VariantRule[]
+): VariantTemplate {
+  const templates = loadVariantTemplates();
+  const trimmed = name.trim();
+  // If a template with this name exists, overwrite it in place. Otherwise append.
+  const existingIdx = templates.findIndex((t) => t.name === trimmed);
+  const template: VariantTemplate = {
+    id:
+      existingIdx >= 0
+        ? templates[existingIdx].id
+        : `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    name: trimmed,
+    rules: rules.map((r) => ({ ...r, id: makeRuleId() })),
+    createdAt: existingIdx >= 0 ? templates[existingIdx].createdAt : Date.now(),
+  };
+  const next =
+    existingIdx >= 0
+      ? templates.map((t, i) => (i === existingIdx ? template : t))
+      : [...templates, template];
+  persistVariantTemplates(next);
+  return template;
+}
+
+export function deleteVariantTemplate(id: string): void {
+  const templates = loadVariantTemplates().filter((t) => t.id !== id);
+  persistVariantTemplates(templates);
+}
+
+/** Returns a fresh copy of the template's rules with new IDs. */
+export function instantiateTemplate(template: VariantTemplate): VariantRule[] {
+  return template.rules.map((r) => ({ ...r, id: makeRuleId() }));
 }
 
 export function resolveVariants(

@@ -1314,11 +1314,36 @@ export function LevelDesignerV2({
     (variants: ResolvedVariant[]) => {
       for (const variant of variants) {
         const variantLevelId = `Level${levelNumber}_${variant.variantNumber}`;
+        const msi = variant.values.maxSelectableItems ?? maxSelectableItems;
+        const bo = variant.values.blockingOffset ?? blockingOffset;
+
+        // Re-layer items so Layer A/B/C counts match this variant's MSI.
+        // Items keep their `order`; only `layer` is recomputed.
+        const relayered = [...itemsWithLayers]
+          .sort((a, b) => a.order - b.order)
+          .map((item, idx) => ({
+            ...item,
+            layer: (idx < msi ? 'A' : idx < 2 * msi ? 'B' : 'C') as
+              | 'A'
+              | 'B'
+              | 'C',
+          }));
+
+        // Recompute DifficultyScore from the variant's levers — base score is
+        // stale once MSI/BO move.
+        const variantDifficulty = studioDifficultyParams
+          ? calculateStudioDifficulty({
+              ...studioDifficultyParams,
+              maxSelectableItems: msi,
+              blockingOffset: bo,
+            })
+          : null;
+
         const exportData: StudioExportData = {
           palette,
           levelId: variantLevelId,
           levelIndex: levelNumber,
-          difficulty: difficultyResult?.tier || 'medium',
+          difficulty: variantDifficulty?.tier || difficultyResult?.tier || 'medium',
           graphicId: `graphic_${artWidth}x${artHeight}`,
           width: artWidth,
           height: artHeight,
@@ -1330,7 +1355,7 @@ export function LevelDesignerV2({
             colorHex: p.colorHex,
             group: p.group,
           })),
-          selectableItems: itemsWithLayers.map((item) => ({
+          selectableItems: relayered.map((item) => ({
             colorType: item.colorType,
             variant: item.variant,
             layer: item.layer,
@@ -1354,22 +1379,22 @@ export function LevelDesignerV2({
               isLocked: l.isLocked,
             })),
           unlockStageData: [{ requiredCompletedGroups: groups.map((g) => g.id) }],
-          maxSelectableItems:
-            variant.values.maxSelectableItems ?? maxSelectableItems,
+          maxSelectableItems: msi,
           seed,
-          blockingOffset: variant.values.blockingOffset ?? blockingOffset,
-          mismatchDepth:
-            (variant.values.blockingOffset ?? blockingOffset) / 10,
+          blockingOffset: bo,
+          mismatchDepth: bo / 10,
           waitingStandSlots:
             variant.values.waitingStandSlots ?? waitingStandSlots,
           activeLauncherCount:
             variant.values.activeLauncherCount ?? activeLauncherCount,
           moveLimit: variant.values.moveLimit ?? moveLimit,
-          difficultyScore: difficultyResult?.score,
+          difficultyScore: variantDifficulty?.score ?? difficultyResult?.score,
           colorVariantDensity: studioDifficultyParams?.colorVariantDensity,
-          variantComplexity: difficultyResult?.breakdown.find(
-            (c) => c.id === 'variantComplexity'
-          )?.score,
+          variantComplexity:
+            variantDifficulty?.breakdown.find((c) => c.id === 'variantComplexity')
+              ?.score ??
+            difficultyResult?.breakdown.find((c) => c.id === 'variantComplexity')
+              ?.score,
         };
 
         const result = exportStudioLevel(exportData);
