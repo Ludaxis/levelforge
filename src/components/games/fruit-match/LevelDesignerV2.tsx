@@ -80,6 +80,10 @@ import {
   type ResolvedVariant,
 } from './designer/BulkVariantGenerator';
 import { StudioArrangementPreview } from './StudioArrangementPreview';
+import {
+  redistributeVariants,
+  type VariantComplexityStop,
+} from '@/lib/juicyBlast/variantComplexity';
 
 // ============================================================================
 // Main Component: LevelDesignerV2
@@ -116,6 +120,10 @@ export function LevelDesignerV2({
   // Item Pool
   const [selectableItems, setSelectableItems] = useState<StudioSelectableItem[]>([]);
   const [maxSelectableItems, setMaxSelectableItems] = useState(10);
+  // Per-color variant complexity. Missing entry → stop 0.
+  const [variantComplexityByColor, setVariantComplexityByColor] = useState<
+    Record<number, VariantComplexityStop>
+  >({});
   // Track items the designer explicitly pinned to a layer (dropdown override).
   // The sync effect skips these so the user's choice isn't overwritten.
   const [pinnedItemIds, setPinnedItemIds] = useState<Set<string>>(new Set());
@@ -1128,6 +1136,32 @@ export function LevelDesignerV2({
     );
   }, []);
 
+  const handleColorComplexityChange = useCallback(
+    (colorType: number, stop: VariantComplexityStop) => {
+      setVariantComplexityByColor((prev) => {
+        const next = { ...prev, [colorType]: stop };
+        setSelectableItems((items) => redistributeVariants(items, next));
+        return next;
+      });
+    },
+    []
+  );
+
+  const handleGlobalComplexityChange = useCallback(
+    (stop: VariantComplexityStop) => {
+      setVariantComplexityByColor((prev) => {
+        const next: Record<number, VariantComplexityStop> = { ...prev };
+        const colors = new Set<number>(
+          selectableItems.map((i) => i.colorType).concat(Object.keys(prev).map(Number))
+        );
+        for (const ct of colors) next[ct] = stop;
+        setSelectableItems((items) => redistributeVariants(items, next));
+        return next;
+      });
+    },
+    [selectableItems]
+  );
+
   const handleReorderItem = useCallback((fromIndex: number, toIndex: number) => {
     setSelectableItems((prev) => {
       const sorted = [...prev].sort((a, b) => a.order - b.order);
@@ -1447,6 +1481,7 @@ export function LevelDesignerV2({
       studioActiveLauncherCount: activeLauncherCount,
       studioSeed: seed,
       studioMoveLimit: moveLimit,
+      studioVariantComplexityByColor: { ...variantComplexityByColor },
     };
 
     onAddToCollection(designedLevel);
@@ -1469,6 +1504,7 @@ export function LevelDesignerV2({
     levelId,
     levelNumber,
     editingLevel,
+    variantComplexityByColor,
   ]);
 
   const handleAddToCollection = useCallback(() => {
@@ -1513,6 +1549,7 @@ export function LevelDesignerV2({
     setSeed(editingLevel.studioSeed);
     setMoveLimit(editingLevel.studioMoveLimit);
     setPinnedItemIds(new Set());
+    setVariantComplexityByColor(editingLevel.studioVariantComplexityByColor ?? {});
 
     // Build pixel map
     const map = new Map<string, StudioPixelCell>();
@@ -1859,6 +1896,9 @@ export function LevelDesignerV2({
           colorTypeToHex={colorTypeToHex}
           pinnedItemIds={pinnedItemIds}
           onClearPins={() => setPinnedItemIds(new Set())}
+          variantComplexityByColor={variantComplexityByColor}
+          onGlobalComplexityChange={handleGlobalComplexityChange}
+          onColorComplexityChange={handleColorComplexityChange}
         />
       )}
 

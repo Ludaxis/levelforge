@@ -264,6 +264,8 @@ export interface DesignedFruitMatchLevel {
   }[];
   studioMaxSelectableItems?: number;
   studioBlockingOffset?: number;
+  /** Per-color variant-complexity stop (0, 1, or 2). Undefined → stop 0. */
+  studioVariantComplexityByColor?: Record<number, 0 | 1 | 2>;
   studioWaitingStandSlots?: number;
   studioActiveLauncherCount?: number;
   studioSeed?: number;

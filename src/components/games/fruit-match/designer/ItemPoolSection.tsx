@@ -15,6 +15,11 @@ import {
 import { VARIANT_NAMES } from '@/types/fruitMatch';
 import { COLOR_TYPE_TO_FRUIT, COLOR_TYPE_TO_HEX, hexToColorName } from '@/lib/juicyBlastExport';
 import { StudioSelectableItem, ColorSwatch } from './types';
+import {
+  VARIANT_COMPLEXITY_STOPS,
+  summarizeGlobalComplexity,
+  type VariantComplexityStop,
+} from '@/lib/juicyBlast/variantComplexity';
 
 export function ItemPoolSection({
   items,
@@ -29,6 +34,9 @@ export function ItemPoolSection({
   colorTypeToHex,
   pinnedItemIds,
   onClearPins,
+  variantComplexityByColor,
+  onGlobalComplexityChange,
+  onColorComplexityChange,
 }: {
   items: StudioSelectableItem[];
   maxSelectableItems: number;
@@ -42,6 +50,9 @@ export function ItemPoolSection({
   colorTypeToHex?: Record<number, string>;
   pinnedItemIds?: Set<string>;
   onClearPins?: () => void;
+  variantComplexityByColor: Record<number, VariantComplexityStop>;
+  onGlobalComplexityChange: (stop: VariantComplexityStop) => void;
+  onColorComplexityChange: (colorType: number, stop: VariantComplexityStop) => void;
 }) {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -68,6 +79,20 @@ export function ItemPoolSection({
   const layerOptions: ('A' | 'B' | 'C')[] = ['A', 'B', 'C'];
 
   const pinnedCount = pinnedItemIds?.size ?? 0;
+
+  // Unique colors present, counted + sorted (most fruits first, same as color palette)
+  const colorsInLevel = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const it of items) counts.set(it.colorType, (counts.get(it.colorType) ?? 0) + 1);
+    return [...counts.entries()]
+      .map(([colorType, count]) => ({ colorType, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [items]);
+
+  const globalComplexity = useMemo(
+    () => summarizeGlobalComplexity(variantComplexityByColor, colorsInLevel.map((c) => c.colorType)),
+    [variantComplexityByColor, colorsInLevel]
+  );
 
   const renderItem = (item: StudioSelectableItem, globalIdx: number, layerNum: number) => {
     const fruit = COLOR_TYPE_TO_FRUIT[item.colorType];
@@ -163,6 +188,59 @@ export function ItemPoolSection({
           />
         </div>
 
+        {/* Variant Complexity — global + per-color */}
+        {colorsInLevel.length > 0 && (
+          <div className="rounded-md border bg-muted/20 p-2 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col">
+                <span className="text-xs font-medium">Variant Complexity</span>
+                <span className="text-[10px] text-muted-foreground">
+                  Redistributes variants in groups of 3 within each color.
+                </span>
+              </div>
+              <StopPicker
+                value={globalComplexity === 'mixed' ? null : globalComplexity}
+                mixed={globalComplexity === 'mixed'}
+                onChange={(s) => onGlobalComplexityChange(s)}
+                title="Apply to all colors"
+              />
+            </div>
+
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-1.5">
+              {colorsInLevel.map(({ colorType, count }) => {
+                const fruit = COLOR_TYPE_TO_FRUIT[colorType];
+                const name = hexToColorName(
+                  colorTypeToHex?.[colorType] || COLOR_TYPE_TO_HEX[colorType] || '888888'
+                );
+                const stop = variantComplexityByColor[colorType] ?? 0;
+                return (
+                  <div
+                    key={colorType}
+                    className="flex items-center gap-1.5 rounded border bg-card px-1.5 py-1"
+                  >
+                    <ColorSwatch
+                      colorType={colorType}
+                      size={14}
+                      hex={colorTypeToHex?.[colorType]}
+                    />
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-[10px] leading-none">{name}</span>
+                      <span className="text-[9px] leading-none text-muted-foreground">
+                        {count} · {fruit ? VARIANT_NAMES[fruit]?.[stop] ?? `V${stop}` : `V${stop}`}
+                      </span>
+                    </div>
+                    <StopPicker
+                      value={stop}
+                      onChange={(s) => onColorComplexityChange(colorType, s)}
+                      compact
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Add Item */}
         <div className="flex items-center gap-2 flex-wrap">
           <select
@@ -237,5 +315,45 @@ export function ItemPoolSection({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function StopPicker({
+  value,
+  onChange,
+  mixed,
+  compact,
+  title,
+}: {
+  value: VariantComplexityStop | null;
+  onChange: (stop: VariantComplexityStop) => void;
+  mixed?: boolean;
+  compact?: boolean;
+  title?: string;
+}) {
+  const size = compact ? 'h-5 w-5 text-[10px]' : 'h-6 w-6 text-[11px]';
+  return (
+    <div
+      className="inline-flex overflow-hidden rounded border bg-background"
+      title={title ?? (mixed ? 'Colors use different complexity stops' : undefined)}
+    >
+      {VARIANT_COMPLEXITY_STOPS.map((s) => {
+        const active = !mixed && value === s;
+        return (
+          <button
+            key={s}
+            type="button"
+            onClick={() => onChange(s)}
+            className={`${size} font-mono transition-colors ${
+              active
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-muted'
+            }`}
+          >
+            {s}
+          </button>
+        );
+      })}
+    </div>
   );
 }
