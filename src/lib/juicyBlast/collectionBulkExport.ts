@@ -6,7 +6,7 @@ import {
   exportStudioLevel,
 } from '@/lib/juicyBlastExport';
 import { calculateColorVariantDensity } from '@/lib/fruitMatchUtils';
-import { calculateStudioDifficulty } from '@/lib/studioGameLogic';
+import { calculateStudioDifficulty, computeParMoves } from '@/lib/studioGameLogic';
 import {
   resolveVariants,
   type VariantRule,
@@ -125,6 +125,35 @@ function buildVariantExportData(
     colorVariantDensity,
   });
 
+  // Par moves — greedy solver with a deterministic fallback when the level
+  // is flagged unsolvable, so every export always carries a par number.
+  const solvedPar = computeParMoves({
+    pixelArt: level.pixelArt,
+    pixelArtWidth: level.pixelArtWidth,
+    pixelArtHeight: level.pixelArtHeight,
+    maxSelectableItems: msi,
+    waitingStandSlots:
+      values.waitingStandSlots ?? level.studioWaitingStandSlots ?? 5,
+    selectableItems: relayered.map((s) => ({
+      colorType: s.colorType,
+      variant: s.variant,
+      order: s.order,
+      layer: s.layer,
+    })),
+    launchers: level.studioLaunchers.map((l) => ({
+      colorType: l.colorType,
+      pixelCount: l.pixelCount,
+      group: l.group,
+      order: l.order,
+    })),
+    activeLauncherCount:
+      values.activeLauncherCount ?? level.studioActiveLauncherCount ?? 2,
+    blockingOffset: bo,
+    seed: level.studioSeed,
+    moveLimit: values.moveLimit ?? level.studioMoveLimit,
+  });
+  const parMoves = solvedPar ?? relayered.length + bo;
+
   return exportStudioLevel({
     palette: Array.from(paletteSet),
     levelId,
@@ -172,6 +201,7 @@ function buildVariantExportData(
       values.activeLauncherCount ?? level.studioActiveLauncherCount ?? 2,
     seed: level.studioSeed,
     moveLimit: values.moveLimit ?? level.studioMoveLimit,
+    parMoves,
     difficultyScore: variantDifficulty.score,
     colorVariantDensity,
     variantComplexity:

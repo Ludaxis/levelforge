@@ -1285,6 +1285,7 @@ export function LevelDesignerV2({
       waitingStandSlots,
       activeLauncherCount,
       moveLimit,
+      parMoves: parMoves ?? itemsWithLayers.length + blockingOffset,
       difficultyScore: difficultyResult?.score,
       colorVariantDensity: studioDifficultyParams?.colorVariantDensity,
       variantComplexity: difficultyResult?.breakdown.find((c) => c.id === 'variantComplexity')?.score,
@@ -1298,7 +1299,7 @@ export function LevelDesignerV2({
     a.download = `${fileName.trim() || levelId}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [palette, levelId, levelNumber, fileName, difficultyResult, studioDifficultyParams, artWidth, artHeight, pixelArray, itemsWithLayers, itemDisplayOrder, launchers, groups, maxSelectableItems, seed, blockingOffset, waitingStandSlots, activeLauncherCount, moveLimit]);
+  }, [palette, levelId, levelNumber, fileName, difficultyResult, studioDifficultyParams, artWidth, artHeight, pixelArray, itemsWithLayers, itemDisplayOrder, launchers, groups, maxSelectableItems, seed, blockingOffset, waitingStandSlots, activeLauncherCount, moveLimit, parMoves]);
 
   const handleExportJSON = useCallback(() => {
     if (existingLevelIds.includes(levelId) && !editingLevel) {
@@ -1338,6 +1339,37 @@ export function LevelDesignerV2({
               blockingOffset: bo,
             })
           : null;
+
+        // Par moves — greedy solve the variant config; fall back to
+        // totalItems + BlockingOffset if the solver reports unsolvable.
+        const variantSolvedPar = computeParMoves({
+          pixelArt: pixelCellArray,
+          pixelArtWidth: artWidth,
+          pixelArtHeight: artHeight,
+          maxSelectableItems: msi,
+          waitingStandSlots:
+            variant.values.waitingStandSlots ?? waitingStandSlots,
+          selectableItems: relayered.map((i) => ({
+            colorType: i.colorType,
+            variant: i.variant,
+            order: i.order,
+            layer: i.layer,
+          })),
+          launchers: launchers
+            .sort((a, b) => a.order - b.order)
+            .map((l) => ({
+              colorType: l.colorType,
+              pixelCount: l.pixelCount,
+              group: l.group,
+              order: l.order,
+            })),
+          activeLauncherCount:
+            variant.values.activeLauncherCount ?? activeLauncherCount,
+          blockingOffset: bo,
+          seed,
+          moveLimit: variant.values.moveLimit ?? moveLimit,
+        });
+        const variantPar = variantSolvedPar ?? relayered.length + bo;
 
         const exportData: StudioExportData = {
           palette,
@@ -1388,6 +1420,7 @@ export function LevelDesignerV2({
           activeLauncherCount:
             variant.values.activeLauncherCount ?? activeLauncherCount,
           moveLimit: variant.values.moveLimit ?? moveLimit,
+          parMoves: variantPar,
           difficultyScore: variantDifficulty?.score ?? difficultyResult?.score,
           colorVariantDensity: studioDifficultyParams?.colorVariantDensity,
           variantComplexity:
@@ -1419,6 +1452,7 @@ export function LevelDesignerV2({
       artWidth,
       artHeight,
       pixelArray,
+      pixelCellArray,
       itemsWithLayers,
       itemDisplayOrder,
       launchers,
