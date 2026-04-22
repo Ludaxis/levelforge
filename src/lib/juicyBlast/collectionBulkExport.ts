@@ -6,6 +6,7 @@ import {
   exportStudioLevel,
 } from '@/lib/juicyBlastExport';
 import { calculateColorVariantDensity } from '@/lib/fruitMatchUtils';
+import { calculateStudioDifficulty, computeParMoves } from '@/lib/studioGameLogic';
 import {
   resolveVariants,
   type VariantRule,
@@ -13,6 +14,23 @@ import {
   type VariantError,
   type BaseLevelValues,
 } from './variantResolve';
+
+/**
+ * Recompute layer assignment (A/B/C) from item order given a variant's
+ * maxSelectableItems. Layer A fills positions [0, MSI), Layer B fills
+ * [MSI, 2*MSI), Layer C is everything else.
+ */
+function layersForMSI(
+  items: DesignedFruitMatchLevel['studioSelectableItems'],
+  msi: number
+): DesignedFruitMatchLevel['studioSelectableItems'] {
+  if (!items) return items;
+  const sorted = [...items].sort((a, b) => a.order - b.order);
+  return sorted.map((item, idx) => ({
+    ...item,
+    layer: (idx < msi ? 'A' : idx < 2 * msi ? 'B' : 'C') as 'A' | 'B' | 'C',
+  }));
+}
 
 export interface CollectionBulkOptions {
   /** If true, files are placed in `Level{N}/` folders inside the zip. */
@@ -78,13 +96,69 @@ function buildVariantExportData(
   }
 
   const levelId = `Level${level.levelNumber}_${variantNumber}`;
+  const msi = values.maxSelectableItems ?? level.studioMaxSelectableItems ?? 10;
   const bo = values.blockingOffset ?? level.studioBlockingOffset ?? 0;
+
+  // Re-layer items so Layer A/B/C match the variant's MSI. Items keep their
+  // `order`; only the `layer` field is recomputed.
+  const relayered = layersForMSI(level.studioSelectableItems, msi) ?? [];
+
+  // Recompute DifficultyScore from the variant's levers — the base score is
+  // stale once MSI/BO move.
+  const uniqueColors = new Set(relayered.map((s) => s.colorType)).size;
+  const uniqueVariants = new Set(
+    relayered.map((s) => `${s.colorType}:${s.variant}`)
+  ).size;
+  const colorVariantDensity = calculateColorVariantDensity(
+    level.pixelArt,
+    relayered
+  );
+  const variantDifficulty = calculateStudioDifficulty({
+    totalPixels: level.pixelArt.length,
+    uniqueColors,
+    groupCount: new Set(level.pixelArt.map((c) => c.groupId ?? 1)).size,
+    launcherCount: level.studioLaunchers.length,
+    maxSelectableItems: msi,
+    totalTiles: relayered.length,
+    blockingOffset: bo,
+    uniqueVariants,
+    colorVariantDensity,
+  });
+
+  // Par moves — greedy solver with a deterministic fallback when the level
+  // is flagged unsolvable, so every export always carries a par number.
+  const solvedPar = computeParMoves({
+    pixelArt: level.pixelArt,
+    pixelArtWidth: level.pixelArtWidth,
+    pixelArtHeight: level.pixelArtHeight,
+    maxSelectableItems: msi,
+    waitingStandSlots:
+      values.waitingStandSlots ?? level.studioWaitingStandSlots ?? 5,
+    selectableItems: relayered.map((s) => ({
+      colorType: s.colorType,
+      variant: s.variant,
+      order: s.order,
+      layer: s.layer,
+    })),
+    launchers: level.studioLaunchers.map((l) => ({
+      colorType: l.colorType,
+      pixelCount: l.pixelCount,
+      group: l.group,
+      order: l.order,
+    })),
+    activeLauncherCount:
+      values.activeLauncherCount ?? level.studioActiveLauncherCount ?? 2,
+    blockingOffset: bo,
+    seed: level.studioSeed,
+    moveLimit: values.moveLimit ?? level.studioMoveLimit,
+  });
+  const parMoves = solvedPar ?? relayered.length + bo;
 
   return exportStudioLevel({
     palette: Array.from(paletteSet),
     levelId,
     levelIndex: level.levelNumber,
-    difficulty: level.metrics.difficulty,
+    difficulty: variantDifficulty.tier,
     graphicId: `graphic_${level.pixelArtWidth}x${level.pixelArtHeight}`,
     width: level.pixelArtWidth,
     height: level.pixelArtHeight,
@@ -99,7 +173,7 @@ function buildVariantExportData(
         group: cell.groupId ?? 1,
       };
     }),
-    selectableItems: level.studioSelectableItems.map((si) => ({
+    selectableItems: relayered.map((si) => ({
       colorType: si.colorType,
       variant: si.variant,
       layer: si.layer,
@@ -118,8 +192,7 @@ function buildVariantExportData(
       isLocked: l.isLocked,
     })),
     unlockStageData: [],
-    maxSelectableItems:
-      values.maxSelectableItems ?? level.studioMaxSelectableItems ?? 10,
+    maxSelectableItems: msi,
     blockingOffset: bo,
     mismatchDepth: bo / 10,
     waitingStandSlots:
@@ -128,21 +201,16 @@ function buildVariantExportData(
       values.activeLauncherCount ?? level.studioActiveLauncherCount ?? 2,
     seed: level.studioSeed,
     moveLimit: values.moveLimit ?? level.studioMoveLimit,
-    difficultyScore: level.metrics.difficultyScore,
-    colorVariantDensity: calculateColorVariantDensity(
-      level.pixelArt,
-      level.studioSelectableItems
-    ),
-    variantComplexity: (() => {
-      const uColors = new Set(
-        level.studioSelectableItems.map((s) => s.colorType)
-      ).size;
-      const uVariants = new Set(
-        level.studioSelectableItems.map((s) => `${s.colorType}:${s.variant}`)
-      ).size;
-      const avg = uColors > 0 ? uVariants / uColors : 1;
-      return Math.max(0, Math.min(1, (avg - 1) / 2));
-    })(),
+    parMoves,
+    difficultyScore: variantDifficulty.score,
+    colorVariantDensity,
+    variantComplexity:
+      variantDifficulty.breakdown.find((c) => c.id === 'variantComplexity')
+        ?.score ??
+      (() => {
+        const avg = uniqueColors > 0 ? uniqueVariants / uniqueColors : 1;
+        return Math.max(0, Math.min(1, (avg - 1) / 2));
+      })(),
   });
 }
 

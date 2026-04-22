@@ -175,6 +175,59 @@ describe('evaluateAdjustment', () => {
     }
   });
 
+  it('CadenceStartLevel gate suppresses proposals below the threshold', () => {
+    const c = ctx({
+      recentSummaries: Array.from({ length: 10 }, () => summary('lose')),
+      levelId: 'Level3_1',
+    });
+    const p = evaluateAdjustment(c);
+    expect(p.deltas).toEqual([]);
+    expect(p.reason).toMatch(/CadenceStartLevel/);
+    expect(p.rulesEvaluated).toEqual([]);
+  });
+
+  it('CadenceStartLevel gate allows proposals at or above the threshold', () => {
+    const c = ctx({
+      recentSummaries: Array.from({ length: 10 }, () => summary('lose')),
+      levelId: 'Level15_1',
+    });
+    const p = evaluateAdjustment(c);
+    expect(p.deltas.length).toBeGreaterThan(0);
+    expect(p.reason).not.toMatch(/CadenceStartLevel/);
+  });
+
+  it('CadenceStartLevel gate is inactive when levelId is missing', () => {
+    // /analysis imports that don't carry a level identifier should
+    // not be silently filtered — let the rest of the pipeline run.
+    const c = ctx({
+      recentSummaries: Array.from({ length: 10 }, () => summary('lose')),
+      levelId: undefined,
+    });
+    const p = evaluateAdjustment(c);
+    expect(p.deltas.length).toBeGreaterThan(0);
+  });
+
+  it('play_type=replay suppresses the proposal', () => {
+    const c = ctx({
+      recentSummaries: Array.from({ length: 10 }, () => summary('lose')),
+      levelId: 'Level15_1',
+      playType: 'replay',
+    });
+    const p = evaluateAdjustment(c);
+    expect(p.deltas).toEqual([]);
+    expect(p.reason).toMatch(/replay/i);
+  });
+
+  it('play_type=restart does not suppress the proposal', () => {
+    const c = ctx({
+      recentSummaries: Array.from({ length: 10 }, () => summary('lose')),
+      levelId: 'Level15_1',
+      playType: 'restart',
+    });
+    const p = evaluateAdjustment(c);
+    expect(p.deltas.length).toBeGreaterThan(0);
+  });
+
   it('is deterministic', () => {
     const c1 = ctx({
       recentSummaries: [summary('win'), summary('win'), summary('lose')],

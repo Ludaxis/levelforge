@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useState, type DragEvent } from 'react';
-import { GripVertical, Plus, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useState, type DragEvent } from 'react';
+import { Bookmark, GripVertical, Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -10,17 +10,62 @@ import {
   type DifficultyElementKey,
 } from '@/lib/juicyBlast/difficultyElements';
 import {
+  defaultVariantRules,
+  deleteVariantTemplate,
+  instantiateTemplate,
+  loadVariantTemplates,
   makeRuleId,
+  saveVariantTemplate,
   type VariantRule,
+  type VariantTemplate,
 } from '@/lib/juicyBlast/variantResolve';
 
 interface VariantRuleBuilderProps {
   rules: VariantRule[];
   onChange: (rules: VariantRule[]) => void;
+  /** Show the save/load templates toolbar. Defaults to true. */
+  showTemplates?: boolean;
 }
 
-export function VariantRuleBuilder({ rules, onChange }: VariantRuleBuilderProps) {
+export function VariantRuleBuilder({
+  rules,
+  onChange,
+  showTemplates = true,
+}: VariantRuleBuilderProps) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [templates, setTemplates] = useState<VariantTemplate[]>([]);
+  const [templateName, setTemplateName] = useState('');
+
+  useEffect(() => {
+    if (showTemplates) setTemplates(loadVariantTemplates());
+  }, [showTemplates]);
+
+  const handleSaveTemplate = useCallback(() => {
+    const name = templateName.trim();
+    if (!name) return;
+    saveVariantTemplate(name, rules);
+    setTemplates(loadVariantTemplates());
+    setTemplateName('');
+  }, [templateName, rules]);
+
+  const handleLoadTemplate = useCallback(
+    (id: string) => {
+      if (!id) return;
+      const tpl = templates.find((t) => t.id === id);
+      if (!tpl) return;
+      onChange(instantiateTemplate(tpl));
+    },
+    [templates, onChange]
+  );
+
+  const handleDeleteTemplate = useCallback((id: string) => {
+    deleteVariantTemplate(id);
+    setTemplates(loadVariantTemplates());
+  }, []);
+
+  const handleResetToDefaults = useCallback(() => {
+    onChange(defaultVariantRules());
+  }, [onChange]);
 
   const addRow = useCallback(() => {
     const usedNumbers = new Set(rules.map((r) => r.variantNumber));
@@ -68,6 +113,90 @@ export function VariantRuleBuilder({ rules, onChange }: VariantRuleBuilderProps)
 
   return (
     <div className="space-y-2">
+      {showTemplates && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-2 py-1.5 text-xs">
+          <Bookmark className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">Templates:</span>
+          <select
+            onChange={(e) => {
+              handleLoadTemplate(e.target.value);
+              e.currentTarget.value = '';
+            }}
+            defaultValue=""
+            className="h-7 min-w-[120px] rounded-md border border-input bg-background px-2 text-xs"
+          >
+            <option value="" disabled>
+              Load template…
+            </option>
+            {templates.length === 0 && (
+              <option value="" disabled>
+                (none saved)
+              </option>
+            )}
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+
+          <Input
+            type="text"
+            placeholder="Template name"
+            value={templateName}
+            onChange={(e) => setTemplateName(e.target.value)}
+            className="h-7 w-36 px-2 text-xs"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSaveTemplate}
+            disabled={!templateName.trim() || rules.length === 0}
+            className="h-7"
+            title="Save current rules as a named template"
+          >
+            <Save className="mr-1 h-3.5 w-3.5" />
+            Save
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleResetToDefaults}
+            className="h-7 text-muted-foreground"
+            title="Replace current rules with the shipped defaults"
+          >
+            <RotateCcw className="mr-1 h-3.5 w-3.5" />
+            Reset to defaults
+          </Button>
+
+          {templates.length > 0 && (
+            <div className="ml-auto flex items-center gap-1">
+              <span className="text-muted-foreground">Delete:</span>
+              <select
+                onChange={(e) => {
+                  if (e.target.value) {
+                    handleDeleteTemplate(e.target.value);
+                    e.currentTarget.value = '';
+                  }
+                }}
+                defaultValue=""
+                className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+              >
+                <option value="" disabled>
+                  Pick one…
+                </option>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-[auto_80px_1fr_80px_auto] items-center gap-x-2 text-[10px] uppercase tracking-wider text-muted-foreground">
         <span />
         <span>Variant #</span>

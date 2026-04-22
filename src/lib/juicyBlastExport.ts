@@ -672,6 +672,10 @@ export interface StudioExportLevel {
   WaitingStandSlots?: number;
   ActiveLauncherCount?: number;
   MoveLimit?: number;
+  /** Minimum moves for perfect play from the greedy solver. Falls back to
+   *  totalItems + BlockingOffset when the level is flagged unsolvable, so
+   *  every exported level carries a usable par number. */
+  ParMoves?: number;
   /** Computed difficulty score 0-100 — the composite tier from LevelForge. */
   DifficultyScore?: number;
   /** Spatial clustering metric (0.0-1.0) for same-color-different-variant
@@ -732,6 +736,9 @@ export interface StudioExportData {
   waitingStandSlots?: number;
   activeLauncherCount?: number;
   moveLimit?: number;
+  /** Minimum moves for perfect play. Falls back to totalItems + BlockingOffset
+   *  when the level is unsolvable so the field is always populated. */
+  parMoves?: number;
   /** Computed composite difficulty score (0-100) from LevelForge. */
   difficultyScore?: number;
   /** Spatial clustering metric (0.0-1.0) computed from the pixel art layout. */
@@ -811,6 +818,7 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
     WaitingStandSlots: data.waitingStandSlots,
     ActiveLauncherCount: data.activeLauncherCount,
     MoveLimit: data.moveLimit,
+    ParMoves: data.parMoves,
     DifficultyScore: data.difficultyScore,
     ColorVariantDensity: data.colorVariantDensity,
     VariantComplexity: data.variantComplexity,

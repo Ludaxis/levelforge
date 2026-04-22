@@ -26,12 +26,16 @@ export interface SignalEntry {
   frameNumber: number;
 }
 
+export type PlayType = 'start' | 'restart' | 'replay';
+
 export interface SessionRow {
   userId: string;
   sessionId: string;
   levelId: string;
   levelVariant?: number;
   attempt: number;
+  /** song_start.play_type. `replay` sessions are skipped by the adjustment engine. */
+  playType?: PlayType;
   signals: SignalEntry[];
   levelParameters: Record<string, number>;
   outcome: SessionOutcome;
@@ -129,6 +133,12 @@ export interface CadenceConfig {
     exponentialAlpha: number;
   };
   adjustmentEngine: {
+    /**
+     * Minimum level number at which Cadence produces adjustments.
+     * Matches the shipped SDK default (`CadenceStartLevel = 6`) — DDA
+     * stays off for the first few tutorial levels.
+     */
+    cadenceStartLevel: number;
     targetWinRateMin: number;
     targetWinRateMax: number;
     minSessionsBeforeActive: number;

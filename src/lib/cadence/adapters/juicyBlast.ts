@@ -52,6 +52,22 @@ export const juicyBlastAdapter: GameAdapter = {
     maxJumpStep: 3,
   },
 
+  /**
+   * Applied only when the SAT export does not carry level-design
+   * columns (the current production `song_start` schema does not).
+   * Values match the mid-range JB difficulty config Reza maintains
+   * in Studio (blocking_offset=5, max_selectable=10, etc.) — good
+   * enough for replay-era analysis. Once the DDA tab events ship,
+   * real per-level values override these.
+   */
+  defaultLevelParameters: {
+    blocking_offset: 5,
+    max_selectable: 10,
+    active_launchers: 2,
+    color_variant_density: 50,
+    difficulty_score: 1500,
+  },
+
   sessionKeyColumns: ['user_id', 'level_id', 'attempt'],
 
   signalColumnMapping: {

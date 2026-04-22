@@ -48,6 +48,15 @@ export interface GameAdapter {
   ddaOutputEventName?: string;
 
   /**
+   * Fallback values for design levers when the SAT export does not
+   * carry them yet (pre-DDA-extension telemetry). The replay pipeline
+   * fills in missing lever values from here so rules can still
+   * produce proposals on historical data. The importer surfaces a
+   * warning when this fallback is used.
+   */
+  defaultLevelParameters?: Record<string, number>;
+
+  /**
    * Human-readable notes shown in the adapter selector UI.
    */
   notes?: string;
