@@ -11,6 +11,10 @@ import {
   generateSampleAbDataset,
   generateSampleJuicyBlastRows,
 } from '@/lib/cadence/sampleData';
+import {
+  profileImportRows,
+  type ImportReadinessReport,
+} from '@/lib/cadence/importProfile';
 
 export interface ImportedData {
   fileName: string;
@@ -19,6 +23,7 @@ export interface ImportedData {
   columns: string[];
   rows: Array<Record<string, unknown>>;
   format: 'csv' | 'json';
+  report: ImportReadinessReport;
 }
 
 interface DataImporterProps {
@@ -52,11 +57,15 @@ export function DataImporter({
           text.trimStart().startsWith('[') ||
           text.trimStart().startsWith('{');
         const parsed = isJson ? parseJson(text) : parseCsv(text);
+        const profiled = profileImportRows(parsed.rows, parsed.columns);
         onImport({
           fileName: file.name,
           sizeBytes: file.size,
           format: isJson ? 'json' : 'csv',
-          ...parsed,
+          rowCount: profiled.rows.length,
+          columns: profiled.columns,
+          rows: profiled.rows,
+          report: profiled.report,
         });
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to parse file');
@@ -88,6 +97,7 @@ export function DataImporter({
           return set;
         }, new Set<string>())
       );
+      const profiled = profileImportRows(rows, columns);
       const bytes = new Blob([JSON.stringify(rows)]).size;
       onImport({
         fileName:
@@ -96,9 +106,10 @@ export function DataImporter({
             : 'sample_juicy_blast.json',
         sizeBytes: bytes,
         format: 'json',
-        rowCount: rows.length,
-        columns,
-        rows,
+        rowCount: profiled.rows.length,
+        columns: profiled.columns,
+        rows: profiled.rows,
+        report: profiled.report,
       });
     },
     [onImport]
@@ -232,9 +243,21 @@ export function DataImporter({
               <Button variant="outline" onClick={onClear} disabled={running}>
                 Reset
               </Button>
-              <Button onClick={onRun} disabled={running}>
+              <Button
+                onClick={onRun}
+                disabled={running || !data.report.canRunReplay}
+                title={
+                  data.report.canRunReplay
+                    ? undefined
+                    : 'Replay requires raw user-level event rows.'
+                }
+              >
                 <Play className="mr-2 h-4 w-4" />
-                {running ? 'Running…' : 'Run Pipeline'}
+                {running
+                  ? 'Running…'
+                  : data.report.canRunReplay
+                    ? 'Run Pipeline'
+                    : 'Replay unavailable'}
               </Button>
             </div>
           </div>

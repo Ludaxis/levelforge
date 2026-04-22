@@ -6,6 +6,7 @@ import type {
   SignalEntry,
   SignalTier,
 } from './types';
+import { normalizeAttemptValue } from './importProfile';
 
 /**
  * Group raw SAT-export rows (one row per analytics event) into sessions.
@@ -35,8 +36,7 @@ interface GroupingResult {
    * Names of design-lever keys that were filled from the adapter's
    * defaultLevelParameters because the SAT export did not carry them.
    * The importer uses this to render a "Synthesized lever values"
-   * notice — Mai's 2026-04-20 call flagged that pre-DDA exports
-   * lack these fields.
+   * notice; pre-DDA exports often lack these fields.
    */
   synthesizedLeverKeys: string[];
 }
@@ -88,7 +88,9 @@ export function groupRowsIntoSessions(
         r[EVENT_COL] === 'song_start' ||
         r[EVENT_COL] === 'me_start'
     );
-    const playType = parsePlayType(startRow?.['play_type']);
+    const playType = parsePlayType(
+      startRow?.['play_type'] ?? startRow?.['source'] ?? startRow?.['song_play_type']
+    );
     const endRow = rows.find(
       (r) =>
         r[EVENT_COL] === 'song_result' ||
@@ -238,7 +240,10 @@ function safeString(v: unknown): string {
  */
 function sessionKeyPart(col: string, v: unknown): string {
   const s = safeString(v);
-  if (s !== '') return s;
+  if (s !== '') {
+    if (col === 'attempt') return String(normalizeAttemptValue(s));
+    return s;
+  }
   if (col === 'attempt') return '1';
   return '';
 }

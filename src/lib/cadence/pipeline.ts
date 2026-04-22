@@ -35,6 +35,9 @@ export interface PerSessionReport {
   userId: string;
   levelId: string;
   attempt: number;
+  playType?: SessionRow['playType'];
+  startedAtUtc: number;
+  endedAtUtc: number;
   summary: SessionSummary;
   finalFlowReading?: FlowReading;
   profileBefore: PlayerSkillProfile;
@@ -277,6 +280,9 @@ export async function runPipeline(
         userId,
         levelId: session.levelId,
         attempt: session.attempt,
+        playType: session.playType,
+        startedAtUtc: session.startedAtUtc,
+        endedAtUtc: session.endedAtUtc,
         summary,
         finalFlowReading: finalReading,
         profileBefore,

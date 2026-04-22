@@ -113,6 +113,30 @@ describe('groupRowsIntoSessions', () => {
     expect(out.sessions).toHaveLength(3);
   });
 
+  it('normalizes numeric-looking attempt values before grouping', () => {
+    const rows = [
+      { ...startRow({ user: 'u1', level: 'L5', attempt: 1, ts: 1000, parMoves: 20 }), attempt: '1.0' },
+      { ...moveRow({ user: 'u1', level: 'L5', attempt: 1, ts: 2000, moveIndex: 1, isOptimal: 1 }), attempt: '1' },
+      { ...resultRow({ user: 'u1', level: 'L5', attempt: 1, ts: 5000, result: 'win', playtime: 4.0, actualMoves: 1, parMoves: 20 }), attempt: 1 },
+    ];
+    const out = groupRowsIntoSessions(rows, juicyBlastAdapter);
+    expect(out.sessions).toHaveLength(1);
+    expect(out.sessions[0].attempt).toBe(1);
+    expect(out.sessions[0].outcome).toBe('win');
+  });
+
+  it('uses source as a play-type fallback for NCJB/NCDR exports', () => {
+    const rows = [
+      {
+        ...startRow({ user: 'u1', level: 'L5', attempt: 1, ts: 1000, parMoves: 20 }),
+        source: 'replay',
+      },
+      resultRow({ user: 'u1', level: 'L5', attempt: 1, ts: 5000, result: 'win', playtime: 4.0, actualMoves: 1, parMoves: 20 }),
+    ];
+    const out = groupRowsIntoSessions(rows, juicyBlastAdapter);
+    expect(out.sessions[0].playType).toBe('replay');
+  });
+
   it('emits move.executed and move.optimal signals from song_move rows', () => {
     const rows = [
       startRow({ user: 'u1', level: 'L5', attempt: 1, ts: 1000, parMoves: 20 }),
