@@ -25,6 +25,7 @@ import {
   analyzeMoves,
 } from '@/lib/solvabilityChecker';
 import { StudioExportLevel, COLOR_TYPE_TO_HEX, COLOR_TYPE_TO_NAME } from '@/lib/juicyBlastExport';
+import { HelpButton } from '@/components/help';
 
 // ============================================================================
 // Color Mapping
@@ -1059,9 +1060,22 @@ export function SolvabilityChecker() {
 
   return (
     <div className="space-y-4">
+      {/* Top-level guide */}
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-muted-foreground">
+          Drop level JSONs, run solvers, classify each level, then bulk-tune difficulty.
+        </div>
+        <HelpButton topic="analyze" variant="full" label="Open guide" />
+      </div>
+
       {/* Upload */}
       <Card>
-        <CardHeader className="pb-2"><CardTitle className="text-sm">Upload Level JSONs</CardTitle></CardHeader>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-1.5">
+            Upload Level JSONs
+            <HelpButton topic="analyze.upload" />
+          </CardTitle>
+        </CardHeader>
         <CardContent>
           <input ref={fileRef} type="file" multiple accept=".json" className="hidden" onChange={(e) => e.target.files && handleFiles(e.target.files)} />
           <div
@@ -1110,7 +1124,10 @@ export function SolvabilityChecker() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center justify-between">
-              <span>Summary</span>
+              <span className="flex items-center gap-1.5">
+                Summary
+                <HelpButton topic="analyze.summary" />
+              </span>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" className="h-7" onClick={handleExportCSV}><Download className="h-3 w-3 mr-1" /> CSV</Button>
               </div>
@@ -1125,7 +1142,10 @@ export function SolvabilityChecker() {
               <span className="text-muted-foreground">avg win rate: {(report.summary.avgWinRate * 100).toFixed(1)}%</span>
             </div>
             <div className="flex items-center gap-2 pt-2 border-t border-border/50 flex-wrap">
-              <span className="text-xs text-muted-foreground">Adjust:</span>
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                Adjust:
+                <HelpButton topic="analyze.adjust" size="xs" />
+              </span>
               <select value={adjustTarget} onChange={(e) => setAdjustTarget(e.target.value as AdjustTarget)} className="h-7 text-xs bg-background border rounded px-2">
                 <option value="all">All levels</option>
                 <option value="solvable">Solvable only</option>
@@ -1158,7 +1178,10 @@ export function SolvabilityChecker() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-3">
-              <span>Level Detail</span>
+              <span className="flex items-center gap-1.5">
+                Level Detail
+                <HelpButton topic="analyze.detail" />
+              </span>
               <select
                 value={selectedLevelId || ''}
                 onChange={(e) => { setSelectedLevelId(e.target.value); setDetailTab('layers'); }}
@@ -1186,12 +1209,15 @@ export function SolvabilityChecker() {
                   <TabsTrigger value="logs" className="text-xs gap-1"><ScrollText className="h-3 w-3" /> Logs</TabsTrigger>
                 </TabsList>
                 <TabsContent value="layers">
+                  <div className="flex justify-end mb-2"><HelpButton topic="analyze.detail.layers" variant="inline" label="About this view" /></div>
                   <LayersPanel level={selectedLevel} report={selectedReport} solverInput={selectedSolverInput} />
                 </TabsContent>
                 <TabsContent value="solution">
+                  <div className="flex justify-end mb-2"><HelpButton topic="analyze.detail.solution" variant="inline" label="About this view" /></div>
                   <SolutionPanel report={selectedReport} />
                 </TabsContent>
                 <TabsContent value="sim">
+                  <div className="flex justify-end mb-2"><HelpButton topic="analyze.detail.simulator" variant="inline" label="About this view" /></div>
                   <SimulatorPanel
                     level={selectedLevel}
                     solverInput={selectedSolverInput}
@@ -1200,6 +1226,7 @@ export function SolvabilityChecker() {
                   />
                 </TabsContent>
                 <TabsContent value="logs">
+                  <div className="flex justify-end mb-2"><HelpButton topic="analyze.detail.logs" variant="inline" label="About this view" /></div>
                   <LogsPanel logs={playLogs} onClear={() => setPlayLogs([])} />
                 </TabsContent>
               </Tabs>
@@ -1211,7 +1238,12 @@ export function SolvabilityChecker() {
       {/* Batch Results table */}
       {report && (
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm">Batch Report</CardTitle></CardHeader>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-1.5">
+              Batch Report
+              <HelpButton topic="analyze.batchReport" />
+            </CardTitle>
+          </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
