@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -36,15 +35,6 @@ const IMPACT_COLORS: Record<string, string> = {
 };
 
 type ParameterLockKey = 'blocking' | 'surfaceSize' | 'activeLaunchers';
-
-function blockingLabel(blockingOffset: number): string {
-  if (blockingOffset <= 0) return 'Easy';
-  if (blockingOffset <= 2) return 'Light';
-  if (blockingOffset <= 4) return 'Medium';
-  if (blockingOffset <= 6) return 'Hard';
-  if (blockingOffset <= 8) return 'Very Hard';
-  return 'Nightmare';
-}
 
 function LockToggle({
   locked,
@@ -153,7 +143,14 @@ function DifficultyComponentRow({ component, isExpanded, onToggle }: {
 function FormulaBreakdown({ params, score }: { params: StudioDifficultyParams; score: number }) {
   const [isOpen, setIsOpen] = useState(false);
 
-  const { uniqueColors, launcherCount, maxSelectableItems, totalTiles } = params;
+  const {
+    uniqueColors,
+    launcherCount,
+    maxSelectableItems,
+    totalTiles,
+    uniqueVariants,
+    colorVariantDensity: colorVariantDensityInput,
+  } = params;
   const blockingOffset = params.blockingOffset ?? Math.round((params.mismatchDepth ?? 0) * 10);
 
   const blockingFactor = clamp01(blockingOffset / 10);
@@ -161,6 +158,11 @@ function FormulaBreakdown({ params, score }: { params: StudioDifficultyParams; s
   const surfaceSize = clamp01(1 - (maxSelectableItems - 1) / 19);
   const hiddenRatio = totalTiles > 0 ? clamp01((totalTiles - maxSelectableItems) / totalTiles) : 0;
   const launcherSequence = clamp01((launcherCount - 4) / 12);
+  const avgVariantsPerColor = uniqueVariants != null && uniqueColors > 0
+    ? uniqueVariants / uniqueColors
+    : 1;
+  const variantComplexity = clamp01((avgVariantsPerColor - 1) / 2);
+  const colorVariantDensity = clamp01(colorVariantDensityInput ?? 0);
   const unlockDistance = maxSelectableItems * 2 + blockingOffset;
 
   const rows: { label: string; formula: string; raw: string; weight: string; contribution: string }[] = [
@@ -168,40 +170,61 @@ function FormulaBreakdown({ params, score }: { params: StudioDifficultyParams; s
       label: 'Blocking',
       formula: `clamp01(${blockingOffset} / 10)`,
       raw: blockingFactor.toFixed(2),
-      weight: '0.40',
-      contribution: (blockingFactor * 0.40).toFixed(3),
+      weight: '0.38',
+      contribution: (blockingFactor * 0.38).toFixed(3),
     },
     {
       label: 'Surface Size',
       formula: `clamp01(1 - (${maxSelectableItems} - 1) / 19)`,
       raw: surfaceSize.toFixed(2),
-      weight: '0.25',
-      contribution: (surfaceSize * 0.25).toFixed(3),
+      weight: '0.21',
+      contribution: (surfaceSize * 0.21).toFixed(3),
     },
     {
       label: 'Hidden Ratio',
       formula: `(${totalTiles} - ${maxSelectableItems}) / ${totalTiles}`,
       raw: hiddenRatio.toFixed(2),
-      weight: '0.15',
-      contribution: (hiddenRatio * 0.15).toFixed(3),
+      weight: '0.12',
+      contribution: (hiddenRatio * 0.12).toFixed(3),
     },
     {
       label: 'Color Variety',
       formula: `clamp01((${uniqueColors} - 2) / 5)`,
       raw: colorVariety.toFixed(2),
-      weight: '0.10',
-      contribution: (colorVariety * 0.10).toFixed(3),
+      weight: '0.08',
+      contribution: (colorVariety * 0.08).toFixed(3),
     },
     {
       label: 'Blender Count',
       formula: `clamp01((${launcherCount} - 4) / 12)`,
       raw: launcherSequence.toFixed(2),
-      weight: '0.10',
-      contribution: (launcherSequence * 0.10).toFixed(3),
+      weight: '0.07',
+      contribution: (launcherSequence * 0.07).toFixed(3),
+    },
+    {
+      label: 'Variant Complexity',
+      formula: `clamp01((${avgVariantsPerColor.toFixed(2)} - 1) / 2)`,
+      raw: variantComplexity.toFixed(2),
+      weight: '0.09',
+      contribution: (variantComplexity * 0.09).toFixed(3),
+    },
+    {
+      label: 'Variant Density',
+      formula: `clamp01(${colorVariantDensity.toFixed(2)})`,
+      raw: colorVariantDensity.toFixed(2),
+      weight: '0.05',
+      contribution: (colorVariantDensity * 0.05).toFixed(3),
     },
   ];
 
-  const rawTotal = blockingFactor * 0.40 + colorVariety * 0.10 + surfaceSize * 0.25 + hiddenRatio * 0.15 + launcherSequence * 0.10;
+  const rawTotal =
+    blockingFactor * 0.38 +
+    colorVariety * 0.08 +
+    surfaceSize * 0.21 +
+    hiddenRatio * 0.12 +
+    launcherSequence * 0.07 +
+    variantComplexity * 0.09 +
+    colorVariantDensity * 0.05;
 
   return (
     <div className="pt-1 border-t border-border">

@@ -130,11 +130,8 @@ function TocNode({
   const hasChildren = node.children.length > 0;
   const isActive = node.topic.id === activeId;
   const containsActive = activeId ? containsTopic(node, activeId) : false;
-  const [expanded, setExpanded] = React.useState(containsActive || depth === 0);
-
-  useEffect(() => {
-    if (containsActive) setExpanded(true);
-  }, [containsActive]);
+  const [userExpanded, setUserExpanded] = React.useState(depth === 0);
+  const expanded = containsActive || userExpanded;
 
   return (
     <div>
@@ -151,7 +148,7 @@ function TocNode({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              setExpanded((v) => !v);
+              setUserExpanded((v) => !v);
             }}
             className="opacity-60 hover:opacity-100 -ml-1"
             aria-label={expanded ? 'Collapse' : 'Expand'}

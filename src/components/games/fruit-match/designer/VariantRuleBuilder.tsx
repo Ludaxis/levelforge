@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type DragEvent } from 'react';
+import { useCallback, useState, type DragEvent } from 'react';
 import { Bookmark, GripVertical, Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,12 +33,10 @@ export function VariantRuleBuilder({
   showTemplates = true,
 }: VariantRuleBuilderProps) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [templates, setTemplates] = useState<VariantTemplate[]>([]);
+  const [templates, setTemplates] = useState<VariantTemplate[]>(() =>
+    showTemplates ? loadVariantTemplates() : [],
+  );
   const [templateName, setTemplateName] = useState('');
-
-  useEffect(() => {
-    if (showTemplates) setTemplates(loadVariantTemplates());
-  }, [showTemplates]);
 
   const handleSaveTemplate = useCallback(() => {
     const name = templateName.trim();

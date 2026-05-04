@@ -652,7 +652,8 @@ function verifySolvability(
                 }
               }
             } else {
-              // Empty launcher: group by variant, only take if completable
+              // Empty launcher: pull the largest same-variant group immediately.
+              // This frees stand space as soon as the matching blender appears.
               const variantGroups = new Map<number, number[]>();
               for (let i = 0; i < stand.length; i++) {
                 if (stand[i].colorType === l.colorType) {
@@ -661,12 +662,12 @@ function verifySolvability(
                   variantGroups.get(v)!.push(i);
                 }
               }
-              variantGroups.forEach((vIndices, variant) => {
-                if (indices.length === 0 && vIndices.length >= need) {
-                  indices.push(...vIndices.slice(0, need));
-                  l.lockedVariant = variant;
-                }
-              });
+              const bestGroup = [...variantGroups.entries()]
+                .sort((a, b) => b[1].length - a[1].length)[0];
+              if (bestGroup) {
+                l.lockedVariant = bestGroup[0];
+                indices.push(...bestGroup[1].slice(0, need));
+              }
             }
 
             if (indices.length > 0) {
@@ -1306,12 +1307,12 @@ function verifySolvabilitySeeded(
                   variantGroups.get(v)!.push(i);
                 }
               }
-              variantGroups.forEach((vIndices, variant) => {
-                if (indices.length === 0 && vIndices.length >= need) {
-                  indices.push(...vIndices.slice(0, need));
-                  l.lockedVariant = variant;
-                }
-              });
+              const bestGroup = [...variantGroups.entries()]
+                .sort((a, b) => b[1].length - a[1].length)[0];
+              if (bestGroup) {
+                l.lockedVariant = bestGroup[0];
+                indices.push(...bestGroup[1].slice(0, need));
+              }
             }
             if (indices.length > 0) { l.collected += indices.length; for (let j = indices.length - 1; j >= 0; j--) stand.splice(indices[j], 1); changed = true; }
           }
@@ -1718,11 +1719,10 @@ export function postFireCascade(
           }
         }
       } else {
-        // Empty launcher: group stand items by variant and only auto-fill
-        // if a single variant has enough items to complete the launcher.
-        // This prevents premature variant-locking that can make levels
-        // unfinishable when items of different variants get split across
-        // launchers of the same colorType.
+        // Empty launcher: pull the largest same-variant group immediately.
+        // This matches playtest expectations: when a blender becomes active,
+        // matching stand fruits move into it and free backup slots even if
+        // there are only one or two of them.
         const variantGroups = new Map<number, number[]>();
         for (let i = 0; i < stand.length; i++) {
           if (stand[i].colorType === launcher.colorType) {
@@ -1731,11 +1731,11 @@ export function postFireCascade(
             variantGroups.get(v)!.push(i);
           }
         }
-        variantGroups.forEach((indices) => {
-          if (matchingIndices.length === 0 && indices.length >= canTake) {
-            matchingIndices.push(...indices.slice(0, canTake));
-          }
-        });
+        const bestGroup = [...variantGroups.values()]
+          .sort((a, b) => b.length - a.length)[0];
+        if (bestGroup) {
+          matchingIndices.push(...bestGroup.slice(0, canTake));
+        }
       }
 
       if (matchingIndices.length > 0) {

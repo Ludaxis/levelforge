@@ -9,10 +9,12 @@ import {
 } from '@/lib/studioDifficultyEngine';
 import {
   StudioGameConfig,
+  StudioLauncherState,
   StudioTile,
   mulberry32,
   seededShuffle,
   initializeStateSeeded,
+  postFireCascade,
   buildDeterministicSequence,
   getDeterministicMaxSwap,
   buildSolvableSequenceSeeded,
@@ -412,6 +414,57 @@ describe('Monte Carlo simulation', () => {
 
     expect(result1.winRate).toBe(result2.winRate);
     expect(result1.avgMoves).toBe(result2.avgMoves);
+  });
+});
+
+// ============================================================================
+// Section 5b: Runtime cascade behavior
+// ============================================================================
+
+describe('Runtime cascade', () => {
+  it('auto-fills partial matching stand fruits when a new launcher becomes active', () => {
+    const fired: StudioLauncherState = {
+      id: 'launcher-fired',
+      colorType: 9,
+      fruitType: 'apple',
+      pixelCount: 0,
+      group: 9,
+      collected: [],
+    };
+    const activeGreen: StudioLauncherState = {
+      id: 'launcher-green',
+      colorType: 5,
+      fruitType: 'apple',
+      pixelCount: 0,
+      group: 5,
+      collected: [],
+    };
+    const queuedBlue: StudioLauncherState = {
+      id: 'launcher-blue',
+      colorType: 0,
+      fruitType: 'blueberry',
+      pixelCount: 0,
+      group: 0,
+      collected: [],
+    };
+    const waitingStand: StudioTile[] = [
+      { id: 'blue-1', colorType: 0, variant: 0, fruitType: 'blueberry' },
+      { id: 'blue-2', colorType: 0, variant: 0, fruitType: 'blueberry' },
+      { id: 'orange-1', colorType: 1, variant: 0, fruitType: 'orange' },
+    ];
+
+    const cascade = postFireCascade(
+      [fired, activeGreen],
+      [queuedBlue],
+      waitingStand,
+      [],
+      fired.id,
+      2,
+    );
+
+    const blueLauncher = cascade.activeLaunchers.find((l) => l.id === queuedBlue.id);
+    expect(blueLauncher?.collected.map((tile) => tile.id)).toEqual(['blue-1', 'blue-2']);
+    expect(cascade.waitingStand.map((tile) => tile.id)).toEqual(['orange-1']);
   });
 });
 

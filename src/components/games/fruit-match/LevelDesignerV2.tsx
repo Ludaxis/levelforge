@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
   DialogContent,
@@ -75,11 +76,13 @@ import { LauncherSection } from './designer/LauncherSection';
 import { GamePreviewCanvas } from './designer/GamePreviewCanvas';
 import { ItemPoolSection } from './designer/ItemPoolSection';
 import { DifficultyAnalysis } from './designer/DifficultyAnalysis';
+import { SimulatorPanel } from './designer/SimulatorPanel';
 import {
   BulkVariantGenerator,
   type ResolvedVariant,
 } from './designer/BulkVariantGenerator';
 import { StudioArrangementPreview } from './StudioArrangementPreview';
+import type { ValidatedVariant } from '@/lib/juicyBlast/variantOptimizer';
 
 // ============================================================================
 // Main Component: LevelDesignerV2
@@ -1466,6 +1469,105 @@ export function LevelDesignerV2({
     ]
   );
 
+  const handleValidatedVariantExport = useCallback(
+    (variants: ValidatedVariant[]) => {
+      for (const variant of variants) {
+        if (!variant.accepted) continue;
+
+        const variantLevelId = `Level${levelNumber}_${variant.variantNumber}`;
+        const config = variant.config;
+        const bo = config.blockingOffset ?? blockingOffset;
+        const selectableItemsForExport = config.selectableItems.map((item, index) => ({
+          colorType: item.colorType,
+          variant: item.variant,
+          layer:
+            item.layer ??
+            (index < config.maxSelectableItems
+              ? 'A'
+              : index < 2 * config.maxSelectableItems
+                ? 'B'
+                : 'C'),
+          order: item.order,
+        }));
+
+        const exportData: StudioExportData = {
+          palette,
+          levelId: variantLevelId,
+          levelIndex: levelNumber,
+          difficulty: variant.report.tier,
+          graphicId: `graphic_${artWidth}x${artHeight}`,
+          width: artWidth,
+          height: artHeight,
+          pixels: pixelArray.map((p) => ({
+            row: p.row,
+            col: p.col,
+            colorType: p.colorType,
+            colorGroup: p.colorGroup,
+            colorHex: p.colorHex,
+            group: p.group,
+          })),
+          selectableItems: selectableItemsForExport,
+          requirements: [...launchers]
+            .sort((a, b) => a.order - b.order)
+            .map((l) => ({
+              colorType: l.colorType,
+              value: l.pixelCount,
+              group: l.group,
+            })),
+          launchers: [...launchers]
+            .sort((a, b) => a.order - b.order)
+            .map((l) => ({
+              colorType: l.colorType,
+              pixelCount: l.pixelCount,
+              group: l.group,
+              order: l.order,
+              isLocked: l.isLocked,
+            })),
+          unlockStageData: [{ requiredCompletedGroups: groups.map((g) => g.id) }],
+          maxSelectableItems: config.maxSelectableItems,
+          seed: config.seed,
+          blockingOffset: bo,
+          mismatchDepth: bo / 10,
+          waitingStandSlots: config.waitingStandSlots,
+          activeLauncherCount: config.activeLauncherCount ?? activeLauncherCount,
+          moveLimit: config.moveLimit,
+          parMoves: variant.report.parMoves ?? undefined,
+          difficultyScore: variant.report.solverScore,
+          colorVariantDensity: studioDifficultyParams?.colorVariantDensity,
+          variantComplexity:
+            difficultyResult?.breakdown.find((c) => c.id === 'variantComplexity')
+              ?.score,
+        };
+
+        const result = exportStudioLevel(exportData);
+        const blob = new Blob([JSON.stringify(result, null, 4)], {
+          type: 'application/json',
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${variantLevelId}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    },
+    [
+      palette,
+      levelNumber,
+      artWidth,
+      artHeight,
+      pixelArray,
+      launchers,
+      groups,
+      blockingOffset,
+      activeLauncherCount,
+      studioDifficultyParams,
+      difficultyResult,
+    ]
+  );
+
   // ============================================================================
   // Add to Collection
   // ============================================================================
@@ -1840,65 +1942,81 @@ export function LevelDesignerV2({
               Arrangement Preview
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <DifficultyAnalysis
-              difficultyResult={difficultyResult}
-              difficultyParams={studioDifficultyParams}
-              studioGameConfig={studioGameConfig}
-              maxSelectableItems={maxSelectableItems}
-              blockingOffset={blockingOffset}
-              waitingStandSlots={waitingStandSlots}
-              activeLauncherCount={activeLauncherCount}
-              maxActiveLaunchers={maxActiveLaunchers}
-              seed={seed}
-              parameterLocks={parameterLocks}
-              simulationResult={simulationResult}
-              isTargeting={isTargeting}
-              isSimulating={isSimulating}
-              onMaxSelectableChange={setMaxSelectableItems}
-              onBlockingOffsetChange={setBlockingOffset}
-              onWaitingStandSlotsChange={setWaitingStandSlots}
-              onActiveLauncherCountChange={setActiveLauncherCount}
-              onSeedChange={setSeed}
-              moveLimit={moveLimit}
-              onMoveLimitChange={setMoveLimit}
-              onToggleParameterLock={handleToggleParameterLock}
-              onEasier={handleEasier}
-              onHarder={handleHarder}
-              onAutoTarget={handleAutoTarget}
-              onSimulate={handleSimulate}
-            />
-            {/* Move Stats */}
-            {(parMoves !== null || liveSimResult) && (
-              <div className="flex items-center gap-3 text-[11px] text-muted-foreground px-1 py-1.5 bg-muted/20 rounded-md">
-                <span>Par: <span className={`font-mono font-medium ${parMoves !== null ? 'text-foreground' : ''}`}>{parMoves ?? '--'}</span></span>
-                {liveSimResult && liveSimResult.minMoves > 0 && (
-                  <>
-                    <span className="text-border">|</span>
-                    <span>Min: <span className="font-mono text-foreground">{liveSimResult.minMoves}</span></span>
-                    <span>Avg: <span className="font-mono text-foreground">{Math.round(liveSimResult.avgMoves)}</span></span>
-                    <span>Max: <span className="font-mono text-foreground">{liveSimResult.maxMoves}</span></span>
-                    <span className="text-border">|</span>
-                    <span>Win: <span className="font-mono text-foreground">{Math.round(liveSimResult.winRate * 100)}%</span></span>
-                  </>
-                )}
-                {moveLimit !== undefined && (
-                  <>
-                    <span className="text-border">|</span>
-                    <span>Limit: <span className="font-mono text-foreground font-medium">{moveLimit}</span></span>
-                  </>
-                )}
-              </div>
-            )}
+          <CardContent>
+            <Tabs defaultValue="arrangement" className="space-y-3">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="arrangement">Arrangement</TabsTrigger>
+                <TabsTrigger value="simulator">Simulator</TabsTrigger>
+              </TabsList>
 
-            <StudioArrangementPreview
-              previewState={arrangementPreviewState}
-              colorTypeToHex={colorTypeToHex}
-              waitingStandSlots={waitingStandSlots}
-              blockingOffset={blockingOffset}
-              maxSelectableItems={maxSelectableItems}
-              onBlockingOffsetChange={setBlockingOffset}
-            />
+              <TabsContent value="arrangement" className="mt-0 space-y-3">
+                <DifficultyAnalysis
+                  difficultyResult={difficultyResult}
+                  difficultyParams={studioDifficultyParams}
+                  studioGameConfig={studioGameConfig}
+                  maxSelectableItems={maxSelectableItems}
+                  blockingOffset={blockingOffset}
+                  waitingStandSlots={waitingStandSlots}
+                  activeLauncherCount={activeLauncherCount}
+                  maxActiveLaunchers={maxActiveLaunchers}
+                  seed={seed}
+                  parameterLocks={parameterLocks}
+                  simulationResult={simulationResult}
+                  isTargeting={isTargeting}
+                  isSimulating={isSimulating}
+                  onMaxSelectableChange={setMaxSelectableItems}
+                  onBlockingOffsetChange={setBlockingOffset}
+                  onWaitingStandSlotsChange={setWaitingStandSlots}
+                  onActiveLauncherCountChange={setActiveLauncherCount}
+                  onSeedChange={setSeed}
+                  moveLimit={moveLimit}
+                  onMoveLimitChange={setMoveLimit}
+                  onToggleParameterLock={handleToggleParameterLock}
+                  onEasier={handleEasier}
+                  onHarder={handleHarder}
+                  onAutoTarget={handleAutoTarget}
+                  onSimulate={handleSimulate}
+                />
+                {/* Move Stats */}
+                {(parMoves !== null || liveSimResult) && (
+                  <div className="flex items-center gap-3 text-[11px] text-muted-foreground px-1 py-1.5 bg-muted/20 rounded-md">
+                    <span>Par: <span className={`font-mono font-medium ${parMoves !== null ? 'text-foreground' : ''}`}>{parMoves ?? '--'}</span></span>
+                    {liveSimResult && liveSimResult.minMoves > 0 && (
+                      <>
+                        <span className="text-border">|</span>
+                        <span>Min: <span className="font-mono text-foreground">{liveSimResult.minMoves}</span></span>
+                        <span>Avg: <span className="font-mono text-foreground">{Math.round(liveSimResult.avgMoves)}</span></span>
+                        <span>Max: <span className="font-mono text-foreground">{liveSimResult.maxMoves}</span></span>
+                        <span className="text-border">|</span>
+                        <span>Win: <span className="font-mono text-foreground">{Math.round(liveSimResult.winRate * 100)}%</span></span>
+                      </>
+                    )}
+                    {moveLimit !== undefined && (
+                      <>
+                        <span className="text-border">|</span>
+                        <span>Limit: <span className="font-mono text-foreground font-medium">{moveLimit}</span></span>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                <StudioArrangementPreview
+                  previewState={arrangementPreviewState}
+                  colorTypeToHex={colorTypeToHex}
+                  waitingStandSlots={waitingStandSlots}
+                  blockingOffset={blockingOffset}
+                  maxSelectableItems={maxSelectableItems}
+                  onBlockingOffsetChange={setBlockingOffset}
+                />
+              </TabsContent>
+
+              <TabsContent value="simulator" className="mt-0">
+                <SimulatorPanel
+                  studioGameConfig={studioGameConfig}
+                  legacyScore={difficultyResult?.score ?? null}
+                />
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       )}
@@ -1932,8 +2050,10 @@ export function LevelDesignerV2({
             moveLimit,
             maxActiveLaunchers,
           }}
+          baseConfig={studioGameConfig}
           levelNumber={levelNumber}
           onExport={handleBulkVariantExport}
+          onExportValidated={handleValidatedVariantExport}
         />
       )}
 

@@ -7,6 +7,8 @@ import {
   Download,
   AlertTriangle,
   Info,
+  Loader2,
+  ShieldCheck,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,6 +21,12 @@ import {
   type ResolvedVariant,
   type VariantRule,
 } from '@/lib/juicyBlast/variantResolve';
+import { StudioGameConfig } from '@/lib/studioGameLogic';
+import {
+  ValidatedVariant,
+  ValidatedVariantSet,
+  generateValidatedVariants,
+} from '@/lib/juicyBlast/variantOptimizer';
 import { VariantRuleBuilder } from './VariantRuleBuilder';
 
 // Re-export for callers that still import from this file.
@@ -26,17 +34,23 @@ export type { ResolvedVariant, BaseLevelValues } from '@/lib/juicyBlast/variantR
 
 interface BulkVariantGeneratorProps {
   base: BaseLevelValues;
+  baseConfig?: StudioGameConfig | null;
   levelNumber: number;
   onExport: (variants: ResolvedVariant[]) => void;
+  onExportValidated?: (variants: ValidatedVariant[]) => void;
 }
 
 export function BulkVariantGenerator({
   base,
+  baseConfig,
   levelNumber,
   onExport,
+  onExportValidated,
 }: BulkVariantGeneratorProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [rules, setRules] = useState<VariantRule[]>(() => loadVariantRules());
+  const [validatedSet, setValidatedSet] = useState<ValidatedVariantSet | null>(null);
+  const [isGeneratingValidated, setIsGeneratingValidated] = useState(false);
 
   useEffect(() => {
     saveVariantRules(rules);
@@ -54,6 +68,20 @@ export function BulkVariantGenerator({
     if (!canExport) return;
     onExport(resolved);
   }, [canExport, onExport, resolved]);
+
+  const handleGenerateValidated = useCallback(() => {
+    if (!baseConfig) return;
+    setIsGeneratingValidated(true);
+    window.setTimeout(() => {
+      setValidatedSet(generateValidatedVariants(baseConfig, { runsPerProfile: 12, allowRisky: true }));
+      setIsGeneratingValidated(false);
+    }, 0);
+  }, [baseConfig]);
+
+  const handleExportValidated = useCallback(() => {
+    if (!validatedSet?.canExport || !onExportValidated) return;
+    onExportValidated(validatedSet.variants);
+  }, [onExportValidated, validatedSet]);
 
   return (
     <Card>
@@ -199,6 +227,83 @@ export function BulkVariantGenerator({
               Export {distinctVariants} variant
               {distinctVariants === 1 ? '' : 's'}
             </Button>
+          </div>
+
+          <div className="space-y-2 border-t border-border pt-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-medium">Validated 1-9</p>
+                <p className="text-[10px] text-muted-foreground">
+                  v5 base · solver-gated variants
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8"
+                onClick={handleGenerateValidated}
+                disabled={!baseConfig || isGeneratingValidated}
+              >
+                {isGeneratingValidated ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Generate Validated 1-9
+              </Button>
+            </div>
+
+            {validatedSet && (
+              <div className="rounded-md border border-border/60 bg-muted/20 p-2">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Solver Preview
+                  </p>
+                  <span className={`text-[10px] font-mono ${validatedSet.canExport ? 'text-green-600' : 'text-red-600'}`}>
+                    {validatedSet.canExport ? 'export ready' : 'blocked'}
+                  </span>
+                </div>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-muted-foreground">
+                      <th className="pr-2 pb-1 font-normal">Variant</th>
+                      <th className="pr-2 pb-1 font-normal">Score</th>
+                      <th className="pr-2 pb-1 font-normal">Verdict</th>
+                      <th className="pr-2 pb-1 font-normal">MSI</th>
+                      <th className="pr-2 pb-1 font-normal">BO</th>
+                      <th className="pr-2 pb-1 font-normal">Win</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {validatedSet.variants.map((variant) => (
+                      <tr key={variant.variantNumber} className="border-t border-border/40">
+                        <td className="py-1 pr-2 font-mono">v{variant.variantNumber}</td>
+                        <td className="py-1 pr-2 font-mono">{variant.report.solverScore}</td>
+                        <td className={`py-1 pr-2 ${variant.accepted ? 'text-green-600' : 'text-red-600'}`}>
+                          {variant.report.verdict}
+                        </td>
+                        <td className="py-1 pr-2 font-mono">{variant.values.maxSelectableItems}</td>
+                        <td className="py-1 pr-2 font-mono">{variant.values.blockingOffset}</td>
+                        <td className="py-1 pr-2 font-mono">
+                          {Math.round(variant.report.winRates.average * 100)}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="mt-2 flex justify-end">
+                  <Button
+                    size="sm"
+                    className="h-8"
+                    onClick={handleExportValidated}
+                    disabled={!validatedSet.canExport || !onExportValidated}
+                  >
+                    <Download className="mr-1.5 h-3.5 w-3.5" />
+                    Export validated variants
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       )}
