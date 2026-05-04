@@ -188,7 +188,7 @@ export function SimulatorPanel({
                     {visibleAnalysis.verdict}
                   </Badge>
                   <Badge className={DIFFICULTY_COLORS[visibleAnalysis.tier] || 'bg-gray-500'}>
-                    {visibleAnalysis.solverScore} ({visibleAnalysis.tier})
+                    Solver {visibleAnalysis.solverScore} ({visibleAnalysis.tier})
                   </Badge>
                   <span className="text-xs text-muted-foreground">
                     Legacy {legacyScore ?? visibleAnalysis.legacyScore ?? '--'}

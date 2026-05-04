@@ -1477,6 +1477,23 @@ export function LevelDesignerV2({
         const variantLevelId = `Level${levelNumber}_${variant.variantNumber}`;
         const config = variant.config;
         const bo = config.blockingOffset ?? blockingOffset;
+        const variantUniqueColors = new Set([
+          ...pixelArray.map((p) => p.colorType),
+          ...config.selectableItems.map((item) => item.colorType),
+        ]).size;
+        const variantUniqueVariants = new Set(
+          config.selectableItems.map((item) => `${item.colorType}:${item.variant}`),
+        ).size;
+        const legacyDifficulty = studioDifficultyParams
+          ? calculateStudioDifficulty({
+              ...studioDifficultyParams,
+              uniqueColors: variantUniqueColors,
+              totalTiles: config.selectableItems.length,
+              uniqueVariants: variantUniqueVariants,
+              maxSelectableItems: config.maxSelectableItems,
+              blockingOffset: bo,
+            })
+          : null;
         const selectableItemsForExport = config.selectableItems.map((item, index) => ({
           colorType: item.colorType,
           variant: item.variant,
@@ -1494,7 +1511,7 @@ export function LevelDesignerV2({
           palette,
           levelId: variantLevelId,
           levelIndex: levelNumber,
-          difficulty: variant.report.tier,
+          difficulty: legacyDifficulty?.tier || variant.report.tier,
           graphicId: `graphic_${artWidth}x${artHeight}`,
           width: artWidth,
           height: artHeight,
@@ -1532,9 +1549,14 @@ export function LevelDesignerV2({
           activeLauncherCount: config.activeLauncherCount ?? activeLauncherCount,
           moveLimit: config.moveLimit,
           parMoves: variant.report.parMoves ?? undefined,
-          difficultyScore: variant.report.solverScore,
+          difficultyScore:
+            legacyDifficulty?.score ??
+            variant.report.legacyScore ??
+            variant.report.solverScore,
           colorVariantDensity: studioDifficultyParams?.colorVariantDensity,
           variantComplexity:
+            legacyDifficulty?.breakdown.find((c) => c.id === 'variantComplexity')
+              ?.score ??
             difficultyResult?.breakdown.find((c) => c.id === 'variantComplexity')
               ?.score,
         };

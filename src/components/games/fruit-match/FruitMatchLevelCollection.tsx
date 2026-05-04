@@ -524,8 +524,12 @@ export function FruitMatchLevelCollection({
     const activeLauncherCount = typeof data.ActiveLauncherCount === 'number' ? data.ActiveLauncherCount : 2;
     const seed = typeof data.Seed === 'number' ? data.Seed : undefined;
     const moveLimit = typeof data.MoveLimit === 'number' ? data.MoveLimit : undefined;
+    const exportedDifficultyScore = typeof data.DifficultyScore === 'number'
+      ? Math.max(0, Math.min(100, Math.round(data.DifficultyScore)))
+      : null;
 
-    // Compute real difficulty from studio parameters
+    // Preserve exported DifficultyScore when present. Recomputing the formula
+    // on import would make the collection display drift from the JSON.
     const uniqueColors = new Set(pixelArt.map((p) => FRUIT_TO_COLOR_TYPE[p.fruitType])).size;
     const uniqueVariants = new Set(studioSelectableItems.map((s) => `${s.colorType}:${s.variant}`)).size;
     const diffResult = calculateStudioDifficulty({
@@ -537,7 +541,14 @@ export function FruitMatchLevelCollection({
       totalTiles: studioSelectableItems.length,
       blockingOffset,
       uniqueVariants,
+      colorVariantDensity: typeof data.ColorVariantDensity === 'number'
+        ? data.ColorVariantDensity
+        : undefined,
     });
+    const difficultyScore = exportedDifficultyScore ?? diffResult.score;
+    const difficulty = exportedDifficultyScore !== null
+      ? getTierFromScore(difficultyScore)
+      : diffResult.tier;
 
     // Fruit distribution
     const fruitDistribution: Record<FruitType, number> = {
@@ -562,8 +573,8 @@ export function FruitMatchLevelCollection({
         totalTilesInSink: studioSelectableItems.length,
         waitingStandSlots,
         estimatedMatches: pixelArt.length,
-        difficultyScore: diffResult.score,
-        difficulty: diffResult.tier,
+        difficultyScore,
+        difficulty,
       },
       createdAt: Date.now(),
       studioSelectableItems,

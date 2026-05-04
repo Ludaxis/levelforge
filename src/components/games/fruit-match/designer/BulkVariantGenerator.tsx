@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { DIFFICULTY_ELEMENTS } from '@/lib/juicyBlast/difficultyElements';
 import {
   loadVariantRules,
@@ -51,6 +52,7 @@ export function BulkVariantGenerator({
   const [rules, setRules] = useState<VariantRule[]>(() => loadVariantRules());
   const [validatedSet, setValidatedSet] = useState<ValidatedVariantSet | null>(null);
   const [isGeneratingValidated, setIsGeneratingValidated] = useState(false);
+  const [useContentAwareValidation, setUseContentAwareValidation] = useState(true);
 
   useEffect(() => {
     saveVariantRules(rules);
@@ -73,10 +75,15 @@ export function BulkVariantGenerator({
     if (!baseConfig) return;
     setIsGeneratingValidated(true);
     window.setTimeout(() => {
-      setValidatedSet(generateValidatedVariants(baseConfig, { runsPerProfile: 12, allowRisky: true }));
+      setValidatedSet(generateValidatedVariants(baseConfig, {
+        runsPerProfile: 12,
+        allowRisky: true,
+        contentMode: useContentAwareValidation ? 'contentAware' : 'leversOnly',
+        enforceSeparation: true,
+      }));
       setIsGeneratingValidated(false);
     }, 0);
-  }, [baseConfig]);
+  }, [baseConfig, useContentAwareValidation]);
 
   const handleExportValidated = useCallback(() => {
     if (!validatedSet?.canExport || !onExportValidated) return;
@@ -234,7 +241,7 @@ export function BulkVariantGenerator({
               <div>
                 <p className="text-xs font-medium">Validated 1-9</p>
                 <p className="text-[10px] text-muted-foreground">
-                  v5 base · solver-gated variants
+                  v5 base · solver-gated variants · separation checked
                 </p>
               </div>
               <Button
@@ -253,6 +260,20 @@ export function BulkVariantGenerator({
               </Button>
             </div>
 
+            <label className="flex items-start gap-2 rounded-md border border-border/60 bg-muted/20 p-2 text-xs">
+              <Checkbox
+                checked={useContentAwareValidation}
+                onCheckedChange={(checked) => setUseContentAwareValidation(checked === true)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="block font-medium">Content separation</span>
+                <span className="block text-[10px] text-muted-foreground">
+                  Hard variants may add early decoys, new fruit colors, and same-color variant ambiguity before solver validation.
+                </span>
+              </span>
+            </label>
+
             {validatedSet && (
               <div className="rounded-md border border-border/60 bg-muted/20 p-2">
                 <div className="mb-1.5 flex items-center justify-between">
@@ -267,8 +288,11 @@ export function BulkVariantGenerator({
                   <thead>
                     <tr className="text-left text-muted-foreground">
                       <th className="pr-2 pb-1 font-normal">Variant</th>
-                      <th className="pr-2 pb-1 font-normal">Score</th>
+                      <th className="pr-2 pb-1 font-normal">Solver</th>
                       <th className="pr-2 pb-1 font-normal">Verdict</th>
+                      <th className="pr-2 pb-1 font-normal">Items</th>
+                      <th className="pr-2 pb-1 font-normal">Amb</th>
+                      <th className="pr-2 pb-1 font-normal">New</th>
                       <th className="pr-2 pb-1 font-normal">MSI</th>
                       <th className="pr-2 pb-1 font-normal">BO</th>
                       <th className="pr-2 pb-1 font-normal">Win</th>
@@ -282,6 +306,9 @@ export function BulkVariantGenerator({
                         <td className={`py-1 pr-2 ${variant.accepted ? 'text-green-600' : 'text-red-600'}`}>
                           {variant.report.verdict}
                         </td>
+                        <td className="py-1 pr-2 font-mono">{variant.contentChanges.totalItems}</td>
+                        <td className="py-1 pr-2 font-mono">{variant.contentChanges.ambiguityItems}</td>
+                        <td className="py-1 pr-2 font-mono">{variant.contentChanges.newColorItems}</td>
                         <td className="py-1 pr-2 font-mono">{variant.values.maxSelectableItems}</td>
                         <td className="py-1 pr-2 font-mono">{variant.values.blockingOffset}</td>
                         <td className="py-1 pr-2 font-mono">
@@ -291,6 +318,32 @@ export function BulkVariantGenerator({
                     ))}
                   </tbody>
                 </table>
+
+                <div className={`mt-2 rounded-md border p-2 text-[11px] ${
+                  validatedSet.separation.passed
+                    ? 'border-green-500/40 bg-green-500/10 text-green-700 dark:text-green-300'
+                    : 'border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300'
+                }`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium">
+                      Variant separation {validatedSet.separation.passed ? 'passed' : 'blocked'}
+                    </span>
+                    <span className="font-mono">
+                      v1→v5 +{validatedSet.separation.v1ToV5ScoreDelta} · v5→v9 +{validatedSet.separation.v5ToV9ScoreDelta}
+                    </span>
+                  </div>
+                  {validatedSet.separation.issues.length > 0 && (
+                    <ul className="mt-1 space-y-0.5">
+                      {validatedSet.separation.issues.slice(0, 4).map((issue, index) => (
+                        <li key={`${issue.variantNumber}-${issue.comparedTo}-${index}`}>
+                          <span className="font-mono">v{issue.variantNumber}</span> vs{' '}
+                          <span className="font-mono">v{issue.comparedTo}</span>:{' '}
+                          {issue.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
                 <div className="mt-2 flex justify-end">
                   <Button
                     size="sm"

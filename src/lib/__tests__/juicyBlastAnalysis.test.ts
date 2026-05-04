@@ -148,4 +148,33 @@ describe('validated variant optimizer', () => {
         variant9.report.winRates.average <= variant5.report.winRates.average,
     ).toBe(true);
   });
+
+  it('can enforce separation and block lever-only ladders that feel flat', () => {
+    const result = generateValidatedVariants(makeConfig(), {
+      runsPerProfile: 3,
+      enforceSeparation: true,
+    });
+
+    expect(result.variants.every((variant) => variant.report.verdict !== 'stuck')).toBe(true);
+    expect(result.canExport).toBe(false);
+    expect(result.separation.issues.some((issue) => issue.severity === 'blocking')).toBe(true);
+  });
+
+  it('content-aware mode creates harder variants with more fruits and ambiguity', () => {
+    const result = generateValidatedVariants(makeConfig(), {
+      runsPerProfile: 3,
+      contentMode: 'contentAware',
+      enforceSeparation: true,
+    });
+    const variant5 = result.variants.find((variant) => variant.variantNumber === 5)!;
+    const variant9 = result.variants.find((variant) => variant.variantNumber === 9)!;
+
+    expect(result.canExport).toBe(true);
+    expect(result.separation.passed).toBe(true);
+    expect(variant5.contentChanges.extraItems).toBe(0);
+    expect(variant9.contentChanges.totalItems).toBeGreaterThan(variant5.contentChanges.totalItems);
+    expect(variant9.contentChanges.ambiguityItems).toBeGreaterThan(0);
+    expect(variant9.contentChanges.newColorItems).toBeGreaterThan(0);
+    expect(variant9.config.selectableItems).toHaveLength(variant9.contentChanges.totalItems);
+  });
 });

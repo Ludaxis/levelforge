@@ -81,7 +81,7 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
   } = params;
   const blockingOffset = resolveBlockingOffset(params);
 
-  // ── 1. Blocking Pattern (0.40) ──────────────────────────────────────
+  // ── 1. Blocking Pattern (0.38) ──────────────────────────────────────
   // How long does it take before the player can complete the active set?
   // 0 = no extra blockers beyond A+B, 10 = maximum burial into Layer C.
   const blockingFactor = blockingOffsetToDepth(blockingOffset);
@@ -90,18 +90,18 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
   // More distinct fruit colors = harder to spot matching triplets
   const colorVariety = clamp01((uniqueColors - 2) / 5);
 
-  // ── 3. Surface Size (0.22) ──────────────────────────────────────────
+  // ── 3. Surface Size (0.21) ──────────────────────────────────────────
   // How many items are visible on Layer A? Fewer = fewer choices per move
   const surfaceSize = clamp01(1 - (maxSelectableItems - 1) / 19);
 
-  // ── 4. Hidden Ratio (0.13) ──────────────────────────────────────────
+  // ── 4. Hidden Ratio (0.12) ──────────────────────────────────────────
   // What fraction of items sit below the surface (Layer B + C)?
   // More hidden items = less information to plan with
   const hiddenRatio = totalTiles > 0
     ? clamp01((totalTiles - maxSelectableItems) / totalTiles)
     : 0;
 
-  // ── 5. Launcher Sequence (0.09) ─────────────────────────────────────
+  // ── 5. Launcher Sequence (0.07) ─────────────────────────────────────
   // Total launchers the player must complete
   const launcherSequence = clamp01((launcherCount - 4) / 12);
 

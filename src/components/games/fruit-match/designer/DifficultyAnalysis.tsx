@@ -237,7 +237,7 @@ function FormulaBreakdown({ params, score }: { params: StudioDifficultyParams; s
         ) : (
           <ChevronRight className="h-3 w-3 flex-shrink-0" />
         )}
-        <span>Formula</span>
+        <span>Legacy formula</span>
         <span className="font-mono ml-auto text-[10px]">
           round({rawTotal.toFixed(3)} x 100) = {score}
         </span>
@@ -361,7 +361,7 @@ export function DifficultyAnalysis({
             <BarChart3 className="h-3.5 w-3.5" />
           </button>
           <Badge className={`${parMoves === null ? 'bg-red-700' : DIFFICULTY_COLORS[tier] || 'bg-gray-500'} h-5 text-[10px]`}>
-            {parMoves === null ? 'unsolvable' : `${score} (${tier})`}
+            {parMoves === null ? 'unsolvable' : `Legacy ${score} (${tier})`}
           </Badge>
           <span className="text-[10px] text-muted-foreground">Unlock {unlockDistance}</span>
           <span className="text-[10px] text-muted-foreground">
