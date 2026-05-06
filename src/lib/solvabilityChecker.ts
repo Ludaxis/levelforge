@@ -41,6 +41,9 @@ export interface MonteCarloResult {
 export interface DFSResult {
   solvable: boolean;
   solutionCount: number;
+  solutionCountCapped: boolean;
+  optimalSolutionCount: number;
+  optimalFirstMoves: number[];
   deadEndCount: number;
   exploredStates: number;
   minMoves: number;
@@ -71,6 +74,7 @@ export interface LevelReport {
   verdict: 'solvable' | 'risky' | 'stuck';
   solutionPath?: number[];  // item indices of the best solution (greedy or DFS)
   moveAnalysis?: MoveAnalysis;
+  optimalFirstMoves: number[];
 }
 
 export interface BatchReport {
@@ -89,6 +93,7 @@ export interface AnalyzeOptions {
   monteCarloRuns?: number;
   runDFS?: boolean;
   dfsStateLimit?: number;
+  dfsMaxSolutions?: number;
   onProgress?: (done: number, total: number) => void;
 }
 
@@ -342,6 +347,35 @@ function behindMatchesSlot(s: SolverState, beh: SolverItem | null): boolean {
   });
 }
 
+function scoreSolverPick(state: SolverState, pi: number, maxWait: number): number {
+  const item = state.pos[pi]?.vis;
+  if (!item) return -Infinity;
+
+  if (findMatchSlots(state, item).length > 0) return 3;
+  if (behindMatchesSlot(state, state.pos[pi].beh)) return 2;
+  if (state.wq.length < maxWait) return 1;
+  return -Infinity;
+}
+
+export function findOptimalFirstMoves(config: StudioGameConfig): number[] {
+  const input = configToSolverInput(config);
+  const state = makeState(input);
+  for (let si = 0; si < input.slotCount; si++) loadSlot(state, si, input.reqs, input.maxWait);
+
+  const scored: { itemIdx: number; score: number }[] = [];
+  for (let pi = 0; pi < state.pos.length; pi++) {
+    const item = state.pos[pi].vis;
+    if (!item) continue;
+    scored.push({ itemIdx: item.idx, score: scoreSolverPick(state, pi, input.maxWait) });
+  }
+
+  const best = Math.max(...scored.map((s) => s.score), -Infinity);
+  if (!Number.isFinite(best)) return [];
+  return scored
+    .filter((s) => s.score === best)
+    .map((s) => s.itemIdx);
+}
+
 // ============================================================================
 // Greedy solver — drain-pipe strategy (matches reference level_tool)
 // ============================================================================
@@ -433,27 +467,40 @@ export function solveGreedy(config: StudioGameConfig): SolverResult {
 export function solveDFS(
   config: StudioGameConfig,
   stateLimit: number = 10000,
+  options: { stopAfterFirst?: boolean; maxSolutions?: number } = {},
 ): DFSResult {
   const input = configToSolverInput(config);
   const { L0, L1, L2, reqs, maxWait, slotCount } = input;
   const totalReqs = reqs.length;
+  const { stopAfterFirst = false, maxSolutions = 10000 } = options;
 
   let solutions = 0;
+  let optimalSolutionCount = 0;
   let deadEnds = 0;
   let explored = 0;
   let minMoves = Infinity;
   let maxMoves = 0;
   let timedOut = false;
+  let solutionCountCapped = false;
   let foundSolution = false;
-  let firstSolutionPicks: number[] | null = null;
+  let bestSolutionPicks: number[] | null = null;
 
   function dfs(state: SolverState): void {
-    if (explored++ > stateLimit || foundSolution) return;
+    if (explored++ > stateLimit || solutionCountCapped) return;
+    if (foundSolution && stopAfterFirst) return;
+    if (bestSolutionPicks && state.picks.length > minMoves) return;
+
     if (state.cr >= totalReqs) {
       solutions++;
+      if (solutions >= maxSolutions) solutionCountCapped = true;
       foundSolution = true;
-      firstSolutionPicks = [...state.picks];
-      minMoves = Math.min(minMoves, state.picks.length);
+      if (state.picks.length < minMoves) {
+        minMoves = state.picks.length;
+        optimalSolutionCount = 1;
+        bestSolutionPicks = [...state.picks];
+      } else if (state.picks.length === minMoves) {
+        optimalSolutionCount++;
+      }
       maxMoves = Math.max(maxMoves, state.picks.length);
       return;
     }
@@ -489,7 +536,7 @@ export function solveDFS(
     });
 
     for (const pi of deduped) {
-      if (foundSolution || explored > stateLimit) return;
+      if ((foundSolution && stopAfterFirst) || explored > stateLimit || solutionCountCapped) return;
       const item = state.pos[pi].vis!;
 
       const matchSlots = findMatchSlots(state, item);
@@ -513,7 +560,7 @@ export function solveDFS(
       if (targets.length === 0) continue;
 
       for (const tgt of targets) {
-        if (foundSolution || explored > stateLimit) return;
+        if ((foundSolution && stopAfterFirst) || explored > stateLimit || solutionCountCapped) return;
         const ns = cloneState(state);
         const p = pickSurface(ns, pi, L2);
         if (placeItem(ns, p, tgt, reqs, maxWait)) {
@@ -528,7 +575,7 @@ export function solveDFS(
 
   // Try starting from each position (like reference tool)
   for (let fp = 0; fp < L0.length; fp++) {
-    if (foundSolution) break;
+    if ((foundSolution && stopAfterFirst) || solutionCountCapped) break;
     const init = makeState(input);
     for (let si = 0; si < slotCount; si++) loadSlot(init, si, reqs, maxWait);
     if (!init.pos[fp]?.vis) continue;
@@ -538,7 +585,7 @@ export function solveDFS(
     const targets = matchSlots.length > 0 ? matchSlots : [-1];
 
     for (const tgt of targets) {
-      if (foundSolution) break;
+      if ((foundSolution && stopAfterFirst) || solutionCountCapped) break;
       const ns = cloneState(init);
       const p = pickSurface(ns, fp, L2);
       if (placeItem(ns, p, tgt, reqs, maxWait)) {
@@ -552,7 +599,7 @@ export function solveDFS(
 
   const solvable = solutions > 0;
   const verdict: DFSResult['verdict'] =
-    solvable && deadEnds === 0 && !timedOut
+    solvable && deadEnds === 0 && !timedOut && !solutionCountCapped
       ? 'always'
       : solvable
         ? 'sometimes'
@@ -560,13 +607,16 @@ export function solveDFS(
 
   // Convert position picks to item indices using replay
   let solutionPath: number[] | undefined;
-  if (firstSolutionPicks) {
-    solutionPath = positionPicksToItemIndices(firstSolutionPicks, input);
+  if (bestSolutionPicks) {
+    solutionPath = positionPicksToItemIndices(bestSolutionPicks, input);
   }
 
   return {
     solvable,
     solutionCount: solutions,
+    solutionCountCapped,
+    optimalSolutionCount,
+    optimalFirstMoves: findOptimalFirstMoves(config),
     deadEndCount: deadEnds,
     exploredStates: explored,
     minMoves: solvable ? minMoves : 0,
@@ -852,6 +902,7 @@ export function analyzeSingleLevel(
     monteCarloRuns = 200,
     runDFS = false,
     dfsStateLimit = 500000,
+    dfsMaxSolutions = 10000,
   } = options;
 
   const greedy = solveGreedy(config);
@@ -863,7 +914,10 @@ export function analyzeSingleLevel(
   // Run DFS if explicitly requested, OR as a fallback when greedy+MC find no wins.
   const needsFallbackDFS = !runDFS && !greedy.solved && monteCarlo.winRate === 0;
   const dfs = (runDFS || needsFallbackDFS)
-    ? solveDFS(config, dfsStateLimit)
+    ? solveDFS(config, dfsStateLimit, {
+        stopAfterFirst: needsFallbackDFS,
+        maxSolutions: dfsMaxSolutions,
+      })
     : undefined;
 
   // Determine verdict
@@ -881,6 +935,7 @@ export function analyzeSingleLevel(
 
   // Build solution path: prefer greedy (position picks → item indices), fall back to DFS
   const input = configToSolverInput(config);
+  const optimalFirstMoves = findOptimalFirstMoves(config);
   let solutionPath: number[] | undefined;
   if (greedy.solved && greedy.moveSequence.length > 0) {
     solutionPath = positionPicksToItemIndices(greedy.moveSequence, input);
@@ -906,6 +961,7 @@ export function analyzeSingleLevel(
     verdict,
     solutionPath,
     moveAnalysis,
+    optimalFirstMoves,
   };
 }
 

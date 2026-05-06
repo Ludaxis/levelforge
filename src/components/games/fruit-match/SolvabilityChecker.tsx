@@ -502,6 +502,7 @@ function LayersPanel({ level, report, solverInput }: { level: StudioExportLevel;
   const goldenSet = new Set(report?.solutionPath ?? []);
   const goldenOrder = new Map<number, number>();
   (report?.solutionPath ?? []).forEach((idx, i) => goldenOrder.set(idx, i + 1));
+  const optimalFirstMoveSet = new Set(report?.optimalFirstMoves ?? []);
 
   // Color legend
   const usedColors = new Set<number>();
@@ -551,6 +552,13 @@ function LayersPanel({ level, report, solverInput }: { level: StudioExportLevel;
         <span>Items: {L0.length + L1.length + L2.length}</span>
         <span>Needed: {reqs.length * 3}</span>
         <span>L0: {L0.length} / L1: {L1.length} / L2: {L2.length}</span>
+        {report && (
+          <span>
+            Optimal starts: {report.optimalFirstMoves.length > 0
+              ? report.optimalFirstMoves.map((idx) => `#${idx}`).join(' ')
+              : '-'}
+          </span>
+        )}
       </div>
 
       {/* Requirements */}
@@ -575,7 +583,13 @@ function LayersPanel({ level, report, solverInput }: { level: StudioExportLevel;
         <h4 className="text-[11px] font-mono font-semibold text-muted-foreground uppercase tracking-wider mb-2">Layer 0 — Surface</h4>
         <div className="flex flex-wrap gap-1.5">
           {L0.map((it) => (
-            <ItemCell key={it.idx} item={it} golden={goldenSet.has(it.idx)} step={goldenOrder.get(it.idx)} />
+            <ItemCell
+              key={it.idx}
+              item={it}
+              golden={goldenSet.has(it.idx)}
+              step={goldenOrder.get(it.idx)}
+              hintBadge={optimalFirstMoveSet.has(it.idx)}
+            />
           ))}
         </div>
       </div>
@@ -622,6 +636,11 @@ function LayersPanel({ level, report, solverInput }: { level: StudioExportLevel;
 
 function SolutionPanel({ report }: { report: LevelReport | null }) {
   if (!report) return <p className="text-sm text-muted-foreground">Run analysis first</p>;
+  const countedPaths = report.dfs
+    ? `${report.dfs.optimalSolutionCount || report.dfs.solutionCount}${report.dfs.solutionCountCapped || report.dfs.timedOut ? '+' : ''}`
+    : report.greedy.solved
+      ? '1+'
+      : '-';
 
   return (
     <div className="space-y-4">
@@ -644,6 +663,12 @@ function SolutionPanel({ report }: { report: LevelReport | null }) {
         </div>
       )}
 
+      <div className="text-xs font-mono text-muted-foreground space-y-1">
+        <div>Yellow numbers: one canonical optimal path, not every equivalent path.</div>
+        <div>Optimal starts: {report.optimalFirstMoves.length > 0 ? report.optimalFirstMoves.map((idx) => `#${idx}`).join(' ') : '-'}</div>
+        <div>Counted optimal paths: {countedPaths}</div>
+      </div>
+
       {report.solutionPath && (
         <div className="flex flex-wrap gap-1">
           {report.solutionPath.map((idx, i) => (
@@ -658,7 +683,7 @@ function SolutionPanel({ report }: { report: LevelReport | null }) {
       <div className="text-xs space-y-1 text-muted-foreground font-mono">
         <div>Greedy: {report.greedy.solved ? `PASS in ${report.greedy.moves} moves` : `FAIL (${report.greedy.deadEndReason})`}</div>
         <div>MC: {(report.monteCarlo.winRate * 100).toFixed(1)}% ({report.monteCarlo.wins}/{report.monteCarlo.runs})</div>
-        {report.dfs && <div>DFS: {report.dfs.verdict} — {report.dfs.solutionCount} solutions, {report.dfs.exploredStates} states{report.dfs.timedOut ? ' (timed out)' : ''}</div>}
+        {report.dfs && <div>DFS: {report.dfs.verdict} — {report.dfs.optimalSolutionCount} optimal / {report.dfs.solutionCount} counted, {report.dfs.exploredStates} states{(report.dfs.timedOut || report.dfs.solutionCountCapped) ? ' (capped)' : ''}</div>}
       </div>
     </div>
   );
@@ -717,6 +742,7 @@ function SimulatorPanel({
 
   // Golden path for highlighting
   const goldenSet = new Set(report?.solutionPath ?? []);
+  const optimalFirstMoveSet = new Set(report?.optimalFirstMoves ?? []);
 
   return (
     <div className="space-y-4">
@@ -814,7 +840,7 @@ function SimulatorPanel({
                   onClick={!sim.done && !sim.lost ? () => handlePick(pi) : undefined}
                   highlight={highlight}
                   golden={isGolden}
-                  hintBadge={isHint}
+                  hintBadge={isHint || optimalFirstMoveSet.has(pos.visible.idx)}
                 />
                 {pos.behind && (
                   <ItemCell item={pos.behind} dim />
@@ -998,12 +1024,20 @@ export function SolvabilityChecker() {
   // Export CSV
   const handleExportCSV = useCallback(() => {
     if (!report) return;
-    const header = 'Level,Items,Launchers,Colors,MaxSel,Blocking,Stand,Active,Greedy,MC WinRate,Moves,Direct,Queue,Verdict';
+    const header = 'Level,Items,Launchers,Colors,MaxSel,Blocking,Stand,Active,Greedy,MC WinRate,Moves,Direct,Queue,OptimalStarts,CountedPaths,Verdict';
     const rows = report.levels.map((r) =>
+      {
+        const countedPaths = r.dfs
+          ? `${r.dfs.optimalSolutionCount || r.dfs.solutionCount}${r.dfs.solutionCountCapped || r.dfs.timedOut ? '+' : ''}`
+          : r.greedy.solved ? '1+' : '';
+        return (
       [r.levelId, r.totalItems, r.totalLaunchers, r.uniqueColors, r.maxSelectableItems, r.blockingOffset, r.waitingStandSlots, r.activeLauncherCount,
         r.greedy.solved ? 'PASS' : 'FAIL', `${(r.monteCarlo.winRate * 100).toFixed(1)}%`,
-        r.moveAnalysis?.totalMoves ?? '', r.moveAnalysis?.directMoves ?? '', r.moveAnalysis?.queueMoves ?? '', r.verdict,
+        r.moveAnalysis?.totalMoves ?? '', r.moveAnalysis?.directMoves ?? '', r.moveAnalysis?.queueMoves ?? '',
+        r.optimalFirstMoves.length, countedPaths, r.verdict,
       ].join(',')
+        );
+      }
     );
     const csv = [header, ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -1256,6 +1290,7 @@ export function SolvabilityChecker() {
                       Status {sortKey === 'verdict' ? (sortDir === 'asc' ? '\u2191' : '\u2193') : ''}
                     </th>
                     <th className="px-3 py-2 text-center">Paths</th>
+                    <th className="px-3 py-2 text-center">Starts</th>
                     <th className="px-3 py-2 text-center">Reqs</th>
                     <th className="px-3 py-2 text-center cursor-pointer hover:text-foreground select-none" onClick={() => toggleSort('totalItems')}>
                       Items {sortKey === 'totalItems' ? (sortDir === 'asc' ? '\u2191' : '\u2193') : ''}
@@ -1270,7 +1305,9 @@ export function SolvabilityChecker() {
                   {displayLevels.map((r) => {
                     const isExpanded = expandedId === r.levelId;
                     const qm = r.moveAnalysis?.queueMoves ?? 0;
-                    const paths = r.dfs?.solutionCount ?? (r.greedy.solved ? 1 : 0);
+                    const paths = r.dfs
+                      ? `${r.dfs.optimalSolutionCount || r.dfs.solutionCount}${r.dfs.solutionCountCapped || r.dfs.timedOut ? '+' : ''}`
+                      : r.greedy.solved ? '1+' : '-';
                     return (
                       <React.Fragment key={r.levelId}>
                         <tr
@@ -1287,7 +1324,8 @@ export function SolvabilityChecker() {
                                 ? <span className="text-yellow-400 font-medium">~</span>
                                 : <span className="text-red-400 font-medium">&#10007;</span>}
                           </td>
-                          <td className="px-3 py-2 text-center font-mono text-xs">{paths || '-'}</td>
+                          <td className="px-3 py-2 text-center font-mono text-xs">{paths}</td>
+                          <td className="px-3 py-2 text-center font-mono text-xs">{r.optimalFirstMoves.length || '-'}</td>
                           <td className="px-3 py-2 text-center font-mono text-xs">{r.totalLaunchers}</td>
                           <td className="px-3 py-2 text-center font-mono text-xs">{r.totalItems}</td>
                           <td className="px-3 py-2 text-center font-mono text-xs">{r.moveAnalysis?.totalMoves ?? '-'}</td>
@@ -1301,7 +1339,7 @@ export function SolvabilityChecker() {
                         </tr>
                         {isExpanded && (
                           <tr className="border-b border-border/50">
-                            <td colSpan={9} className="px-6 py-3 bg-muted/30 text-xs space-y-1">
+                            <td colSpan={10} className="px-6 py-3 bg-muted/30 text-xs space-y-1">
                               <div className="flex gap-6">
                                 <span>Colors: {r.uniqueColors}</span>
                                 <span>MaxSel: {r.maxSelectableItems}</span>
@@ -1311,7 +1349,8 @@ export function SolvabilityChecker() {
                               </div>
                               <div>Greedy: {r.greedy.solved ? `PASS in ${r.greedy.moves} moves` : `FAIL (${r.greedy.deadEndReason})`}{r.greedy.peakStandUsage > 0 && ` | peak stand ${r.greedy.peakStandUsage}/${r.waitingStandSlots}`}</div>
                               <div>MC: {(r.monteCarlo.winRate * 100).toFixed(1)}% win ({r.monteCarlo.wins}/{r.monteCarlo.runs}){r.monteCarlo.wins > 0 && ` | avg ${r.monteCarlo.avgMoves.toFixed(0)} moves`}</div>
-                              {r.dfs && <div>DFS: {r.dfs.verdict} | {r.dfs.solutionCount} solutions, {r.dfs.exploredStates} states{r.dfs.timedOut && ' (timed out)'}</div>}
+                              <div>Optimal starts: {r.optimalFirstMoves.length > 0 ? r.optimalFirstMoves.map((idx) => `#${idx}`).join(' ') : '-'}</div>
+                              {r.dfs && <div>DFS: {r.dfs.verdict} | {r.dfs.optimalSolutionCount} optimal / {r.dfs.solutionCount} counted, {r.dfs.exploredStates} states{(r.dfs.timedOut || r.dfs.solutionCountCapped) && ' (capped)'}</div>}
                               <Button size="sm" variant="outline" className="h-6 text-xs mt-1" onClick={() => { setSelectedLevelId(r.levelId); setDetailTab('layers'); }}>
                                 View Detail
                               </Button>

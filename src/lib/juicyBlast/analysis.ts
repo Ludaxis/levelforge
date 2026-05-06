@@ -332,7 +332,7 @@ export function computeSolverBackedPar(config: StudioGameConfig): number | null 
   const greedy = solveGreedy(materialized);
   if (greedy.solved) return greedy.moves;
 
-  const dfs = solveDFS(materialized, 100000);
+  const dfs = solveDFS(materialized, 100000, { stopAfterFirst: true });
   return dfs.solvable ? dfs.minMoves : null;
 }
 
@@ -345,7 +345,9 @@ export function analyzeJuicyLevel(
   const legacyScore = calculateLegacyScore(config);
   const materialized = materializeStudioConfig(config, baseSeed);
   const greedy = solveGreedy(materialized);
-  const dfs = greedy.solved ? undefined : solveDFS(materialized, options.dfsStateLimit ?? 100000);
+  const dfs = greedy.solved
+    ? undefined
+    : solveDFS(materialized, options.dfsStateLimit ?? 100000, { stopAfterFirst: true });
   const parMoves = greedy.solved ? greedy.moves : dfs?.solvable ? dfs.minMoves : null;
   const solutionPath = greedy.solved ? greedy.moveSequence : dfs?.solutionPath;
 
