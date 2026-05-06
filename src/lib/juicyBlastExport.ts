@@ -66,6 +66,8 @@ export interface ReferenceLevel {
   LevelIndex: number;
   LevelVariant: number;
   Difficulty: number;
+  LauncherOrderScore?: number;
+  DifficultyBreakdown?: Record<string, number>;
   GraphicId: string;
   Artwork: ReferenceArtwork;
   SelectableItems: ReferenceSelectableItem[];
@@ -678,6 +680,10 @@ export interface StudioExportLevel {
   ParMoves?: number;
   /** Computed difficulty score 0-100 — the composite tier from LevelForge. */
   DifficultyScore?: number;
+  /** Derived 0-100 launcher-order mismatch score. Higher = harder timing mismatch. */
+  LauncherOrderScore?: number;
+  /** Optional normalized component scores, e.g. { LauncherOrder: 0.42 }. */
+  DifficultyBreakdown?: Record<string, number>;
   /** Spatial clustering metric (0.0-1.0) for same-color-different-variant
    *  tiles in the pixel art. Computed by LevelForge. Games pass this to
    *  Cadence BeginSession() as a design parameter. */
@@ -741,6 +747,10 @@ export interface StudioExportData {
   parMoves?: number;
   /** Computed composite difficulty score (0-100) from LevelForge. */
   difficultyScore?: number;
+  /** Derived 0-100 launcher-order mismatch score. */
+  launcherOrderScore?: number;
+  /** Optional normalized component scores. */
+  difficultyBreakdown?: Record<string, number>;
   /** Spatial clustering metric (0.0-1.0) computed from the pixel art layout. */
   colorVariantDensity?: number;
   /** Average variants per color, normalized 0.0-1.0. Observational for Cadence. */
@@ -752,6 +762,14 @@ export interface StudioExportData {
  */
 export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
   const height = data.height;
+  const launcherOrderScore = typeof data.launcherOrderScore === 'number'
+    ? Math.max(0, Math.min(100, Math.round(data.launcherOrderScore)))
+    : undefined;
+  const difficultyBreakdown = data.difficultyBreakdown ?? (
+    typeof launcherOrderScore === 'number'
+      ? { LauncherOrder: Math.round((launcherOrderScore / 100) * 1000) / 1000 }
+      : undefined
+  );
 
   // Build group → colorType from launchers so pixel ColorType matches.
   // The pixel's own colorType can be stale (e.g. hexToColorType mapped dark
@@ -820,6 +838,8 @@ export function exportStudioLevel(data: StudioExportData): StudioExportLevel {
     MoveLimit: data.moveLimit,
     ParMoves: data.parMoves,
     DifficultyScore: data.difficultyScore,
+    LauncherOrderScore: launcherOrderScore,
+    DifficultyBreakdown: difficultyBreakdown,
     ColorVariantDensity: data.colorVariantDensity,
     VariantComplexity: data.variantComplexity,
     Palette: data.palette,

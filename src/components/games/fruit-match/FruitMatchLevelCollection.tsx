@@ -306,12 +306,37 @@ export function FruitMatchLevelCollection({
         paletteSet.add(COLOR_TYPE_TO_HEX[ct] || '888888');
       }
 
-      const layerToNumber: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2 };
+      const colorVariantDensity = calculateColorVariantDensity(level.pixelArt, level.studioSelectableItems);
+      const uniqueColors = new Set(level.studioSelectableItems.map((s) => s.colorType)).size;
+      const uniqueVariants = new Set(level.studioSelectableItems.map((s) => `${s.colorType}:${s.variant}`)).size;
+      const studioDifficulty = calculateStudioDifficulty({
+        totalPixels: level.pixelArt.length,
+        uniqueColors,
+        groupCount: new Set(level.studioLaunchers.map((l) => l.group)).size,
+        launcherCount: level.studioLaunchers.length,
+        maxSelectableItems: level.studioMaxSelectableItems ?? 10,
+        totalTiles: level.studioSelectableItems.length,
+        blockingOffset: level.studioBlockingOffset,
+        activeLauncherCount: level.studioActiveLauncherCount,
+        selectableItems: level.studioSelectableItems.map((si) => ({
+          colorType: si.colorType,
+          variant: si.variant,
+          layer: si.layer,
+          order: si.order,
+        })),
+        launchers: level.studioLaunchers.map((launcher) => ({
+          colorType: launcher.colorType,
+          order: launcher.order,
+        })),
+        uniqueVariants,
+        colorVariantDensity,
+      });
+
       return exportStudioLevel({
         palette: Array.from(paletteSet),
         levelId: level.name,
         levelIndex: level.levelNumber,
-        difficulty: level.metrics.difficulty,
+        difficulty: studioDifficulty.tier,
         graphicId: `graphic_${level.pixelArtWidth}x${level.pixelArtHeight}`,
         width: level.pixelArtWidth,
         height: level.pixelArtHeight,
@@ -351,12 +376,14 @@ export function FruitMatchLevelCollection({
         activeLauncherCount: level.studioActiveLauncherCount,
         seed: level.studioSeed,
         moveLimit: level.studioMoveLimit,
-        difficultyScore: level.metrics.difficultyScore,
-        colorVariantDensity: calculateColorVariantDensity(level.pixelArt, level.studioSelectableItems),
+        difficultyScore: studioDifficulty.score,
+        launcherOrderScore: Math.round(
+          (studioDifficulty.breakdown.find((c) => c.id === 'launcherOrder')?.score ?? 0) *
+            100,
+        ),
+        colorVariantDensity,
         variantComplexity: (() => {
-          const uColors = new Set(level.studioSelectableItems.map((s) => s.colorType)).size;
-          const uVariants = new Set(level.studioSelectableItems.map((s) => `${s.colorType}:${s.variant}`)).size;
-          const avg = uColors > 0 ? uVariants / uColors : 1;
+          const avg = uniqueColors > 0 ? uniqueVariants / uniqueColors : 1;
           return Math.max(0, Math.min(1, (avg - 1) / 2));
         })(),
       });
@@ -540,6 +567,20 @@ export function FruitMatchLevelCollection({
       maxSelectableItems,
       totalTiles: studioSelectableItems.length,
       blockingOffset,
+      activeLauncherCount,
+      selectableItems: studioSelectableItems.map((item) => ({
+        colorType: item.colorType,
+        variant: item.variant,
+        layer: item.layer,
+        order: item.order,
+      })),
+      launchers: studioLaunchers.map((launcher) => ({
+        colorType: launcher.colorType,
+        order: launcher.order,
+      })),
+      launcherOrderScore: typeof data.LauncherOrderScore === 'number'
+        ? Math.max(0, Math.min(1, data.LauncherOrderScore / 100))
+        : undefined,
       uniqueVariants,
       colorVariantDensity: typeof data.ColorVariantDensity === 'number'
         ? data.ColorVariantDensity

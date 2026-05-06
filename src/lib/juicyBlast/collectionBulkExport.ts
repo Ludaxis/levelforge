@@ -121,6 +121,18 @@ function buildVariantExportData(
     maxSelectableItems: msi,
     totalTiles: relayered.length,
     blockingOffset: bo,
+    activeLauncherCount:
+      values.activeLauncherCount ?? level.studioActiveLauncherCount ?? 2,
+    selectableItems: relayered.map((item) => ({
+      colorType: item.colorType,
+      variant: item.variant,
+      layer: item.layer,
+      order: item.order,
+    })),
+    launchers: level.studioLaunchers.map((launcher) => ({
+      colorType: launcher.colorType,
+      order: launcher.order,
+    })),
     uniqueVariants,
     colorVariantDensity,
   });
@@ -203,6 +215,11 @@ function buildVariantExportData(
     moveLimit: values.moveLimit ?? level.studioMoveLimit,
     parMoves,
     difficultyScore: variantDifficulty.score,
+    launcherOrderScore:
+      Math.round(
+        (variantDifficulty.breakdown.find((c) => c.id === 'launcherOrder')?.score ?? 0) *
+          100,
+      ),
     colorVariantDensity,
     variantComplexity:
       variantDifficulty.breakdown.find((c) => c.id === 'variantComplexity')

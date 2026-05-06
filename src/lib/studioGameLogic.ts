@@ -13,6 +13,11 @@ export interface StudioDifficultyParams {
   maxSelectableItems: number;
   totalTiles: number;
   blockingOffset?: number; // 0-10: how many blocker items extend the unlock window
+  activeLauncherCount?: number;
+  selectableItems?: StudioDifficultySelectableItem[];
+  launchers?: StudioDifficultyLauncher[];
+  /** Precomputed 0-1 score. Used when only the derived metric is available. */
+  launcherOrderScore?: number;
   /** Total unique (colorType, variant) pairs in the item pool.
    *  When omitted, variant complexity is assumed to be 0 (1 variant per color). */
   uniqueVariants?: number;
@@ -23,6 +28,18 @@ export interface StudioDifficultyParams {
   colorVariantDensity?: number;
   /** @deprecated Legacy field preserved for compatibility with older saved levels/tests. */
   mismatchDepth?: number;
+}
+
+export interface StudioDifficultySelectableItem {
+  colorType: number;
+  variant?: number;
+  layer?: 'A' | 'B' | 'C';
+  order: number;
+}
+
+export interface StudioDifficultyLauncher {
+  colorType: number;
+  order: number;
 }
 
 /** A single component of the difficulty score, with designer-facing explanation. */
@@ -70,6 +87,116 @@ export function resolveBlockingOffset(input: {
   return 0;
 }
 
+const REQUIRED_ITEMS_PER_LAUNCHER = 3;
+
+function layerToIndex(layer: 'A' | 'B' | 'C' | undefined, fallback: number): number {
+  if (layer === 'A') return 0;
+  if (layer === 'B') return 1;
+  if (layer === 'C') return 2;
+  return fallback;
+}
+
+export function calculateLauncherOrderDifficulty(input: {
+  selectableItems?: StudioDifficultySelectableItem[];
+  launchers?: StudioDifficultyLauncher[];
+  maxSelectableItems: number;
+  activeLauncherCount?: number;
+}): number {
+  const selectableItems = input.selectableItems ?? [];
+  const launchers = input.launchers ?? [];
+  if (selectableItems.length === 0 || launchers.length === 0) return 0;
+
+  const maxSelectableItems = Math.max(1, Math.round(input.maxSelectableItems || 1));
+  const activeLauncherCount = Math.max(
+    1,
+    Math.min(launchers.length, Math.round(input.activeLauncherCount ?? 2)),
+  );
+
+  const sortedByOrder = selectableItems
+    .map((item, originalIndex) => ({ item, originalIndex }))
+    .sort((a, b) => a.item.order - b.item.order || a.originalIndex - b.originalIndex);
+  const orderFallbackLayer = new Map<number, number>();
+  sortedByOrder.forEach(({ originalIndex }, index) => {
+    orderFallbackLayer.set(originalIndex, Math.min(2, Math.floor(index / maxSelectableItems)));
+  });
+
+  const enriched = selectableItems.map((item, originalIndex) => ({
+    ...item,
+    originalIndex,
+    layerIndex: layerToIndex(item.layer, orderFallbackLayer.get(originalIndex) ?? 0),
+    accessIndex: 0,
+  }));
+
+  for (const layerIndex of [0, 1, 2]) {
+    const layerItems = enriched
+      .filter((item) => item.layerIndex === layerIndex)
+      .sort((a, b) => a.order - b.order || a.originalIndex - b.originalIndex);
+    layerItems.forEach((item, index) => {
+      item.accessIndex = layerIndex * maxSelectableItems + index;
+    });
+  }
+
+  const maxAccessIndex = Math.max(
+    1,
+    selectableItems.length - 1,
+    ...enriched.map((item) => item.accessIndex),
+  );
+  const sortedLaunchers = [...launchers].sort((a, b) => a.order - b.order);
+  const openDenominator = Math.max(1, sortedLaunchers.length - activeLauncherCount);
+  const activeWindowEndIndex = activeLauncherCount * REQUIRED_ITEMS_PER_LAUNCHER - 1;
+  const fruitDenominator = Math.max(1, maxAccessIndex - activeWindowEndIndex);
+  const consumed = new Set<number>();
+  let totalMismatch = 0;
+
+  for (let launcherIndex = 0; launcherIndex < sortedLaunchers.length; launcherIndex++) {
+    const launcher = sortedLaunchers[launcherIndex];
+    const matching = enriched
+      .filter((item) => item.colorType === launcher.colorType && !consumed.has(item.originalIndex))
+      .sort((a, b) => a.accessIndex - b.accessIndex || a.originalIndex - b.originalIndex);
+
+    let chosenTriplet: typeof matching | null = null;
+    const byVariant = new Map<number, typeof matching>();
+    for (const item of matching) {
+      const key = item.variant ?? 0;
+      const bucket = byVariant.get(key) ?? [];
+      bucket.push(item);
+      byVariant.set(key, bucket);
+    }
+
+    for (const bucket of byVariant.values()) {
+      if (bucket.length < REQUIRED_ITEMS_PER_LAUNCHER) continue;
+      const triplet = bucket.slice(0, REQUIRED_ITEMS_PER_LAUNCHER);
+      if (
+        chosenTriplet === null ||
+        triplet[REQUIRED_ITEMS_PER_LAUNCHER - 1].accessIndex <
+          chosenTriplet[REQUIRED_ITEMS_PER_LAUNCHER - 1].accessIndex
+      ) {
+        chosenTriplet = triplet;
+      }
+    }
+
+    const completionAccessIndex = chosenTriplet
+      ? chosenTriplet[REQUIRED_ITEMS_PER_LAUNCHER - 1].accessIndex
+      : matching[Math.min(REQUIRED_ITEMS_PER_LAUNCHER - 1, matching.length - 1)]?.accessIndex ??
+        maxAccessIndex;
+
+    if (chosenTriplet) {
+      for (const item of chosenTriplet) consumed.add(item.originalIndex);
+    }
+
+    const openNorm = clamp01(
+      Math.max(0, launcherIndex - activeLauncherCount + 1) / openDenominator,
+    );
+    const fruitNorm = clamp01(
+      Math.max(0, completionAccessIndex - activeWindowEndIndex) / fruitDenominator,
+    );
+    const gap = fruitNorm - openNorm;
+    totalMismatch += clamp01(gap >= 0 ? gap : Math.abs(gap) * 0.65);
+  }
+
+  return clamp01(totalMismatch / sortedLaunchers.length);
+}
+
 export function calculateStudioDifficulty(params: StudioDifficultyParams): StudioDifficultyResult {
   const {
     uniqueColors,
@@ -81,7 +208,7 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
   } = params;
   const blockingOffset = resolveBlockingOffset(params);
 
-  // ── 1. Blocking Pattern (0.38) ──────────────────────────────────────
+  // ── 1. Blocking Pattern (0.32) ──────────────────────────────────────
   // How long does it take before the player can complete the active set?
   // 0 = no extra blockers beyond A+B, 10 = maximum burial into Layer C.
   const blockingFactor = blockingOffsetToDepth(blockingOffset);
@@ -101,7 +228,7 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
     ? clamp01((totalTiles - maxSelectableItems) / totalTiles)
     : 0;
 
-  // ── 5. Launcher Sequence (0.07) ─────────────────────────────────────
+  // ── 5. Launcher Sequence (0.06) ─────────────────────────────────────
   // Total launchers the player must complete
   const launcherSequence = clamp01((launcherCount - 4) / 12);
 
@@ -124,14 +251,27 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
   // Amplifies complexity — weighted lower since it has no effect without it.
   const colorVariantDensity = clamp01(colorVariantDensityInput ?? 0);
 
+  // ── 8. Launcher Order (0.14) ────────────────────────────────────────
+  // Mismatch between blender activation order and depth of the 3rd usable fruit.
+  const launcherOrder = clamp01(
+    params.launcherOrderScore ??
+    calculateLauncherOrderDifficulty({
+      selectableItems: params.selectableItems,
+      launchers: params.launchers,
+      maxSelectableItems,
+      activeLauncherCount: params.activeLauncherCount,
+    }),
+  );
+
   const raw =
-    blockingFactor * 0.38 +
-    colorVariety * 0.08 +
-    surfaceSize * 0.21 +
-    hiddenRatio * 0.12 +
-    launcherSequence * 0.07 +
+    blockingFactor * 0.32 +
+    colorVariety * 0.07 +
+    surfaceSize * 0.18 +
+    hiddenRatio * 0.10 +
+    launcherSequence * 0.06 +
     variantComplexity * 0.09 +
-    colorVariantDensity * 0.05;
+    colorVariantDensity * 0.04 +
+    launcherOrder * 0.14;
 
   const score = Math.round(raw * 100);
 
@@ -162,8 +302,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Blocking',
       description: 'How far the matching fruits for the active blenders are stretched through the unlock window. Higher = more non-matching fruits must be processed first.',
       score: blockingFactor,
-      weight: 0.38,
-      contribution: blockingFactor * 0.38,
+      weight: 0.32,
+      contribution: blockingFactor * 0.32,
       explanation: blockingOffset === 0
         ? `Unlock distance ${unlockDistance} items — matching fruits stay within Layer A + Layer B, so the active blenders can be completed without digging into Layer C.`
         : blockingOffset <= 3
@@ -178,8 +318,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Surface Size',
       description: 'Number of fruits visible on top (Layer A) — how many choices the player has per move',
       score: surfaceSize,
-      weight: 0.21,
-      contribution: surfaceSize * 0.21,
+      weight: 0.18,
+      contribution: surfaceSize * 0.18,
       explanation: maxSelectableItems >= 10
         ? `${maxSelectableItems} fruits on surface — player has many options to choose from.`
         : maxSelectableItems >= 6
@@ -192,8 +332,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Hidden Items',
       description: 'Fruits below the surface: Layer B (dimmed, visible as hint) and Layer C (fully hidden)',
       score: hiddenRatio,
-      weight: 0.12,
-      contribution: hiddenRatio * 0.12,
+      weight: 0.10,
+      contribution: hiddenRatio * 0.10,
       explanation: layerCCount === 0
         ? `${layerBCount} fruits in Layer B (visible as hints), 0 in Layer C. Player can see everything and plan ahead.`
         : layerCCount <= 5
@@ -206,8 +346,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Color Quantity',
       description: 'Number of distinct fruit colors in the level',
       score: colorVariety,
-      weight: 0.08,
-      contribution: colorVariety * 0.08,
+      weight: 0.07,
+      contribution: colorVariety * 0.07,
       explanation: uniqueColors <= 3
         ? `${uniqueColors} colors — easy to spot matching triplets at a glance.`
         : uniqueColors <= 5
@@ -220,8 +360,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Blender Count',
       description: 'Total blenders to complete — determines level length and sustained concentration',
       score: launcherSequence,
-      weight: 0.07,
-      contribution: launcherSequence * 0.07,
+      weight: 0.06,
+      contribution: launcherSequence * 0.06,
       explanation: launcherCount <= 6
         ? `${launcherCount} blenders — short level, quick completion.`
         : launcherCount <= 12
@@ -248,8 +388,8 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
       name: 'Variant Density',
       description: 'Spatial clustering of same-color-different-variant tiles in the pixel art. High density means the player sees e.g. Blueberry next to Fig next to Grape — all blue but visually distinct — creating cognitive load.',
       score: colorVariantDensity,
-      weight: 0.05,
-      contribution: colorVariantDensity * 0.05,
+      weight: 0.04,
+      contribution: colorVariantDensity * 0.04,
       explanation: colorVariantDensity < 0.15
         ? `Same-color variants are scattered across the artwork — no significant visual confusion.`
         : colorVariantDensity < 0.4
@@ -258,6 +398,20 @@ export function calculateStudioDifficulty(params: StudioDifficultyParams): Studi
         ? `Same-color variants frequently cluster together (${Math.round(colorVariantDensity * 100)}% of same-color neighbors are different variants) — high visual confusion.`
         : `Dense same-color variant clustering (${Math.round(colorVariantDensity * 100)}% of same-color neighbors are different variants) — maximum cognitive load.`,
       impact: impactOf(colorVariantDensity),
+    },
+    {
+      id: 'launcherOrder',
+      name: 'Launcher Order',
+      description: 'Mismatch between blender activation order and the depth of the 3rd usable fruit',
+      score: launcherOrder,
+      weight: 0.14,
+      contribution: launcherOrder * 0.14,
+      explanation: launcherOrder < 0.2
+        ? `Blenders and fruit access are well aligned — required fruits appear near the time they are needed.`
+        : launcherOrder < 0.55
+        ? `Some blenders open before their fruits are reachable, or fruits appear before their blender is active.`
+        : `Launcher order is highly misaligned with fruit depth — expect more stand pressure and queue management.`,
+      impact: impactOf(launcherOrder),
     },
   ];
 

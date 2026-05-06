@@ -147,6 +147,12 @@ function calculateLegacyScore(config: StudioGameConfig): number | null {
     maxSelectableItems: config.maxSelectableItems,
     totalTiles: config.selectableItems.length,
     blockingOffset: resolveBlockingOffset(config),
+    activeLauncherCount: config.activeLauncherCount,
+    selectableItems: config.selectableItems,
+    launchers: config.launchers.map((launcher) => ({
+      colorType: launcher.colorType,
+      order: launcher.order,
+    })),
     uniqueVariants,
     colorVariantDensity: 0,
   }).score;

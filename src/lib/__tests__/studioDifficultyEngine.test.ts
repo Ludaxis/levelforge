@@ -19,6 +19,8 @@ import {
   getDeterministicMaxSwap,
   buildSolvableSequenceSeeded,
   buildChallengingSequenceSeeded,
+  calculateLauncherOrderDifficulty,
+  calculateStudioDifficulty,
 } from '@/lib/useStudioGame';
 import { COLOR_TYPE_TO_FRUIT } from '@/lib/juicyBlastExport';
 import { PixelCell, DifficultyTier } from '@/types/fruitMatch';
@@ -752,5 +754,80 @@ describe('Solvability with deterministic builder', () => {
     const bColors1 = state1.layerB.map((t) => t?.colorType ?? null);
     const bColors2 = state2.layerB.map((t) => t?.colorType ?? null);
     expect(bColors1).toEqual(bColors2);
+  });
+});
+
+// ============================================================================
+// Section 11: Launcher order difficulty
+// ============================================================================
+
+describe('Launcher order difficulty', () => {
+  const launchers = [
+    { colorType: 0, order: 0 },
+    { colorType: 1, order: 1 },
+  ];
+
+  const alignedItems = [
+    { colorType: 0, variant: 0, layer: 'A' as const, order: 0 },
+    { colorType: 0, variant: 0, layer: 'A' as const, order: 1 },
+    { colorType: 0, variant: 0, layer: 'A' as const, order: 2 },
+    { colorType: 1, variant: 0, layer: 'B' as const, order: 3 },
+    { colorType: 1, variant: 0, layer: 'B' as const, order: 4 },
+    { colorType: 1, variant: 0, layer: 'B' as const, order: 5 },
+  ];
+
+  const misalignedItems = [
+    { colorType: 1, variant: 0, layer: 'A' as const, order: 0 },
+    { colorType: 1, variant: 0, layer: 'A' as const, order: 1 },
+    { colorType: 1, variant: 0, layer: 'A' as const, order: 2 },
+    { colorType: 0, variant: 0, layer: 'B' as const, order: 3 },
+    { colorType: 0, variant: 0, layer: 'B' as const, order: 4 },
+    { colorType: 0, variant: 0, layer: 'B' as const, order: 5 },
+  ];
+
+  it('scores deeper first-launcher fruit as harder than aligned order', () => {
+    const aligned = calculateLauncherOrderDifficulty({
+      maxSelectableItems: 3,
+      activeLauncherCount: 1,
+      launchers,
+      selectableItems: alignedItems,
+    });
+
+    const misaligned = calculateLauncherOrderDifficulty({
+      maxSelectableItems: 3,
+      activeLauncherCount: 1,
+      launchers,
+      selectableItems: misalignedItems,
+    });
+
+    expect(misaligned).toBeGreaterThan(aligned);
+    expect(misaligned).toBeGreaterThan(0.5);
+  });
+
+  it('folds launcher order into the studio DifficultyScore', () => {
+    const base = {
+      totalPixels: 6,
+      uniqueColors: 2,
+      groupCount: 2,
+      launcherCount: 2,
+      maxSelectableItems: 3,
+      totalTiles: 6,
+      activeLauncherCount: 1,
+      launchers,
+    };
+
+    const aligned = calculateStudioDifficulty({
+      ...base,
+      selectableItems: alignedItems,
+    });
+    const misaligned = calculateStudioDifficulty({
+      ...base,
+      selectableItems: misalignedItems,
+    });
+
+    expect(misaligned.score).toBeGreaterThan(aligned.score);
+    expect(misaligned.breakdown.find((c) => c.id === 'launcherOrder')?.score).toBeGreaterThan(
+      aligned.breakdown.find((c) => c.id === 'launcherOrder')?.score ?? 0,
+    );
   });
 });

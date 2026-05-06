@@ -546,6 +546,7 @@ describe('Studio export format', () => {
       waitingStandSlots: 5,
       activeLauncherCount: 2,
       seed: 42,
+      launcherOrderScore: 42,
     });
 
     expect(exported.BlockingOffset).toBe(7);
@@ -553,6 +554,8 @@ describe('Studio export format', () => {
     expect(exported.WaitingStandSlots).toBe(5);
     expect(exported.ActiveLauncherCount).toBe(2);
     expect(exported.Seed).toBe(42);
+    expect(exported.LauncherOrderScore).toBe(42);
+    expect(exported.DifficultyBreakdown?.LauncherOrder).toBe(0.42);
   });
 
   it('exports selectable items in arrangement order while preserving canonical order metadata', () => {

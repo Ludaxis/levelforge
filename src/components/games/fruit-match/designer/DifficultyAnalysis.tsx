@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { StudioDifficultyResult, StudioDifficultyParams, DifficultyComponent, StudioGameConfig } from '@/lib/useStudioGame';
 import { StudioSimulationResult } from '@/lib/studioDifficultyEngine';
-import { computeParMoves } from '@/lib/useStudioGame';
+import { computeParMoves, calculateLauncherOrderDifficulty } from '@/lib/useStudioGame';
 import { DIFFICULTY_COLORS } from './types';
 
 function clamp01(v: number): number {
@@ -150,6 +150,7 @@ function FormulaBreakdown({ params, score }: { params: StudioDifficultyParams; s
     totalTiles,
     uniqueVariants,
     colorVariantDensity: colorVariantDensityInput,
+    activeLauncherCount,
   } = params;
   const blockingOffset = params.blockingOffset ?? Math.round((params.mismatchDepth ?? 0) * 10);
 
@@ -163,6 +164,15 @@ function FormulaBreakdown({ params, score }: { params: StudioDifficultyParams; s
     : 1;
   const variantComplexity = clamp01((avgVariantsPerColor - 1) / 2);
   const colorVariantDensity = clamp01(colorVariantDensityInput ?? 0);
+  const launcherOrder = clamp01(
+    params.launcherOrderScore ??
+    calculateLauncherOrderDifficulty({
+      selectableItems: params.selectableItems,
+      launchers: params.launchers,
+      maxSelectableItems,
+      activeLauncherCount,
+    }),
+  );
   const unlockDistance = maxSelectableItems * 2 + blockingOffset;
 
   const rows: { label: string; formula: string; raw: string; weight: string; contribution: string }[] = [
@@ -170,36 +180,36 @@ function FormulaBreakdown({ params, score }: { params: StudioDifficultyParams; s
       label: 'Blocking',
       formula: `clamp01(${blockingOffset} / 10)`,
       raw: blockingFactor.toFixed(2),
-      weight: '0.38',
-      contribution: (blockingFactor * 0.38).toFixed(3),
+      weight: '0.32',
+      contribution: (blockingFactor * 0.32).toFixed(3),
     },
     {
       label: 'Surface Size',
       formula: `clamp01(1 - (${maxSelectableItems} - 1) / 19)`,
       raw: surfaceSize.toFixed(2),
-      weight: '0.21',
-      contribution: (surfaceSize * 0.21).toFixed(3),
+      weight: '0.18',
+      contribution: (surfaceSize * 0.18).toFixed(3),
     },
     {
       label: 'Hidden Ratio',
       formula: `(${totalTiles} - ${maxSelectableItems}) / ${totalTiles}`,
       raw: hiddenRatio.toFixed(2),
-      weight: '0.12',
-      contribution: (hiddenRatio * 0.12).toFixed(3),
+      weight: '0.10',
+      contribution: (hiddenRatio * 0.10).toFixed(3),
     },
     {
       label: 'Color Variety',
       formula: `clamp01((${uniqueColors} - 2) / 5)`,
       raw: colorVariety.toFixed(2),
-      weight: '0.08',
-      contribution: (colorVariety * 0.08).toFixed(3),
+      weight: '0.07',
+      contribution: (colorVariety * 0.07).toFixed(3),
     },
     {
       label: 'Blender Count',
       formula: `clamp01((${launcherCount} - 4) / 12)`,
       raw: launcherSequence.toFixed(2),
-      weight: '0.07',
-      contribution: (launcherSequence * 0.07).toFixed(3),
+      weight: '0.06',
+      contribution: (launcherSequence * 0.06).toFixed(3),
     },
     {
       label: 'Variant Complexity',
@@ -212,19 +222,27 @@ function FormulaBreakdown({ params, score }: { params: StudioDifficultyParams; s
       label: 'Variant Density',
       formula: `clamp01(${colorVariantDensity.toFixed(2)})`,
       raw: colorVariantDensity.toFixed(2),
-      weight: '0.05',
-      contribution: (colorVariantDensity * 0.05).toFixed(3),
+      weight: '0.04',
+      contribution: (colorVariantDensity * 0.04).toFixed(3),
+    },
+    {
+      label: 'Launcher Order',
+      formula: 'avg(thirdFruitDepth - openStage)',
+      raw: launcherOrder.toFixed(2),
+      weight: '0.14',
+      contribution: (launcherOrder * 0.14).toFixed(3),
     },
   ];
 
   const rawTotal =
-    blockingFactor * 0.38 +
-    colorVariety * 0.08 +
-    surfaceSize * 0.21 +
-    hiddenRatio * 0.12 +
-    launcherSequence * 0.07 +
+    blockingFactor * 0.32 +
+    colorVariety * 0.07 +
+    surfaceSize * 0.18 +
+    hiddenRatio * 0.10 +
+    launcherSequence * 0.06 +
     variantComplexity * 0.09 +
-    colorVariantDensity * 0.05;
+    colorVariantDensity * 0.04 +
+    launcherOrder * 0.14;
 
   return (
     <div className="pt-1 border-t border-border">

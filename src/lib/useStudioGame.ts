@@ -22,6 +22,7 @@ export {
   blockingOffsetToDepth,
   resolveBlockingOffset,
   calculateStudioDifficulty,
+  calculateLauncherOrderDifficulty,
   buildPreviewState,
   computeParMoves,
   findMaxSolvableBlockingOffset,

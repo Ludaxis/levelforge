@@ -84,6 +84,14 @@ import {
 import { StudioArrangementPreview } from './StudioArrangementPreview';
 import type { ValidatedVariant } from '@/lib/juicyBlast/variantOptimizer';
 
+function componentScorePercent(
+  result: StudioDifficultyResult | null | undefined,
+  id: string,
+): number | undefined {
+  const score = result?.breakdown.find((component) => component.id === id)?.score;
+  return typeof score === 'number' ? Math.round(score * 100) : undefined;
+}
+
 // ============================================================================
 // Main Component: LevelDesignerV2
 // ============================================================================
@@ -321,10 +329,21 @@ export function LevelDesignerV2({
       maxSelectableItems,
       totalTiles,
       blockingOffset,
+      activeLauncherCount,
+      selectableItems: selectableItems.map((item) => ({
+        colorType: item.colorType,
+        variant: item.variant,
+        layer: item.layer,
+        order: item.order,
+      })),
+      launchers: launchers.map((launcher) => ({
+        colorType: launcher.colorType,
+        order: launcher.order,
+      })),
       uniqueVariants,
       colorVariantDensity,
     };
-  }, [pixelArray, pixelCellArray, launchers, groups.length, selectableItems, maxSelectableItems, blockingOffset]);
+  }, [pixelArray, pixelCellArray, launchers, groups.length, selectableItems, maxSelectableItems, blockingOffset, activeLauncherCount]);
 
   // Studio difficulty result
   const difficultyResult = useMemo((): StudioDifficultyResult | null => {
@@ -1290,6 +1309,7 @@ export function LevelDesignerV2({
       moveLimit,
       parMoves: parMoves ?? itemsWithLayers.length + blockingOffset,
       difficultyScore: difficultyResult?.score,
+      launcherOrderScore: componentScorePercent(difficultyResult, 'launcherOrder'),
       colorVariantDensity: studioDifficultyParams?.colorVariantDensity,
       variantComplexity: difficultyResult?.breakdown.find((c) => c.id === 'variantComplexity')?.score,
     };
@@ -1340,6 +1360,18 @@ export function LevelDesignerV2({
               ...studioDifficultyParams,
               maxSelectableItems: msi,
               blockingOffset: bo,
+              activeLauncherCount:
+                variant.values.activeLauncherCount ?? activeLauncherCount,
+              selectableItems: relayered.map((item) => ({
+                colorType: item.colorType,
+                variant: item.variant,
+                layer: item.layer,
+                order: item.order,
+              })),
+              launchers: launchers.map((launcher) => ({
+                colorType: launcher.colorType,
+                order: launcher.order,
+              })),
             })
           : null;
 
@@ -1425,6 +1457,10 @@ export function LevelDesignerV2({
           moveLimit: variant.values.moveLimit ?? moveLimit,
           parMoves: variantPar,
           difficultyScore: variantDifficulty?.score ?? difficultyResult?.score,
+          launcherOrderScore: componentScorePercent(
+            variantDifficulty ?? difficultyResult,
+            'launcherOrder',
+          ),
           colorVariantDensity: studioDifficultyParams?.colorVariantDensity,
           variantComplexity:
             variantDifficulty?.breakdown.find((c) => c.id === 'variantComplexity')
@@ -1492,6 +1528,17 @@ export function LevelDesignerV2({
               uniqueVariants: variantUniqueVariants,
               maxSelectableItems: config.maxSelectableItems,
               blockingOffset: bo,
+              activeLauncherCount: config.activeLauncherCount ?? activeLauncherCount,
+              selectableItems: config.selectableItems.map((item) => ({
+                colorType: item.colorType,
+                variant: item.variant,
+                layer: item.layer,
+                order: item.order,
+              })),
+              launchers: config.launchers.map((launcher) => ({
+                colorType: launcher.colorType,
+                order: launcher.order,
+              })),
             })
           : null;
         const selectableItemsForExport = config.selectableItems.map((item, index) => ({
@@ -1553,6 +1600,10 @@ export function LevelDesignerV2({
             legacyDifficulty?.score ??
             variant.report.legacyScore ??
             variant.report.solverScore,
+          launcherOrderScore: componentScorePercent(
+            legacyDifficulty ?? difficultyResult,
+            'launcherOrder',
+          ),
           colorVariantDensity: studioDifficultyParams?.colorVariantDensity,
           variantComplexity:
             legacyDifficulty?.breakdown.find((c) => c.id === 'variantComplexity')
