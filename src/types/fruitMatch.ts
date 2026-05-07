@@ -268,6 +268,8 @@ export interface DesignedFruitMatchLevel {
   studioActiveLauncherCount?: number;
   studioSeed?: number;
   studioMoveLimit?: number;
+  studioPalette?: string[];
+  studioParMoves?: number;
 }
 
 // ============================================================================

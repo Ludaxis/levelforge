@@ -19,7 +19,9 @@ import { calculateStudioDifficulty } from '@/lib/studioGameLogic';
 import {
   exportToReferenceFormat,
   exportStudioLevel,
+  importFromFullPixelArtFormat,
   importFromReferenceFormat,
+  isFullPixelArtFormat,
   isReferenceFormat,
   ReferenceLevel,
   StudioExportLevel,
@@ -84,6 +86,46 @@ const DIFFICULTY_BADGE_COLORS: Record<DifficultyTier, string> = {
   expert: 'bg-red-500/20 text-red-400 border-red-500/50',
   nightmare: 'bg-purple-500/20 text-purple-400 border-purple-500/50',
 };
+
+function clampRounded(value: unknown, fallback: number, min: number, max: number): number {
+  const n = typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  return Math.max(min, Math.min(max, Math.round(n)));
+}
+
+function normalizeHex(hex: unknown, fallback: string): string {
+  return typeof hex === 'string' && hex.trim()
+    ? hex.replace('#', '').toUpperCase()
+    : fallback;
+}
+
+function isStudioExportLike(data: unknown): data is Record<string, unknown> {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+  const obj = data as Record<string, unknown>;
+  return Boolean(
+    obj.Artwork &&
+    obj.SelectableItems &&
+    (
+      obj.Palette ||
+      obj.Launchers ||
+      obj.MaxSelectableItems ||
+      obj.BlockingOffset ||
+      obj.MismatchDepth ||
+      obj.WaitingStandSlots ||
+      obj.ActiveLauncherCount
+    ),
+  );
+}
+
+function getImportedLevelNumber(data: Record<string, unknown>, fileName: string, fallback: number): number {
+  const levelId = typeof data.LevelId === 'string' ? data.LevelId : '';
+  const levelIdMatch = levelId.match(/^Level(\d+)_\d+$/i);
+  if (levelIdMatch) return parseInt(levelIdMatch[1], 10);
+  if (typeof data.LevelIndex === 'number' && Number.isFinite(data.LevelIndex) && data.LevelIndex > 0) {
+    return Math.round(data.LevelIndex);
+  }
+  const fileMatch = fileName.match(/level[_-]?(\d+)/i);
+  return fileMatch ? parseInt(fileMatch[1], 10) : fallback;
+}
 
 
 // ============================================================================
@@ -299,32 +341,37 @@ export function FruitMatchLevelCollection({
   const levelToExportJSON = useCallback((level: DesignedFruitMatchLevel): object => {
     // If the level has studio data (items, launchers with order/variant/layer), use studio format
     if (level.studioSelectableItems && level.studioLaunchers) {
+      const studioItems = [...level.studioSelectableItems].sort((a, b) => a.order - b.order);
+      const studioLaunchers = [...level.studioLaunchers].sort((a, b) => a.order - b.order);
+
       // Build palette from pixel art colors
-      const paletteSet = new Set<string>();
+      const paletteSet = new Set<string>(level.studioPalette ?? []);
       for (const cell of level.pixelArt) {
-        const ct = FRUIT_TO_COLOR_TYPE[cell.fruitType];
-        paletteSet.add(COLOR_TYPE_TO_HEX[ct] || '888888');
+        const ct = typeof cell.colorType === 'number'
+          ? cell.colorType
+          : FRUIT_TO_COLOR_TYPE[cell.fruitType];
+        paletteSet.add(normalizeHex(cell.colorHex, COLOR_TYPE_TO_HEX[ct] || '888888'));
       }
 
-      const colorVariantDensity = calculateColorVariantDensity(level.pixelArt, level.studioSelectableItems);
-      const uniqueColors = new Set(level.studioSelectableItems.map((s) => s.colorType)).size;
-      const uniqueVariants = new Set(level.studioSelectableItems.map((s) => `${s.colorType}:${s.variant}`)).size;
+      const colorVariantDensity = calculateColorVariantDensity(level.pixelArt, studioItems);
+      const uniqueColors = new Set(studioItems.map((s) => s.colorType)).size;
+      const uniqueVariants = new Set(studioItems.map((s) => `${s.colorType}:${s.variant}`)).size;
       const studioDifficulty = calculateStudioDifficulty({
         totalPixels: level.pixelArt.length,
         uniqueColors,
-        groupCount: new Set(level.studioLaunchers.map((l) => l.group)).size,
-        launcherCount: level.studioLaunchers.length,
+        groupCount: new Set(studioLaunchers.map((l) => l.group)).size,
+        launcherCount: studioLaunchers.length,
         maxSelectableItems: level.studioMaxSelectableItems ?? 10,
-        totalTiles: level.studioSelectableItems.length,
+        totalTiles: studioItems.length,
         blockingOffset: level.studioBlockingOffset,
         activeLauncherCount: level.studioActiveLauncherCount,
-        selectableItems: level.studioSelectableItems.map((si) => ({
+        selectableItems: studioItems.map((si) => ({
           colorType: si.colorType,
           variant: si.variant,
           layer: si.layer,
           order: si.order,
         })),
-        launchers: level.studioLaunchers.map((launcher) => ({
+        launchers: studioLaunchers.map((launcher) => ({
           colorType: launcher.colorType,
           order: launcher.order,
         })),
@@ -341,28 +388,30 @@ export function FruitMatchLevelCollection({
         width: level.pixelArtWidth,
         height: level.pixelArtHeight,
         pixels: level.pixelArt.map((cell) => {
-          const ct = FRUIT_TO_COLOR_TYPE[cell.fruitType];
+          const ct = typeof cell.colorType === 'number'
+            ? cell.colorType
+            : FRUIT_TO_COLOR_TYPE[cell.fruitType];
           return {
             row: cell.row,
             col: cell.col,
             colorType: ct,
             colorGroup: ct,
-            colorHex: COLOR_TYPE_TO_HEX[ct] || '888888',
+            colorHex: normalizeHex(cell.colorHex, COLOR_TYPE_TO_HEX[ct] || '888888'),
             group: cell.groupId ?? 1,
           };
         }),
-        selectableItems: level.studioSelectableItems.map((si) => ({
+        selectableItems: studioItems.map((si) => ({
           colorType: si.colorType,
           variant: si.variant,
           layer: si.layer,
           order: si.order,
         })),
-        requirements: level.studioLaunchers.map((l) => ({
+        requirements: studioLaunchers.map((l) => ({
           colorType: l.colorType,
           value: l.pixelCount,
           group: l.group,
         })),
-        launchers: level.studioLaunchers.map((l) => ({
+        launchers: studioLaunchers.map((l) => ({
           colorType: l.colorType,
           pixelCount: l.pixelCount,
           group: l.group,
@@ -372,10 +421,12 @@ export function FruitMatchLevelCollection({
         unlockStageData: [],
         maxSelectableItems: level.studioMaxSelectableItems ?? 10,
         blockingOffset: level.studioBlockingOffset,
+        mismatchDepth: (level.studioBlockingOffset ?? 0) / 10,
         waitingStandSlots: level.studioWaitingStandSlots,
         activeLauncherCount: level.studioActiveLauncherCount,
         seed: level.studioSeed,
         moveLimit: level.studioMoveLimit,
+        parMoves: level.studioParMoves ?? studioItems.length + (level.studioBlockingOffset ?? 0),
         difficultyScore: studioDifficulty.score,
         launcherOrderScore: Math.round(
           (studioDifficulty.breakdown.find((c) => c.id === 'launcherOrder')?.score ?? 0) *
@@ -496,14 +547,149 @@ export function FruitMatchLevelCollection({
     };
   };
 
-  // Convert a studio-format JSON (has Palette + Artwork + SelectableItems) to DesignedFruitMatchLevel
+  const fullPixelArtToDesignedLevel = (
+    data: Parameters<typeof importFromFullPixelArtFormat>[0],
+    levelNumber: number,
+  ): DesignedFruitMatchLevel => {
+    const result = importFromFullPixelArtFormat(data);
+    const pixelArt: PixelCell[] = result.pixels.map((pixel) => ({
+      row: pixel.row,
+      col: pixel.col,
+      fruitType: pixel.fruitType,
+      filled: false,
+      groupId: pixel.group,
+      colorHex: normalizeHex(pixel.colorHex, COLOR_TYPE_TO_HEX[pixel.colorType] || '888888'),
+      colorType: pixel.colorType,
+    }));
+
+    const groupMap = new Map<number, { pixelsByColor: Record<number, number>; totalPixels: number }>();
+    result.pixels.forEach((pixel) => {
+      const existing = groupMap.get(pixel.group);
+      if (existing) {
+        existing.pixelsByColor[pixel.colorType] = (existing.pixelsByColor[pixel.colorType] || 0) + 1;
+        existing.totalPixels++;
+      } else {
+        groupMap.set(pixel.group, {
+          pixelsByColor: { [pixel.colorType]: 1 },
+          totalPixels: 1,
+        });
+      }
+    });
+
+    const studioLaunchers: DesignedFruitMatchLevel['studioLaunchers'] = [];
+    let launcherOrder = 0;
+    Array.from(groupMap.entries())
+      .sort(([a], [b]) => a - b)
+      .forEach(([group, info]) => {
+        Object.keys(info.pixelsByColor)
+          .map(Number)
+          .sort((a, b) => a - b)
+          .forEach((colorType) => {
+            studioLaunchers.push({
+              colorType,
+              pixelCount: info.pixelsByColor[colorType],
+              group,
+              order: launcherOrder,
+              isLocked: launcherOrder >= 2,
+            });
+            launcherOrder++;
+          });
+      });
+
+    const maxSelectableItems = Math.min(Math.max(1, Math.ceil((studioLaunchers.length * 3) / 2)), 20);
+    const studioSelectableItems: DesignedFruitMatchLevel['studioSelectableItems'] = [];
+    let itemOrder = 0;
+    for (const launcher of studioLaunchers) {
+      for (let i = 0; i < 3; i++) {
+        const layer: 'A' | 'B' | 'C' = itemOrder < maxSelectableItems
+          ? 'A'
+          : itemOrder < 2 * maxSelectableItems
+            ? 'B'
+            : 'C';
+        studioSelectableItems.push({
+          colorType: launcher.colorType,
+          variant: 0,
+          layer,
+          order: itemOrder++,
+        });
+      }
+    }
+
+    const uniqueColors = new Set(studioSelectableItems.map((item) => item.colorType)).size;
+    const colorVariantDensity = calculateColorVariantDensity(pixelArt, studioSelectableItems);
+    const diffResult = calculateStudioDifficulty({
+      totalPixels: pixelArt.length,
+      uniqueColors,
+      groupCount: groupMap.size,
+      launcherCount: studioLaunchers.length,
+      maxSelectableItems,
+      totalTiles: studioSelectableItems.length,
+      blockingOffset: 0,
+      activeLauncherCount: 2,
+      selectableItems: studioSelectableItems,
+      launchers: studioLaunchers.map((launcher) => ({
+        colorType: launcher.colorType,
+        order: launcher.order,
+      })),
+      uniqueVariants: uniqueColors,
+      colorVariantDensity,
+    });
+
+    const fruitDistribution: Record<FruitType, number> = {
+      blueberry: 0, orange: 0, strawberry: 0, dragonfruit: 0, banana: 0, apple: 0, plum: 0, pear: 0, blackberry: 0,
+    };
+    for (const cell of pixelArt) fruitDistribution[cell.fruitType]++;
+
+    return {
+      id: `level-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      name: `Level${levelNumber}_1`,
+      levelNumber,
+      pixelArt,
+      pixelArtWidth: result.width,
+      pixelArtHeight: result.height,
+      sinkWidth: 6,
+      sinkStacks: [],
+      waitingStandSlots: 5,
+      metrics: {
+        totalPixels: pixelArt.length,
+        uniqueFruitTypes: uniqueColors,
+        fruitDistribution,
+        totalTilesInSink: studioSelectableItems.length,
+        waitingStandSlots: 5,
+        estimatedMatches: pixelArt.length,
+        difficultyScore: diffResult.score,
+        difficulty: diffResult.tier,
+      },
+      createdAt: Date.now(),
+      studioSelectableItems,
+      studioLaunchers,
+      studioMaxSelectableItems: maxSelectableItems,
+      studioBlockingOffset: 0,
+      studioWaitingStandSlots: 5,
+      studioActiveLauncherCount: 2,
+      studioPalette: result.palette.map((p) => normalizeHex(p, '888888')),
+      studioParMoves: studioSelectableItems.length,
+    };
+  };
+
+  // Convert a studio-format JSON to DesignedFruitMatchLevel
   const studioToDesignedLevel = (data: Record<string, unknown>, levelNumber: number): DesignedFruitMatchLevel => {
     const artwork = data.Artwork as { Width: number; Height: number; PixelData: { Position: { x: number; y: number }; ColorType: number; Group: number; ColorHex: string }[] };
     const height = artwork.Height;
     const width = artwork.Width;
 
     // Extract launcher data first — needed to reconcile pixel colorTypes
-    const rawLaunchers = (data.Launchers as { ColorType: number; Value: number; Group: number; Order: number; IsLocked: boolean }[]) || [];
+    const rawLaunchersFromData = data.Launchers as { ColorType: number; Value: number; Group: number; Order: number; IsLocked: boolean }[] | undefined;
+    const rawRequirements = (data.Requirements as { ColorType: number; Value: number; Group: number }[]) || [];
+    const rawLaunchers = Array.isArray(rawLaunchersFromData)
+      ? rawLaunchersFromData
+      : rawRequirements.map((r, idx) => ({
+          ColorType: r.ColorType,
+          Value: r.Value,
+          Group: r.Group,
+          Order: idx,
+          IsLocked: idx >= 2,
+        }));
 
     // Build group → colorType from launchers so pixels match launcher intent
     // (hex-mapping can produce a wrong colorType, e.g. dark green → Black=8)
@@ -531,12 +717,15 @@ export function FruitMatchLevelCollection({
     // Extract studio data
     const rawItems = (data.SelectableItems as { ColorType: number; Variant: number; Layer: number; Order?: number }[]) || [];
     const layerNames: Record<number, 'A' | 'B' | 'C'> = { 0: 'A', 1: 'B', 2: 'C' };
-    const studioSelectableItems = rawItems.map((item, idx) => ({
-      colorType: item.ColorType,
-      variant: item.Variant ?? 0,
-      layer: layerNames[item.Layer] || 'A' as 'A' | 'B' | 'C',
-      order: typeof item.Order === 'number' ? item.Order : idx,
-    }));
+    const studioSelectableItems = rawItems
+      .map((item, idx) => ({
+        colorType: item.ColorType,
+        variant: item.Variant ?? 0,
+        layer: layerNames[item.Layer] || 'A' as 'A' | 'B' | 'C',
+        order: typeof item.Order === 'number' ? Math.max(0, Math.round(item.Order)) : idx,
+      }))
+      .sort((a, b) => a.order - b.order)
+      .map((item, idx) => ({ ...item, order: idx }));
     const studioLaunchers = rawLaunchers.map((l, idx) => ({
       colorType: l.ColorType,
       pixelCount: l.Value,
@@ -545,12 +734,17 @@ export function FruitMatchLevelCollection({
       isLocked: l.IsLocked ?? idx >= 2,
     }));
 
-    const maxSelectableItems = (data.MaxSelectableItems as number) || 10;
-    const blockingOffset = typeof data.BlockingOffset === 'number' ? data.BlockingOffset : 0;
-    const waitingStandSlots = typeof data.WaitingStandSlots === 'number' ? data.WaitingStandSlots : 5;
-    const activeLauncherCount = typeof data.ActiveLauncherCount === 'number' ? data.ActiveLauncherCount : 2;
+    const maxSelectableItems = clampRounded(data.MaxSelectableItems, 10, 1, 20);
+    const blockingOffset = typeof data.BlockingOffset === 'number'
+      ? clampRounded(data.BlockingOffset, 0, 0, 10)
+      : typeof data.MismatchDepth === 'number'
+        ? clampRounded(data.MismatchDepth * 10, 0, 0, 10)
+        : 0;
+    const waitingStandSlots = clampRounded(data.WaitingStandSlots, 5, 3, 7);
+    const activeLauncherCount = clampRounded(data.ActiveLauncherCount, 2, 1, 3);
     const seed = typeof data.Seed === 'number' ? data.Seed : undefined;
     const moveLimit = typeof data.MoveLimit === 'number' ? data.MoveLimit : undefined;
+    const parMoves = typeof data.ParMoves === 'number' ? Math.max(0, Math.round(data.ParMoves)) : undefined;
     const exportedDifficultyScore = typeof data.DifficultyScore === 'number'
       ? Math.max(0, Math.min(100, Math.round(data.DifficultyScore)))
       : null;
@@ -626,6 +820,10 @@ export function FruitMatchLevelCollection({
       studioActiveLauncherCount: activeLauncherCount,
       studioSeed: seed,
       studioMoveLimit: moveLimit,
+      studioPalette: Array.isArray(data.Palette)
+        ? (data.Palette as unknown[]).filter((p): p is string => typeof p === 'string').map((p) => normalizeHex(p, '888888'))
+        : undefined,
+      studioParMoves: parMoves,
     };
   };
 
@@ -648,10 +846,16 @@ export function FruitMatchLevelCollection({
           const content = await file.text();
           const imported = JSON.parse(content);
 
-          // Check studio format first (has Palette + Artwork + SelectableItems)
-          if (imported && !Array.isArray(imported) && imported.Palette && imported.Artwork && imported.SelectableItems) {
-            const match = file.name.match(/level[_-]?(\d+)/i);
-            const levelNumber = match ? parseInt(match[1], 10) : currentLevelNumber++;
+          if (isFullPixelArtFormat(imported)) {
+            const levelNumber = getImportedLevelNumber(imported as unknown as Record<string, unknown>, file.name, currentLevelNumber++);
+            newLevels.push(fullPixelArtToDesignedLevel(imported, levelNumber));
+            continue;
+          }
+
+          // Check studio format first. It overlaps with reference format, so this
+          // path preserves Design-tab normalization fields before the fallback.
+          if (isStudioExportLike(imported)) {
+            const levelNumber = getImportedLevelNumber(imported, file.name, currentLevelNumber++);
             newLevels.push(studioToDesignedLevel(imported, levelNumber));
             continue;
           }
@@ -676,8 +880,10 @@ export function FruitMatchLevelCollection({
           if (Array.isArray(imported)) {
             for (const l of imported) {
               // Studio format in array
-              if (l.Palette && l.Artwork && l.SelectableItems) {
-                newLevels.push(studioToDesignedLevel(l, currentLevelNumber++));
+              if (isFullPixelArtFormat(l)) {
+                newLevels.push(fullPixelArtToDesignedLevel(l, getImportedLevelNumber(l as unknown as Record<string, unknown>, file.name, currentLevelNumber++)));
+              } else if (isStudioExportLike(l)) {
+                newLevels.push(studioToDesignedLevel(l, getImportedLevelNumber(l, file.name, currentLevelNumber++)));
               } else if (isReferenceFormat(l)) {
                 newLevels.push(referenceToDesignedLevel(l, currentLevelNumber++));
               } else if (l.pixelArt) {
