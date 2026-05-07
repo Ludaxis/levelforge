@@ -36,7 +36,7 @@ function makeTwoColorLevel(): StudioExportLevel {
 }
 
 describe('SolvabilityChecker', () => {
-  it('imports a level and reports path diversity without DFS enabled', async () => {
+  it('imports a level without pretending non-DFS path counts are exact', async () => {
     const user = userEvent.setup();
     const { container } = render(<SolvabilityChecker />);
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
@@ -53,7 +53,8 @@ describe('SolvabilityChecker', () => {
     await user.click(screen.getByRole('button', { name: /Run Analysis/i }));
 
     expect((await screen.findAllByText('OptimalStarts')).length).toBeGreaterThan(0);
-    expect(screen.getByText('1+')).toBeInTheDocument();
+    expect(screen.getByText('Not counted')).toBeInTheDocument();
     expect(screen.getByText(/Optimal starts: #0 #1/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Export Optimal Policy/i })).toBeInTheDocument();
   });
 });

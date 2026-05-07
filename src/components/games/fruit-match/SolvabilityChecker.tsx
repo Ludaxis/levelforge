@@ -23,6 +23,7 @@ import {
   configToSolverInput,
   studioExportToGameConfig,
   analyzeMoves,
+  buildOptimalMovePolicy,
 } from '@/lib/solvabilityChecker';
 import { StudioExportLevel, COLOR_TYPE_TO_HEX, COLOR_TYPE_TO_NAME } from '@/lib/juicyBlastExport';
 import { HelpButton } from '@/components/help';
@@ -110,6 +111,12 @@ function VerdictBadge({ verdict }: { verdict: LevelReport['verdict'] }) {
   };
   const labels = { solvable: 'Solvable', risky: 'Risky', stuck: 'Stuck' };
   return <Badge variant="outline" className={styles[verdict]}>{labels[verdict]}</Badge>;
+}
+
+function formatDetectedPathCount(report: LevelReport): string {
+  if (!report.dfs) return report.greedy.solved ? 'Not counted' : '-';
+  const count = report.dfs.optimalSolutionCount || report.dfs.solutionCount;
+  return `${count}${report.dfs.solutionCountCapped || report.dfs.timedOut ? '+' : ''}`;
 }
 
 // ============================================================================
@@ -636,11 +643,7 @@ function LayersPanel({ level, report, solverInput }: { level: StudioExportLevel;
 
 function SolutionPanel({ report }: { report: LevelReport | null }) {
   if (!report) return <p className="text-sm text-muted-foreground">Run analysis first</p>;
-  const countedPaths = report.dfs
-    ? `${report.dfs.optimalSolutionCount || report.dfs.solutionCount}${report.dfs.solutionCountCapped || report.dfs.timedOut ? '+' : ''}`
-    : report.greedy.solved
-      ? '1+'
-      : '-';
+  const countedPaths = formatDetectedPathCount(report);
 
   return (
     <div className="space-y-4">
@@ -951,6 +954,7 @@ export function SolvabilityChecker() {
   const [selectedLevelId, setSelectedLevelId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState('layers');
   const [playLogs, setPlayLogs] = useState<string[]>([]);
+  const [exportingPolicy, setExportingPolicy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const files = useMemo(
@@ -1027,9 +1031,7 @@ export function SolvabilityChecker() {
     const header = 'Level,Items,Launchers,Colors,MaxSel,Blocking,Stand,Active,Greedy,MC WinRate,Moves,Direct,Queue,OptimalStarts,CountedPaths,Verdict';
     const rows = report.levels.map((r) =>
       {
-        const countedPaths = r.dfs
-          ? `${r.dfs.optimalSolutionCount || r.dfs.solutionCount}${r.dfs.solutionCountCapped || r.dfs.timedOut ? '+' : ''}`
-          : r.greedy.solved ? '1+' : '';
+        const countedPaths = formatDetectedPathCount(r);
         return (
       [r.levelId, r.totalItems, r.totalLaunchers, r.uniqueColors, r.maxSelectableItems, r.blockingOffset, r.waitingStandSlots, r.activeLauncherCount,
         r.greedy.solved ? 'PASS' : 'FAIL', `${(r.monteCarlo.winRate * 100).toFixed(1)}%`,
@@ -1084,6 +1086,34 @@ export function SolvabilityChecker() {
       URL.revokeObjectURL(url);
     }
   }, [files]);
+
+  const handleExportOptimalPolicy = useCallback(() => {
+    if (files.length === 0 || exportingPolicy) return;
+    setExportingPolicy(true);
+    window.setTimeout(() => {
+      try {
+        const levels = files.map((level) =>
+          buildOptimalMovePolicy(level, {
+            stateLimit: dfsLimit,
+            nodeLimit: 50000,
+          }),
+        );
+        const payload = {
+          format: 'juicy-blast-optimal-policy-v1',
+          levels,
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `optimal-policy-${files.length}-levels.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } finally {
+        setExportingPolicy(false);
+      }
+    }, 0);
+  }, [dfsLimit, exportingPolicy, files]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -1202,6 +1232,9 @@ export function SolvabilityChecker() {
               )}
               <div className="flex-1" />
               <Button variant="outline" size="sm" className="h-7" onClick={handleExportAllJSON} disabled={running}><Download className="h-3 w-3 mr-1" /> Export All JSONs</Button>
+              <Button variant="outline" size="sm" className="h-7" onClick={handleExportOptimalPolicy} disabled={running || exportingPolicy}>
+                <Download className="h-3 w-3 mr-1" /> {exportingPolicy ? 'Building Policy...' : 'Export Optimal Policy'}
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -1305,9 +1338,7 @@ export function SolvabilityChecker() {
                   {displayLevels.map((r) => {
                     const isExpanded = expandedId === r.levelId;
                     const qm = r.moveAnalysis?.queueMoves ?? 0;
-                    const paths = r.dfs
-                      ? `${r.dfs.optimalSolutionCount || r.dfs.solutionCount}${r.dfs.solutionCountCapped || r.dfs.timedOut ? '+' : ''}`
-                      : r.greedy.solved ? '1+' : '-';
+                    const paths = formatDetectedPathCount(r);
                     return (
                       <React.Fragment key={r.levelId}>
                         <tr

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   analyzeSingleLevel,
+  buildOptimalMovePolicy,
   findOptimalFirstMoves,
   solveDFS,
   studioExportToGameConfig,
@@ -57,5 +58,20 @@ describe('solvability checker path reporting', () => {
 
     const report = analyzeSingleLevel(level, { runMonteCarlo: false, runDFS: false });
     expect(report.optimalFirstMoves).toEqual([0, 1]);
+  });
+
+  it('builds a deterministic state-hash optimal move policy', () => {
+    const level = makeTwoColorLevel();
+    const policy = buildOptimalMovePolicy(level, { stateLimit: 10000, nodeLimit: 10000 });
+    const replay = buildOptimalMovePolicy(level, { stateLimit: 10000, nodeLimit: 10000 });
+    const root = policy.nodes.find((node) => node.moveNumber === 0);
+
+    expect(policy).toEqual(replay);
+    expect(policy.complete).toBe(true);
+    expect(policy.capped).toBe(false);
+    expect(policy.parMoves).toBe(6);
+    expect(policy.nodeCount).toBeGreaterThan(0);
+    expect(root?.remainingMoves).toBe(6);
+    expect(root?.optimalMoves.map((move) => move.itemIndex).sort((a, b) => a - b)).toEqual([0, 1]);
   });
 });

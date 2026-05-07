@@ -97,6 +97,37 @@ export interface AnalyzeOptions {
   onProgress?: (done: number, total: number) => void;
 }
 
+export interface OptimalPolicyMove {
+  itemIndex: number;
+  position: number;
+  colorType: number;
+  variant: number;
+  action: 'launcher' | 'queue';
+}
+
+export interface OptimalPolicyNode {
+  stateHash: string;
+  moveNumber: number;
+  remainingMoves: number;
+  optimalMoves: OptimalPolicyMove[];
+}
+
+export interface OptimalPolicyReport {
+  levelId: string;
+  parMoves: number | null;
+  nodeCount: number;
+  complete: boolean;
+  capped: boolean;
+  exploredStates: number;
+  stateHashVersion: 'juicy-blast-policy-v1';
+  nodes: OptimalPolicyNode[];
+}
+
+export interface BuildOptimalPolicyOptions {
+  stateLimit?: number;
+  nodeLimit?: number;
+}
+
 // ============================================================================
 // StudioExportLevel → StudioGameConfig conversion
 // ============================================================================
@@ -624,6 +655,224 @@ export function solveDFS(
     verdict,
     timedOut,
     solutionPath,
+  };
+}
+
+// ============================================================================
+// Optimal move policy export
+// ============================================================================
+
+interface PolicyTransition {
+  move: OptimalPolicyMove;
+  next: SolverState;
+}
+
+function solverItemKey(item: SolverItem | null): string {
+  return item ? `${item.idx}:${item.ColorType}:${item.Variant}` : 'x';
+}
+
+function serializeSolverState(state: SolverState): string {
+  const positions = state.pos
+    .map((p) => `${solverItemKey(p.vis)}/${solverItemKey(p.beh)}`)
+    .join('|');
+  const slots = state.slots
+    .map((slot) => {
+      if (!slot) return 'x';
+      return `${slot.ri}:${slot.ct}:${slot.vl ?? 'x'}:${slot.items.map(solverItemKey).join('.')}`;
+    })
+    .join('|');
+  return [
+    `p=${positions}`,
+    `l2=${state.l2i}`,
+    `nri=${state.nri}`,
+    `slots=${slots}`,
+    `wq=${state.wq.map(solverItemKey).join('|')}`,
+    `cr=${state.cr}`,
+  ].join(';');
+}
+
+function hashPolicyState(serialized: string): string {
+  let h1 = 0xdeadbeef ^ serialized.length;
+  let h2 = 0x41c6ce57 ^ serialized.length;
+
+  for (let i = 0; i < serialized.length; i++) {
+    const ch = serialized.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+
+  const hi = (h2 >>> 0).toString(16).padStart(8, '0');
+  const lo = (h1 >>> 0).toString(16).padStart(8, '0');
+  return `jbop1_${hi}${lo}`;
+}
+
+function comparePolicyPickScore(state: SolverState, maxWait: number, a: number, b: number): number {
+  const scoreA = scoreSolverPick(state, a, maxWait);
+  const scoreB = scoreSolverPick(state, b, maxWait);
+  if (scoreA !== scoreB) return scoreB - scoreA;
+  const itemA = state.pos[a].vis!;
+  const itemB = state.pos[b].vis!;
+  return itemA.idx - itemB.idx;
+}
+
+function buildPolicyTransitions(state: SolverState, input: SolverInput): PolicyTransition[] {
+  const { L2, reqs, maxWait } = input;
+  const available: number[] = [];
+  for (let pi = 0; pi < state.pos.length; pi++) {
+    if (state.pos[pi].vis) available.push(pi);
+  }
+
+  available.sort((a, b) => comparePolicyPickScore(state, maxWait, a, b));
+
+  const transitions: PolicyTransition[] = [];
+  const seen = new Set<string>();
+
+  for (const pi of available) {
+    const item = state.pos[pi].vis!;
+    const matchSlots = findMatchSlots(state, item);
+    const target = matchSlots.length > 0 ? matchSlots[0] : -1;
+    const transitionKey = `${item.idx}:${target}`;
+    if (seen.has(transitionKey)) continue;
+    seen.add(transitionKey);
+
+    const next = cloneState(state);
+    const picked = pickSurface(next, pi, L2);
+    if (!placeItem(next, picked, target, reqs, maxWait)) continue;
+    next.picks.push(pi);
+    transitions.push({
+      move: {
+        itemIndex: picked.idx,
+        position: pi,
+        colorType: picked.ColorType,
+        variant: picked.Variant,
+        action: target >= 0 ? 'launcher' : 'queue',
+      },
+      next,
+    });
+  }
+
+  return transitions;
+}
+
+export function buildOptimalMovePolicy(
+  level: StudioExportLevel,
+  options: BuildOptimalPolicyOptions = {},
+): OptimalPolicyReport {
+  const config = studioExportToGameConfig(level);
+  const input = configToSolverInput(config);
+  const { reqs, slotCount, maxWait } = input;
+  const totalReqs = reqs.length;
+  const stateLimit = options.stateLimit ?? 200000;
+  const nodeLimit = options.nodeLimit ?? 50000;
+
+  const root = makeState(input);
+  for (let si = 0; si < slotCount; si++) loadSlot(root, si, reqs, maxWait);
+
+  const distanceMemo = new Map<string, number | null>();
+  const transitionMemo = new Map<string, PolicyTransition[]>();
+  const visiting = new Set<string>();
+  let capped = false;
+  let exploredStates = 0;
+
+  function solveDistance(state: SolverState): number | null {
+    const key = serializeSolverState(state);
+    if (distanceMemo.has(key)) return distanceMemo.get(key)!;
+
+    if (state.cr >= totalReqs) {
+      distanceMemo.set(key, 0);
+      return 0;
+    }
+
+    if (exploredStates >= stateLimit || visiting.has(key)) {
+      capped = true;
+      return null;
+    }
+
+    exploredStates++;
+    visiting.add(key);
+
+    const transitions = buildPolicyTransitions(state, input);
+    transitionMemo.set(key, transitions);
+
+    let best = Infinity;
+    for (const transition of transitions) {
+      const childDistance = solveDistance(transition.next);
+      if (childDistance !== null) best = Math.min(best, childDistance + 1);
+    }
+
+    visiting.delete(key);
+
+    const result = Number.isFinite(best) ? best : null;
+    distanceMemo.set(key, result);
+    return result;
+  }
+
+  const parMoves = solveDistance(root);
+  const nodes: OptimalPolicyNode[] = [];
+  const collected = new Set<string>();
+
+  function collectOptimalStates(state: SolverState): void {
+    if (nodes.length >= nodeLimit) {
+      capped = true;
+      return;
+    }
+
+    const key = serializeSolverState(state);
+    if (collected.has(key)) return;
+    const remainingMoves = distanceMemo.get(key);
+    if (remainingMoves == null || remainingMoves <= 0) return;
+
+    const moves = new Map<number, OptimalPolicyMove>();
+    const nextStates: SolverState[] = [];
+    const transitions = transitionMemo.get(key) ?? buildPolicyTransitions(state, input);
+
+    for (const transition of transitions) {
+      const childKey = serializeSolverState(transition.next);
+      const childDistance = distanceMemo.get(childKey);
+      if (childDistance == null || childDistance + 1 !== remainingMoves) continue;
+
+      const existing = moves.get(transition.move.itemIndex);
+      if (!existing || (existing.action === 'queue' && transition.move.action === 'launcher')) {
+        moves.set(transition.move.itemIndex, transition.move);
+      }
+      nextStates.push(transition.next);
+    }
+
+    const optimalMoves = Array.from(moves.values()).sort((a, b) => {
+      if (a.position !== b.position) return a.position - b.position;
+      return a.itemIndex - b.itemIndex;
+    });
+
+    if (optimalMoves.length === 0) return;
+
+    collected.add(key);
+    nodes.push({
+      stateHash: hashPolicyState(key),
+      moveNumber: state.picks.length,
+      remainingMoves,
+      optimalMoves,
+    });
+
+    for (const next of nextStates) {
+      collectOptimalStates(next);
+      if (capped) return;
+    }
+  }
+
+  collectOptimalStates(root);
+
+  return {
+    levelId: level.LevelId || 'unknown',
+    parMoves,
+    nodeCount: nodes.length,
+    complete: !capped,
+    capped,
+    exploredStates,
+    stateHashVersion: 'juicy-blast-policy-v1',
+    nodes,
   };
 }
 
