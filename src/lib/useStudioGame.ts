@@ -23,6 +23,8 @@ export {
   resolveBlockingOffset,
   calculateStudioDifficulty,
   calculateLauncherOrderDifficulty,
+  calculateBlockingAwareLauncherOrderDifficulty,
+  buildBlockingAwareSelectableItems,
   buildPreviewState,
   computeParMoves,
   findMaxSolvableBlockingOffset,

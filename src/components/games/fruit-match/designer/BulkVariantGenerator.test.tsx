@@ -73,6 +73,7 @@ describe('BulkVariantGenerator', () => {
 
     expect(screen.getByText('Content separation')).toBeInTheDocument();
     expect(screen.getByText(/separation checked/)).toBeInTheDocument();
+    expect(screen.getByText('Order')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Generate Validated 1-9/i })).toBeInTheDocument();
   });
 

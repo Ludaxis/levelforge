@@ -197,6 +197,93 @@ export function calculateLauncherOrderDifficulty(input: {
   return clamp01(totalMismatch / sortedLaunchers.length);
 }
 
+export function buildBlockingAwareSelectableItems<
+  T extends { colorType: number; variant?: number; order: number; layer?: 'A' | 'B' | 'C' },
+>(input: {
+  selectableItems: T[];
+  launchers: StudioDifficultyLauncher[];
+  maxSelectableItems: number;
+  activeLauncherCount?: number;
+  blockingOffset?: number;
+  mismatchDepth?: number;
+}): Array<T & { layer: 'A' | 'B' | 'C'; order: number }> {
+  const maxSelectableItems = Math.max(1, Math.round(input.maxSelectableItems || 1));
+  const activeLauncherCount = Math.max(
+    1,
+    Math.min(input.launchers.length || 1, Math.round(input.activeLauncherCount ?? 2)),
+  );
+  const blockingOffset = resolveBlockingOffset(input);
+
+  const sortedItems = [...input.selectableItems].sort((a, b) => a.order - b.order);
+  const sourceById = new Map<string, T>();
+  const allTiles: StudioTile[] = sortedItems.map((item, index) => {
+    const id = `variant-source-${index}`;
+    sourceById.set(id, item);
+    return {
+      id,
+      colorType: item.colorType,
+      variant: item.variant ?? 0,
+      fruitType: COLOR_TYPE_TO_FRUIT[item.colorType] || 'apple',
+    };
+  });
+
+  const sequence = buildDeterministicSequence(
+    allTiles,
+    input.launchers,
+    activeLauncherCount,
+    blockingOffset,
+    maxSelectableItems,
+  );
+
+  return sequence.map((tile, index) => {
+    const source = sourceById.get(tile.id);
+    const layer = (index < maxSelectableItems
+      ? 'A'
+      : index < maxSelectableItems * 2
+        ? 'B'
+        : 'C') as 'A' | 'B' | 'C';
+
+    return {
+      ...(source ?? {
+        colorType: tile.colorType,
+        variant: tile.variant,
+        order: index,
+      } as T),
+      order: index,
+      layer,
+    };
+  });
+}
+
+export function calculateBlockingAwareLauncherOrderDifficulty(input: {
+  selectableItems?: StudioDifficultySelectableItem[];
+  launchers?: StudioDifficultyLauncher[];
+  maxSelectableItems: number;
+  activeLauncherCount?: number;
+  blockingOffset?: number;
+  mismatchDepth?: number;
+}): number {
+  const selectableItems = input.selectableItems ?? [];
+  const launchers = input.launchers ?? [];
+  if (selectableItems.length === 0 || launchers.length === 0) return 0;
+
+  const arrangedItems = buildBlockingAwareSelectableItems({
+    selectableItems,
+    launchers,
+    maxSelectableItems: input.maxSelectableItems,
+    activeLauncherCount: input.activeLauncherCount,
+    blockingOffset: input.blockingOffset,
+    mismatchDepth: input.mismatchDepth,
+  });
+
+  return calculateLauncherOrderDifficulty({
+    selectableItems: arrangedItems,
+    launchers,
+    maxSelectableItems: input.maxSelectableItems,
+    activeLauncherCount: input.activeLauncherCount,
+  });
+}
+
 export function calculateStudioDifficulty(params: StudioDifficultyParams): StudioDifficultyResult {
   const {
     uniqueColors,

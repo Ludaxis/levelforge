@@ -22,7 +22,10 @@ import {
   type ResolvedVariant,
   type VariantRule,
 } from '@/lib/juicyBlast/variantResolve';
-import { StudioGameConfig } from '@/lib/studioGameLogic';
+import {
+  calculateBlockingAwareLauncherOrderDifficulty,
+  StudioGameConfig,
+} from '@/lib/studioGameLogic';
 import {
   ValidatedVariant,
   ValidatedVariantSet,
@@ -62,6 +65,34 @@ export function BulkVariantGenerator({
     () => resolveVariants(rules, base),
     [rules, base]
   );
+  const launcherOrderPreview = useMemo(() => {
+    if (!baseConfig) return new Map<number, number>();
+    const launchers = baseConfig.launchers.map((launcher) => ({
+      colorType: launcher.colorType,
+      order: launcher.order,
+    }));
+    const selectableItems = baseConfig.selectableItems.map((item) => ({
+      colorType: item.colorType,
+      variant: item.variant,
+      layer: item.layer,
+      order: item.order,
+    }));
+    return new Map(
+      resolved.map((variant) => {
+        const score = calculateBlockingAwareLauncherOrderDifficulty({
+          selectableItems,
+          launchers,
+          maxSelectableItems:
+            variant.values.maxSelectableItems ?? base.maxSelectableItems,
+          activeLauncherCount:
+            variant.values.activeLauncherCount ?? base.activeLauncherCount,
+          blockingOffset:
+            variant.values.blockingOffset ?? base.blockingOffset,
+        });
+        return [variant.variantNumber, Math.round(score * 100)];
+      }),
+    );
+  }, [base, baseConfig, resolved]);
 
   const distinctVariants = resolved.length;
   const canExport = distinctVariants > 0 && errors.length === 0;
@@ -134,6 +165,9 @@ export function BulkVariantGenerator({
                 <thead>
                   <tr className="text-left text-muted-foreground">
                     <th className="pr-2 pb-1 font-normal">Variant</th>
+                    <th className="pr-2 pb-1 font-normal" title="LauncherOrderScore">
+                      Order
+                    </th>
                     {DIFFICULTY_ELEMENTS.map((el) => (
                       <th key={el.key} className="pr-2 pb-1 font-normal">
                         {el.short}
@@ -148,6 +182,9 @@ export function BulkVariantGenerator({
                       className="border-t border-border/40"
                     >
                       <td className="py-1 pr-2 font-mono">v{v.variantNumber}</td>
+                      <td className="py-1 pr-2 font-mono text-primary">
+                        {launcherOrderPreview.get(v.variantNumber) ?? '—'}
+                      </td>
                       {DIFFICULTY_ELEMENTS.map((el) => {
                         const value = v.values[el.key];
                         const baseVal =

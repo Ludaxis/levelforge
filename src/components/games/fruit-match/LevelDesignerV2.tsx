@@ -33,6 +33,8 @@ import {
   findMaxSolvableBlockingOffset,
   computeParMoves,
   resolveBlockingOffset,
+  buildBlockingAwareSelectableItems,
+  calculateBlockingAwareLauncherOrderDifficulty,
 } from '@/lib/useStudioGame';
 import {
   targetDifficulty,
@@ -1340,18 +1342,36 @@ export function LevelDesignerV2({
         const variantLevelId = `Level${levelNumber}_${variant.variantNumber}`;
         const msi = variant.values.maxSelectableItems ?? maxSelectableItems;
         const bo = variant.values.blockingOffset ?? blockingOffset;
+        const variantActiveLauncherCount =
+          variant.values.activeLauncherCount ?? activeLauncherCount;
+        const variantLaunchersForOrder = launchers.map((launcher) => ({
+          colorType: launcher.colorType,
+          order: launcher.order,
+        }));
 
-        // Re-layer items so Layer A/B/C counts match this variant's MSI.
-        // Items keep their `order`; only `layer` is recomputed.
-        const relayered = [...itemsWithLayers]
-          .sort((a, b) => a.order - b.order)
-          .map((item, idx) => ({
-            ...item,
-            layer: (idx < msi ? 'A' : idx < 2 * msi ? 'B' : 'C') as
-              | 'A'
-              | 'B'
-              | 'C',
-          }));
+        // Rebuild the variant arrangement from the edited levers. Blocking
+        // Offset moves active-launcher fruit deeper, so Layer/Order and
+        // LauncherOrderScore must change together.
+        const relayered = buildBlockingAwareSelectableItems({
+          selectableItems: itemsWithLayers,
+          launchers: variantLaunchersForOrder,
+          maxSelectableItems: msi,
+          activeLauncherCount: variantActiveLauncherCount,
+          blockingOffset: bo,
+        });
+        const variantLauncherOrderScore =
+          calculateBlockingAwareLauncherOrderDifficulty({
+            selectableItems: itemsWithLayers.map((item) => ({
+              colorType: item.colorType,
+              variant: item.variant,
+              layer: item.layer,
+              order: item.order,
+            })),
+            launchers: variantLaunchersForOrder,
+            maxSelectableItems: msi,
+            activeLauncherCount: variantActiveLauncherCount,
+            blockingOffset: bo,
+          });
 
         // Recompute DifficultyScore from the variant's levers — base score is
         // stale once MSI/BO move.
@@ -1360,8 +1380,8 @@ export function LevelDesignerV2({
               ...studioDifficultyParams,
               maxSelectableItems: msi,
               blockingOffset: bo,
-              activeLauncherCount:
-                variant.values.activeLauncherCount ?? activeLauncherCount,
+              activeLauncherCount: variantActiveLauncherCount,
+              launcherOrderScore: variantLauncherOrderScore,
               selectableItems: relayered.map((item) => ({
                 colorType: item.colorType,
                 variant: item.variant,
@@ -1398,8 +1418,7 @@ export function LevelDesignerV2({
               group: l.group,
               order: l.order,
             })),
-          activeLauncherCount:
-            variant.values.activeLauncherCount ?? activeLauncherCount,
+          activeLauncherCount: variantActiveLauncherCount,
           blockingOffset: bo,
           seed,
           moveLimit: variant.values.moveLimit ?? moveLimit,
@@ -1452,15 +1471,11 @@ export function LevelDesignerV2({
           mismatchDepth: bo / 10,
           waitingStandSlots:
             variant.values.waitingStandSlots ?? waitingStandSlots,
-          activeLauncherCount:
-            variant.values.activeLauncherCount ?? activeLauncherCount,
+          activeLauncherCount: variantActiveLauncherCount,
           moveLimit: variant.values.moveLimit ?? moveLimit,
           parMoves: variantPar,
           difficultyScore: variantDifficulty?.score ?? difficultyResult?.score,
-          launcherOrderScore: componentScorePercent(
-            variantDifficulty ?? difficultyResult,
-            'launcherOrder',
-          ),
+          launcherOrderScore: Math.round(variantLauncherOrderScore * 100),
           colorVariantDensity: studioDifficultyParams?.colorVariantDensity,
           variantComplexity:
             variantDifficulty?.breakdown.find((c) => c.id === 'variantComplexity')
@@ -1520,6 +1535,25 @@ export function LevelDesignerV2({
         const variantUniqueVariants = new Set(
           config.selectableItems.map((item) => `${item.colorType}:${item.variant}`),
         ).size;
+        const legacyActiveLauncherCount =
+          config.activeLauncherCount ?? activeLauncherCount;
+        const legacyLaunchersForOrder = config.launchers.map((launcher) => ({
+          colorType: launcher.colorType,
+          order: launcher.order,
+        }));
+        const legacyLauncherOrderScore =
+          calculateBlockingAwareLauncherOrderDifficulty({
+            selectableItems: config.selectableItems.map((item) => ({
+              colorType: item.colorType,
+              variant: item.variant,
+              layer: item.layer,
+              order: item.order,
+            })),
+            launchers: legacyLaunchersForOrder,
+            maxSelectableItems: config.maxSelectableItems,
+            activeLauncherCount: legacyActiveLauncherCount,
+            blockingOffset: bo,
+          });
         const legacyDifficulty = studioDifficultyParams
           ? calculateStudioDifficulty({
               ...studioDifficultyParams,
@@ -1528,7 +1562,8 @@ export function LevelDesignerV2({
               uniqueVariants: variantUniqueVariants,
               maxSelectableItems: config.maxSelectableItems,
               blockingOffset: bo,
-              activeLauncherCount: config.activeLauncherCount ?? activeLauncherCount,
+              activeLauncherCount: legacyActiveLauncherCount,
+              launcherOrderScore: legacyLauncherOrderScore,
               selectableItems: config.selectableItems.map((item) => ({
                 colorType: item.colorType,
                 variant: item.variant,
@@ -1541,18 +1576,13 @@ export function LevelDesignerV2({
               })),
             })
           : null;
-        const selectableItemsForExport = config.selectableItems.map((item, index) => ({
-          colorType: item.colorType,
-          variant: item.variant,
-          layer:
-            item.layer ??
-            (index < config.maxSelectableItems
-              ? 'A'
-              : index < 2 * config.maxSelectableItems
-                ? 'B'
-                : 'C'),
-          order: item.order,
-        }));
+        const selectableItemsForExport = buildBlockingAwareSelectableItems({
+          selectableItems: config.selectableItems,
+          launchers: legacyLaunchersForOrder,
+          maxSelectableItems: config.maxSelectableItems,
+          activeLauncherCount: legacyActiveLauncherCount,
+          blockingOffset: bo,
+        });
 
         const exportData: StudioExportData = {
           palette,
@@ -1593,17 +1623,14 @@ export function LevelDesignerV2({
           blockingOffset: bo,
           mismatchDepth: bo / 10,
           waitingStandSlots: config.waitingStandSlots,
-          activeLauncherCount: config.activeLauncherCount ?? activeLauncherCount,
+          activeLauncherCount: legacyActiveLauncherCount,
           moveLimit: config.moveLimit,
           parMoves: variant.report.parMoves ?? undefined,
           difficultyScore:
             legacyDifficulty?.score ??
             variant.report.legacyScore ??
             variant.report.solverScore,
-          launcherOrderScore: componentScorePercent(
-            legacyDifficulty ?? difficultyResult,
-            'launcherOrder',
-          ),
+          launcherOrderScore: Math.round(legacyLauncherOrderScore * 100),
           colorVariantDensity: studioDifficultyParams?.colorVariantDensity,
           variantComplexity:
             legacyDifficulty?.breakdown.find((c) => c.id === 'variantComplexity')

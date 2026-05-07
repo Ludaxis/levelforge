@@ -1,4 +1,8 @@
-import { StudioGameConfig, resolveBlockingOffset } from '@/lib/studioGameLogic';
+import {
+  StudioGameConfig,
+  buildBlockingAwareSelectableItems,
+  resolveBlockingOffset,
+} from '@/lib/studioGameLogic';
 import {
   JuicyDifficultyReport,
   analyzeJuicyLevel,
@@ -119,7 +123,16 @@ function baseValues(config: StudioGameConfig, seed: number): ValidatedVariantVal
 }
 
 function applyValues(config: StudioGameConfig, values: ValidatedVariantValues): StudioGameConfig {
-  const selectableItems = relayerSelectableItems(config.selectableItems, values.maxSelectableItems);
+  const selectableItems = buildBlockingAwareSelectableItems({
+    selectableItems: config.selectableItems,
+    launchers: config.launchers.map((launcher) => ({
+      colorType: launcher.colorType,
+      order: launcher.order,
+    })),
+    maxSelectableItems: values.maxSelectableItems,
+    activeLauncherCount: values.activeLauncherCount,
+    blockingOffset: values.blockingOffset,
+  });
   return {
     ...config,
     maxSelectableItems: values.maxSelectableItems,
@@ -223,17 +236,21 @@ function addContentPressure(
     Math.min(baseItems.length, config.maxSelectableItems * 2 + resolveBlockingOffset(config)),
   );
   const extraItems = clamp(distance + strength, 1, Math.min(14, Math.max(4, baseItems.length)));
-  const ambiguityItems = Math.ceil(extraItems * 0.6);
+  const targetAmbiguityItems = Math.ceil(extraItems * 0.6);
+  const ambiguityItems = extraItems < 3
+    ? 0
+    : Math.min(extraItems, Math.max(3, Math.round(targetAmbiguityItems / 3) * 3));
   const newColorItems = extraItems - ambiguityItems;
   const extras: StudioGameConfig['selectableItems'] = [];
 
   for (let i = 0; i < ambiguityItems; i++) {
+    const tripletIndex = Math.floor(i / 3);
     const colorType = launcherColorTypes.length > 0
-      ? launcherColorTypes[(seed + i + variantNumber) % launcherColorTypes.length]
+      ? launcherColorTypes[(seed + tripletIndex + variantNumber) % launcherColorTypes.length]
       : chooseUnusedColorType(usedColorTypes, i);
     extras.push({
       colorType,
-      variant: 1 + ((seed + i + strength) % 2),
+      variant: 1 + ((seed + tripletIndex + strength) % 2),
       order: 0,
     });
   }
@@ -265,7 +282,16 @@ function addContentPressure(
     ];
   }
 
-  const selectableItems = relayerSelectableItems(mixed, config.maxSelectableItems);
+  const selectableItems = buildBlockingAwareSelectableItems({
+    selectableItems: mixed,
+    launchers: config.launchers.map((launcher) => ({
+      colorType: launcher.colorType,
+      order: launcher.order,
+    })),
+    maxSelectableItems: config.maxSelectableItems,
+    activeLauncherCount: config.activeLauncherCount,
+    blockingOffset: resolveBlockingOffset(config),
+  });
 
   return {
     config: {

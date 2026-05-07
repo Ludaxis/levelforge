@@ -19,7 +19,9 @@ import {
   getDeterministicMaxSwap,
   buildSolvableSequenceSeeded,
   buildChallengingSequenceSeeded,
+  buildBlockingAwareSelectableItems,
   calculateLauncherOrderDifficulty,
+  calculateBlockingAwareLauncherOrderDifficulty,
   calculateStudioDifficulty,
 } from '@/lib/useStudioGame';
 import { COLOR_TYPE_TO_FRUIT } from '@/lib/juicyBlastExport';
@@ -829,5 +831,46 @@ describe('Launcher order difficulty', () => {
     expect(misaligned.breakdown.find((c) => c.id === 'launcherOrder')?.score).toBeGreaterThan(
       aligned.breakdown.find((c) => c.id === 'launcherOrder')?.score ?? 0,
     );
+  });
+
+  it('updates launcher order score when blocking offset moves active fruit deeper', () => {
+    const blockingItems = [0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4].map(
+      (colorType, order) => ({
+        colorType,
+        variant: 0,
+        order,
+        layer: order < 5 ? 'A' as const : order < 10 ? 'B' as const : 'C' as const,
+      }),
+    );
+    const blockingLaunchers = [
+      { colorType: 0, order: 0 },
+      { colorType: 1, order: 1 },
+      { colorType: 2, order: 2 },
+    ];
+
+    const easy = calculateBlockingAwareLauncherOrderDifficulty({
+      maxSelectableItems: 5,
+      activeLauncherCount: 1,
+      blockingOffset: 0,
+      launchers: blockingLaunchers,
+      selectableItems: blockingItems,
+    });
+    const hard = calculateBlockingAwareLauncherOrderDifficulty({
+      maxSelectableItems: 5,
+      activeLauncherCount: 1,
+      blockingOffset: 4,
+      launchers: blockingLaunchers,
+      selectableItems: blockingItems,
+    });
+    const hardArrangement = buildBlockingAwareSelectableItems({
+      maxSelectableItems: 5,
+      activeLauncherCount: 1,
+      blockingOffset: 4,
+      launchers: blockingLaunchers,
+      selectableItems: blockingItems,
+    });
+
+    expect(hard).toBeGreaterThan(easy);
+    expect(hardArrangement.filter((item) => item.colorType === 0)[2].layer).toBe('C');
   });
 });

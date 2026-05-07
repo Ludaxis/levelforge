@@ -6,7 +6,12 @@ import {
   exportStudioLevel,
 } from '@/lib/juicyBlastExport';
 import { calculateColorVariantDensity } from '@/lib/fruitMatchUtils';
-import { calculateStudioDifficulty, computeParMoves } from '@/lib/studioGameLogic';
+import {
+  buildBlockingAwareSelectableItems,
+  calculateBlockingAwareLauncherOrderDifficulty,
+  calculateStudioDifficulty,
+  computeParMoves,
+} from '@/lib/studioGameLogic';
 import {
   resolveVariants,
   type VariantRule,
@@ -14,23 +19,6 @@ import {
   type VariantError,
   type BaseLevelValues,
 } from './variantResolve';
-
-/**
- * Recompute layer assignment (A/B/C) from item order given a variant's
- * maxSelectableItems. Layer A fills positions [0, MSI), Layer B fills
- * [MSI, 2*MSI), Layer C is everything else.
- */
-function layersForMSI(
-  items: DesignedFruitMatchLevel['studioSelectableItems'],
-  msi: number
-): DesignedFruitMatchLevel['studioSelectableItems'] {
-  if (!items) return items;
-  const sorted = [...items].sort((a, b) => a.order - b.order);
-  return sorted.map((item, idx) => ({
-    ...item,
-    layer: (idx < msi ? 'A' : idx < 2 * msi ? 'B' : 'C') as 'A' | 'B' | 'C',
-  }));
-}
 
 export interface CollectionBulkOptions {
   /** If true, files are placed in `Level{N}/` folders inside the zip. */
@@ -98,10 +86,34 @@ function buildVariantExportData(
   const levelId = `Level${level.levelNumber}_${variantNumber}`;
   const msi = values.maxSelectableItems ?? level.studioMaxSelectableItems ?? 10;
   const bo = values.blockingOffset ?? level.studioBlockingOffset ?? 0;
+  const activeLauncherCount =
+    values.activeLauncherCount ?? level.studioActiveLauncherCount ?? 2;
+  const launchersForOrder = level.studioLaunchers.map((launcher) => ({
+    colorType: launcher.colorType,
+    order: launcher.order,
+  }));
 
-  // Re-layer items so Layer A/B/C match the variant's MSI. Items keep their
-  // `order`; only the `layer` field is recomputed.
-  const relayered = layersForMSI(level.studioSelectableItems, msi) ?? [];
+  // Rebuild item Layer/Order from the edited levers. Blocking Offset affects
+  // where active-launcher matches sit, so exported layout and score stay aligned.
+  const relayered = buildBlockingAwareSelectableItems({
+    selectableItems: level.studioSelectableItems,
+    launchers: launchersForOrder,
+    maxSelectableItems: msi,
+    activeLauncherCount,
+    blockingOffset: bo,
+  });
+  const launcherOrderScore = calculateBlockingAwareLauncherOrderDifficulty({
+    selectableItems: level.studioSelectableItems.map((item) => ({
+      colorType: item.colorType,
+      variant: item.variant,
+      layer: item.layer,
+      order: item.order,
+    })),
+    launchers: launchersForOrder,
+    maxSelectableItems: msi,
+    activeLauncherCount,
+    blockingOffset: bo,
+  });
 
   // Recompute DifficultyScore from the variant's levers — the base score is
   // stale once MSI/BO move.
@@ -121,18 +133,15 @@ function buildVariantExportData(
     maxSelectableItems: msi,
     totalTiles: relayered.length,
     blockingOffset: bo,
-    activeLauncherCount:
-      values.activeLauncherCount ?? level.studioActiveLauncherCount ?? 2,
+    activeLauncherCount,
+    launcherOrderScore,
     selectableItems: relayered.map((item) => ({
       colorType: item.colorType,
       variant: item.variant,
       layer: item.layer,
       order: item.order,
     })),
-    launchers: level.studioLaunchers.map((launcher) => ({
-      colorType: launcher.colorType,
-      order: launcher.order,
-    })),
+    launchers: launchersForOrder,
     uniqueVariants,
     colorVariantDensity,
   });
@@ -158,8 +167,7 @@ function buildVariantExportData(
       group: l.group,
       order: l.order,
     })),
-    activeLauncherCount:
-      values.activeLauncherCount ?? level.studioActiveLauncherCount ?? 2,
+    activeLauncherCount,
     blockingOffset: bo,
     seed: level.studioSeed,
     moveLimit: values.moveLimit ?? level.studioMoveLimit,
@@ -209,17 +217,12 @@ function buildVariantExportData(
     mismatchDepth: bo / 10,
     waitingStandSlots:
       values.waitingStandSlots ?? level.studioWaitingStandSlots ?? 5,
-    activeLauncherCount:
-      values.activeLauncherCount ?? level.studioActiveLauncherCount ?? 2,
+    activeLauncherCount,
     seed: level.studioSeed,
     moveLimit: values.moveLimit ?? level.studioMoveLimit,
     parMoves,
     difficultyScore: variantDifficulty.score,
-    launcherOrderScore:
-      Math.round(
-        (variantDifficulty.breakdown.find((c) => c.id === 'launcherOrder')?.score ?? 0) *
-          100,
-      ),
+    launcherOrderScore: Math.round(launcherOrderScore * 100),
     colorVariantDensity,
     variantComplexity:
       variantDifficulty.breakdown.find((c) => c.id === 'variantComplexity')

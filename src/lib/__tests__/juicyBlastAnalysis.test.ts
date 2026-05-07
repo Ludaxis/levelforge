@@ -149,15 +149,16 @@ describe('validated variant optimizer', () => {
     ).toBe(true);
   });
 
-  it('can enforce separation and block lever-only ladders that feel flat', () => {
+  it('uses blocking-aware layouts so lever-only ladders can create separation', () => {
     const result = generateValidatedVariants(makeConfig(), {
       runsPerProfile: 3,
       enforceSeparation: true,
     });
 
     expect(result.variants.every((variant) => variant.report.verdict !== 'stuck')).toBe(true);
-    expect(result.canExport).toBe(false);
-    expect(result.separation.issues.some((issue) => issue.severity === 'blocking')).toBe(true);
+    expect(result.canExport).toBe(true);
+    expect(result.separation.passed).toBe(true);
+    expect(result.separation.v5ToV9ScoreDelta).toBeGreaterThan(0);
   });
 
   it('content-aware mode creates harder variants with more fruits and ambiguity', () => {
