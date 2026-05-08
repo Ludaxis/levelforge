@@ -37,7 +37,7 @@ export const juicyBlastAdapter: GameAdapter = {
     {
       key: 'color_variant_density',
       label: 'Color Variant Density',
-      range: [0, 100],
+      range: [0, 1],
       direction: 'higher_harder',
       description:
         'Proximity of same-color fruit variants. Higher = more cognitive load.',
@@ -64,15 +64,19 @@ export const juicyBlastAdapter: GameAdapter = {
     blocking_offset: 5,
     max_selectable: 10,
     active_launchers: 2,
-    color_variant_density: 50,
-    difficulty_score: 1500,
+    color_variant_density: 0.5,
+    difficulty_score: 50,
   },
 
   sessionKeyColumns: ['user_id', 'level_id', 'attempt'],
 
   signalColumnMapping: {
     // Per-move fields from song_move
-    move_index: { cadenceKey: 'move.executed', tier: 0 },
+    move_index: {
+      cadenceKey: 'move.executed',
+      tier: 0,
+      transform: () => 1,
+    },
     is_optimal: {
       cadenceKey: 'move.optimal',
       tier: 0,
@@ -87,6 +91,11 @@ export const juicyBlastAdapter: GameAdapter = {
     },
     hesitation_ms: {
       cadenceKey: 'tempo.hesitation',
+      tier: 1,
+      transform: (raw: unknown) => Number(raw) / 1000,
+    },
+    delay_ms: {
+      cadenceKey: 'tempo.first_move',
       tier: 1,
       transform: (raw: unknown) => Number(raw) / 1000,
     },

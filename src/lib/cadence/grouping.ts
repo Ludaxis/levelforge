@@ -124,7 +124,7 @@ export function groupRowsIntoSessions(
     for (const row of rows) {
       const eventName = safeString(row[EVENT_COL]);
       const isMoveEvent = eventName === 'song_move' || eventName === '';
-      if (!isMoveEvent && eventName !== 'song_booster_success' && eventName !== 'song_booster_click' && eventName !== 'song_revive_click' && eventName !== 'song_revive_success') {
+      if (!isMoveEvent && eventName !== 'song_first_move' && eventName !== 'song_booster_success' && eventName !== 'song_booster_click' && eventName !== 'song_revive_impression' && eventName !== 'song_revive_click' && eventName !== 'song_revive_success') {
         // Non-signal-bearing event row (start, result, me_*). Skip.
         continue;
       }
@@ -156,6 +156,16 @@ export function groupRowsIntoSessions(
           key: 'strategy.powerup_attempt',
           value: 1,
           tier: 2,
+          moveIndex: rowMoveIndex,
+          sessionTime,
+          frameNumber: 0,
+        });
+      }
+      if (eventName === 'song_revive_impression') {
+        signals.push({
+          key: 'meta.frustration_trigger',
+          value: 1,
+          tier: 3,
           moveIndex: rowMoveIndex,
           sessionTime,
           frameNumber: 0,

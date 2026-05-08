@@ -57,6 +57,9 @@ export interface ResolveOutput {
 
 export const VARIANT_RULES_STORAGE_KEY =
   'juicyblast.bulkVariantGenerator.rules.v1';
+export const CADENCE_VARIANT_MIN = 2;
+export const CADENCE_VARIANT_DEFAULT = 5;
+export const CADENCE_VARIANT_MAX = 8;
 
 export function makeRuleId(): string {
   return `r_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -196,11 +199,15 @@ export function resolveVariants(
   const errors: VariantError[] = [];
 
   for (const rule of rules) {
-    if (!Number.isInteger(rule.variantNumber) || rule.variantNumber < 1) {
+    if (
+      !Number.isInteger(rule.variantNumber) ||
+      rule.variantNumber < CADENCE_VARIANT_MIN ||
+      rule.variantNumber > CADENCE_VARIANT_MAX
+    ) {
       errors.push({
         variantNumber: rule.variantNumber,
         element: rule.element,
-        reason: `Variant number must be a positive integer.`,
+        reason: `Variant number must be between ${CADENCE_VARIANT_MIN} and ${CADENCE_VARIANT_MAX}. Variant ${CADENCE_VARIANT_DEFAULT} is the default/base level.`,
       });
       continue;
     }
@@ -246,8 +253,9 @@ export function resolveVariants(
     for (const spec of DIFFICULTY_ELEMENTS) {
       const value = v.values[spec.key];
       if (value === undefined) continue;
-      const dynamicMax =
-        spec.key === 'activeLauncherCount' ? base.maxActiveLaunchers : undefined;
+      const dynamicMax = spec.key === 'activeLauncherCount' && base.maxActiveLaunchers !== undefined
+        ? Math.min(base.maxActiveLaunchers, spec.max ?? base.maxActiveLaunchers)
+        : undefined;
       const effectiveMax = dynamicMax ?? spec.max;
 
       let clamped = value;

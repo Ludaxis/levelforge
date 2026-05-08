@@ -32,8 +32,8 @@ export const DIFFICULTY_ELEMENTS: DifficultyElementSpec[] = [
     key: 'maxSelectableItems',
     label: 'Max Selectable Items',
     short: 'MSI',
-    min: 1,
-    max: 20,
+    min: 6,
+    max: 15,
     step: 1,
   },
   {
@@ -49,6 +49,7 @@ export const DIFFICULTY_ELEMENTS: DifficultyElementSpec[] = [
     label: 'Active Launchers',
     short: 'AL',
     min: 1,
+    max: 3,
     step: 1,
   },
   {

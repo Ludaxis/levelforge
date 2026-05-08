@@ -276,7 +276,7 @@ export function BulkVariantGenerator({
           <div className="space-y-2 border-t border-border pt-3">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <p className="text-xs font-medium">Validated 1-9</p>
+                <p className="text-xs font-medium">Validated 2-8</p>
                 <p className="text-[10px] text-muted-foreground">
                   v5 base · solver-gated variants · separation checked
                 </p>
@@ -293,7 +293,7 @@ export function BulkVariantGenerator({
                 ) : (
                   <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
                 )}
-                Generate Validated 1-9
+                Generate Validated 2-8
               </Button>
             </div>
 
@@ -366,7 +366,7 @@ export function BulkVariantGenerator({
                       Variant separation {validatedSet.separation.passed ? 'passed' : 'blocked'}
                     </span>
                     <span className="font-mono">
-                      v1→v5 +{validatedSet.separation.v1ToV5ScoreDelta} · v5→v9 +{validatedSet.separation.v5ToV9ScoreDelta}
+                      v2-&gt;v5 +{validatedSet.separation.v2ToV5ScoreDelta} · v5-&gt;v8 +{validatedSet.separation.v5ToV8ScoreDelta}
                     </span>
                   </div>
                   {validatedSet.separation.issues.length > 0 && (

@@ -158,7 +158,7 @@ export function LevelDesignerV2({
   const [playMode, setPlayMode] = useState(false);
 
   // Level variant & file name
-  const [levelVariant, setLevelVariant] = useState(1);
+  const [levelVariant, setLevelVariant] = useState(5);
   const [fileName, setFileName] = useState('');
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
   const [pendingExport, setPendingExport] = useState(false);
@@ -1625,7 +1625,7 @@ export function LevelDesignerV2({
           waitingStandSlots: config.waitingStandSlots,
           activeLauncherCount: legacyActiveLauncherCount,
           moveLimit: config.moveLimit,
-          parMoves: variant.report.parMoves ?? undefined,
+          parMoves: variant.report.parMoves ?? config.selectableItems.length + bo,
           difficultyScore:
             legacyDifficulty?.score ??
             variant.report.legacyScore ??
@@ -2184,11 +2184,12 @@ export function LevelDesignerV2({
                 <label className="text-xs text-muted-foreground">Level Variant</label>
                 <Input
                   type="number"
-                  min={1}
+                  min={2}
+                  max={8}
                   value={levelVariant}
                   onChange={(e) => {
                     const v = parseInt(e.target.value, 10);
-                    if (!isNaN(v) && v >= 1) setLevelVariant(v);
+                    if (!isNaN(v) && v >= 2 && v <= 8) setLevelVariant(v);
                   }}
                   className="h-8"
                 />

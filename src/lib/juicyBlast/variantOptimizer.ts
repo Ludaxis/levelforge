@@ -37,8 +37,8 @@ export interface GenerateValidatedVariantsOptions {
   baseSeed?: number;
   contentMode?: 'leversOnly' | 'contentAware';
   enforceSeparation?: boolean;
-  minimumV5ToV9ScoreGap?: number;
-  minimumV1ToV5ScoreGap?: number;
+  minimumV5ToV8ScoreGap?: number;
+  minimumV2ToV5ScoreGap?: number;
   minimumExtremeWinRateGap?: number;
   minimumAdjacentScoreGap?: number;
   minimumAdjacentWinRateGap?: number;
@@ -69,16 +69,16 @@ export interface VariantSeparationIssue {
 
 export interface VariantSeparationSummary {
   passed: boolean;
-  v1ToV5ScoreDelta: number;
-  v5ToV9ScoreDelta: number;
-  v1ToV5AverageWinRateDelta: number;
-  v5ToV9AverageWinRateDelta: number;
+  v2ToV5ScoreDelta: number;
+  v5ToV8ScoreDelta: number;
+  v2ToV5AverageWinRateDelta: number;
+  v5ToV8AverageWinRateDelta: number;
   smallestAdjacentScoreDelta: number;
   smallestAdjacentAverageWinRateDelta: number;
   issues: VariantSeparationIssue[];
 }
 
-const VARIANT_NUMBERS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
+const VARIANT_NUMBERS = [2, 3, 4, 5, 6, 7, 8] as const;
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(v)));
@@ -113,9 +113,9 @@ function emptyContentChanges(config: StudioGameConfig): VariantContentChanges {
 
 function baseValues(config: StudioGameConfig, seed: number): ValidatedVariantValues {
   return {
-    maxSelectableItems: config.maxSelectableItems,
     blockingOffset: resolveBlockingOffset(config),
-    activeLauncherCount: config.activeLauncherCount ?? 2,
+    maxSelectableItems: clamp(config.maxSelectableItems, 6, 15),
+    activeLauncherCount: clamp(config.activeLauncherCount ?? 2, 1, 3),
     waitingStandSlots: config.waitingStandSlots,
     moveLimit: config.moveLimit,
     seed,
@@ -167,12 +167,12 @@ function buildCandidateValues(
   const direction = Math.sign(variantNumber - 5);
   if (direction === 0) return { ...base, seed };
 
-  const launcherMax = Math.max(1, config.launchers.length);
+  const launcherMax = Math.min(3, Math.max(1, config.launchers.length));
   const totalItems = config.selectableItems.length;
 
   if (direction < 0) {
     return {
-      maxSelectableItems: clamp(base.maxSelectableItems + strength, 1, 20),
+      maxSelectableItems: clamp(base.maxSelectableItems + strength, 6, 15),
       blockingOffset: clamp(base.blockingOffset - strength, 0, 10),
       activeLauncherCount: clamp(base.activeLauncherCount + Math.floor(strength / 2), 1, launcherMax),
       waitingStandSlots: clamp(base.waitingStandSlots + Math.floor(strength / 3), 1, 8),
@@ -183,7 +183,7 @@ function buildCandidateValues(
 
   const hardMoveLimitBase = base.moveLimit ?? (basePar !== null ? Math.ceil(basePar * 1.35) : undefined);
   return {
-    maxSelectableItems: clamp(base.maxSelectableItems - strength, 1, 20),
+    maxSelectableItems: clamp(base.maxSelectableItems - strength, 6, 15),
     blockingOffset: clamp(base.blockingOffset + strength, 0, 10),
     activeLauncherCount: clamp(base.activeLauncherCount - Math.floor(strength / 2), 1, launcherMax),
     waitingStandSlots: clamp(base.waitingStandSlots - Math.floor(strength / 3), 1, 8),
@@ -334,56 +334,56 @@ export function computeVariantSeparation(
   variants: ValidatedVariant[],
   options: GenerateValidatedVariantsOptions = {},
 ): VariantSeparationSummary {
-  const minimumV5ToV9ScoreGap = options.minimumV5ToV9ScoreGap ?? 12;
-  const minimumV1ToV5ScoreGap = options.minimumV1ToV5ScoreGap ?? 8;
+  const minimumV5ToV8ScoreGap = options.minimumV5ToV8ScoreGap ?? 12;
+  const minimumV2ToV5ScoreGap = options.minimumV2ToV5ScoreGap ?? 8;
   const minimumExtremeWinRateGap = options.minimumExtremeWinRateGap ?? 0.18;
   const minimumAdjacentScoreGap = options.minimumAdjacentScoreGap ?? 1;
   const minimumAdjacentWinRateGap = options.minimumAdjacentWinRateGap ?? 0.03;
   const sorted = [...variants].sort((a, b) => a.variantNumber - b.variantNumber);
   const byNumber = new Map(sorted.map((variant) => [variant.variantNumber, variant]));
   const issues: VariantSeparationIssue[] = [];
-  const v1 = byNumber.get(1);
+  const v2 = byNumber.get(2);
   const v5 = byNumber.get(5);
-  const v9 = byNumber.get(9);
-  let v1ToV5ScoreDelta = 0;
-  let v5ToV9ScoreDelta = 0;
-  let v1ToV5AverageWinRateDelta = 0;
-  let v5ToV9AverageWinRateDelta = 0;
+  const v8 = byNumber.get(8);
+  let v2ToV5ScoreDelta = 0;
+  let v5ToV8ScoreDelta = 0;
+  let v2ToV5AverageWinRateDelta = 0;
+  let v5ToV8AverageWinRateDelta = 0;
   let smallestAdjacentScoreDelta = Number.POSITIVE_INFINITY;
   let smallestAdjacentAverageWinRateDelta = Number.POSITIVE_INFINITY;
 
-  if (v1 && v5) {
-    const delta = harderDelta(v1, v5);
-    v1ToV5ScoreDelta = delta.solverDelta;
-    v1ToV5AverageWinRateDelta = delta.averageWinRateDelta;
+  if (v2 && v5) {
+    const delta = harderDelta(v2, v5);
+    v2ToV5ScoreDelta = delta.solverDelta;
+    v2ToV5AverageWinRateDelta = delta.averageWinRateDelta;
     if (
-      delta.solverDelta < minimumV1ToV5ScoreGap &&
+      delta.solverDelta < minimumV2ToV5ScoreGap &&
       delta.averageWinRateDelta < minimumExtremeWinRateGap
     ) {
       issues.push({
-        variantNumber: 1,
+        variantNumber: 2,
         comparedTo: 5,
         severity: 'blocking',
-        reason: `v1 is too close to base v5. Add more easier/harder separation before export.`,
+        reason: `v2 is too close to base v5. Add more easier/harder separation before export.`,
         solverDelta: delta.solverDelta,
         averageWinRateDelta: delta.averageWinRateDelta,
       });
     }
   }
 
-  if (v5 && v9) {
-    const delta = harderDelta(v5, v9);
-    v5ToV9ScoreDelta = delta.solverDelta;
-    v5ToV9AverageWinRateDelta = delta.averageWinRateDelta;
+  if (v5 && v8) {
+    const delta = harderDelta(v5, v8);
+    v5ToV8ScoreDelta = delta.solverDelta;
+    v5ToV8AverageWinRateDelta = delta.averageWinRateDelta;
     if (
-      delta.solverDelta < minimumV5ToV9ScoreGap &&
+      delta.solverDelta < minimumV5ToV8ScoreGap &&
       delta.averageWinRateDelta < minimumExtremeWinRateGap
     ) {
       issues.push({
-        variantNumber: 9,
+        variantNumber: 8,
         comparedTo: 5,
         severity: 'blocking',
-        reason: `v9 is too close to base v5. A bored-player DDA push would not feel meaningfully harder.`,
+        reason: `v8 is too close to base v5. A bored-player DDA push would not feel meaningfully harder.`,
         solverDelta: delta.solverDelta,
         averageWinRateDelta: delta.averageWinRateDelta,
       });
@@ -421,10 +421,10 @@ export function computeVariantSeparation(
 
   return {
     passed: !issues.some((issue) => issue.severity === 'blocking'),
-    v1ToV5ScoreDelta,
-    v5ToV9ScoreDelta,
-    v1ToV5AverageWinRateDelta,
-    v5ToV9AverageWinRateDelta,
+    v2ToV5ScoreDelta,
+    v5ToV8ScoreDelta,
+    v2ToV5AverageWinRateDelta,
+    v5ToV8AverageWinRateDelta,
     smallestAdjacentScoreDelta,
     smallestAdjacentAverageWinRateDelta,
     issues,

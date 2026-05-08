@@ -109,7 +109,7 @@ export function generateSampleJuicyBlastRows(
       const blockingOffset = Math.max(0, Math.min(10, 3 + (currentVariant - 5) * 0.8));
       const maxSelectable = Math.max(6, Math.min(15, 12 - (currentVariant - 5) * 0.5));
       const activeLaunchers = Math.max(1, Math.min(3, 2 + (currentVariant >= 7 ? -1 : 0)));
-      const colorVariantDensity = Math.min(100, 20 + (currentVariant - 5) * 12);
+      const colorVariantDensity = Math.max(0, Math.min(1, 0.2 + (currentVariant - 5) * 0.12));
       const parMoves = 15 + currentLevel;
 
       // Simulate session outcome + scores from archetype + variant.

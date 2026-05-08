@@ -420,7 +420,7 @@ export function DifficultyAnalysis({
               locked={parameterLocks.surfaceSize}
               onToggleLock={() => onToggleParameterLock('surfaceSize')}
             />
-            <Slider value={[maxSelectableItems]} min={1} max={20} step={1} onValueChange={([v]) => onMaxSelectableChange(v)} />
+            <Slider value={[maxSelectableItems]} min={6} max={15} step={1} onValueChange={([v]) => onMaxSelectableChange(v)} />
           </div>
           <div className="space-y-0.5">
             <SliderHeading
@@ -429,7 +429,7 @@ export function DifficultyAnalysis({
               locked={parameterLocks.activeLaunchers}
               onToggleLock={() => onToggleParameterLock('activeLaunchers')}
             />
-            <Slider value={[activeLauncherCount]} min={1} max={maxActiveLaunchers} step={1} onValueChange={([v]) => onActiveLauncherCountChange(v)} />
+            <Slider value={[activeLauncherCount]} min={1} max={Math.min(3, maxActiveLaunchers)} step={1} onValueChange={([v]) => onActiveLauncherCountChange(v)} />
           </div>
         </div>
       </div>

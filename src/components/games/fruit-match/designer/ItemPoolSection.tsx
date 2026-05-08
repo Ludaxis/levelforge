@@ -155,10 +155,10 @@ export function ItemPoolSection({
           <span className="text-xs text-muted-foreground whitespace-nowrap">Max Selectable:</span>
           <Input
             type="number"
-            min={1}
-            max={20}
+            min={6}
+            max={15}
             value={maxSelectableItems}
-            onChange={(e) => onMaxChange(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+            onChange={(e) => onMaxChange(Math.max(6, Math.min(15, Number(e.target.value) || 6)))}
             className="h-7 w-20 text-xs"
           />
         </div>

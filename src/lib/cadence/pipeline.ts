@@ -53,6 +53,12 @@ export interface PipelineRunWithReports extends PipelineRun {
   ruleFireCounts: Record<string, number>;
 }
 
+function toGlickoLevelDifficulty(difficultyScore: number | undefined): number {
+  if (difficultyScore === undefined || !Number.isFinite(difficultyScore)) return 1500;
+  const normalized = Math.max(0, Math.min(100, difficultyScore));
+  return 1500 + (normalized - 50) * 8;
+}
+
 export async function runPipeline(
   input: PipelineInput
 ): Promise<PipelineRunWithReports> {
@@ -212,7 +218,7 @@ export async function runPipeline(
 
       const profileBefore: PlayerSkillProfile = JSON.parse(JSON.stringify(profile));
       profile = updateProfileFromSession(profile, session.outcome, {
-        levelDifficulty: session.levelParameters['difficulty_score'] ?? 1500,
+        levelDifficulty: toGlickoLevelDifficulty(session.levelParameters['difficulty_score']),
         levelDeviation: 200,
         tau: config.playerModel.tau,
         convergenceEpsilon: config.playerModel.convergenceEpsilon,

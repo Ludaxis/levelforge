@@ -74,7 +74,7 @@ describe('BulkVariantGenerator', () => {
     expect(screen.getByText('Content separation')).toBeInTheDocument();
     expect(screen.getByText(/separation checked/)).toBeInTheDocument();
     expect(screen.getByText('Order')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Generate Validated 1-9/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Generate Validated 2-8/i })).toBeInTheDocument();
   });
 
   it('renders solver separation after generating validated variants', async () => {
@@ -98,7 +98,7 @@ describe('BulkVariantGenerator', () => {
     );
 
     await user.click(screen.getByText('Bulk Variant Generator'));
-    await user.click(screen.getByRole('button', { name: /Generate Validated 1-9/i }));
+    await user.click(screen.getByRole('button', { name: /Generate Validated 2-8/i }));
 
     await waitFor(
       () => expect(screen.getByText(/Variant separation/)).toBeInTheDocument(),

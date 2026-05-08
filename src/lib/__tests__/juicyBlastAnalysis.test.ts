@@ -114,12 +114,12 @@ describe('Juicy Blast solver-backed analysis', () => {
 });
 
 describe('validated variant optimizer', () => {
-  it('generates a 1-9 ladder with v5 preserving base levers', () => {
+  it('generates a 2-8 ladder with v5 preserving base levers', () => {
     const base = makeConfig();
     const result = generateValidatedVariants(base, { runsPerProfile: 3 });
     const variant5 = result.variants.find((variant) => variant.variantNumber === 5);
 
-    expect(result.variants).toHaveLength(9);
+    expect(result.variants.map((variant) => variant.variantNumber)).toEqual([2, 3, 4, 5, 6, 7, 8]);
     expect(variant5?.values.maxSelectableItems).toBe(base.maxSelectableItems);
     expect(variant5?.values.blockingOffset).toBe(base.blockingOffset);
     expect(variant5?.values.activeLauncherCount).toBe(base.activeLauncherCount);
@@ -135,17 +135,17 @@ describe('validated variant optimizer', () => {
 
   it('trends easier below v5 and harder above v5 by solver score or win rate', () => {
     const result = generateValidatedVariants(makeConfig(), { runsPerProfile: 3 });
-    const variant1 = result.variants.find((variant) => variant.variantNumber === 1)!;
+    const variant2 = result.variants.find((variant) => variant.variantNumber === 2)!;
     const variant5 = result.variants.find((variant) => variant.variantNumber === 5)!;
-    const variant9 = result.variants.find((variant) => variant.variantNumber === 9)!;
+    const variant8 = result.variants.find((variant) => variant.variantNumber === 8)!;
 
     expect(
-      variant1.report.solverScore <= variant5.report.solverScore ||
-        variant1.report.winRates.average >= variant5.report.winRates.average,
+      variant2.report.solverScore <= variant5.report.solverScore ||
+        variant2.report.winRates.average >= variant5.report.winRates.average,
     ).toBe(true);
     expect(
-      variant9.report.solverScore >= variant5.report.solverScore ||
-        variant9.report.winRates.average <= variant5.report.winRates.average,
+      variant8.report.solverScore >= variant5.report.solverScore ||
+        variant8.report.winRates.average <= variant5.report.winRates.average,
     ).toBe(true);
   });
 
@@ -158,7 +158,7 @@ describe('validated variant optimizer', () => {
     expect(result.variants.every((variant) => variant.report.verdict !== 'stuck')).toBe(true);
     expect(result.canExport).toBe(true);
     expect(result.separation.passed).toBe(true);
-    expect(result.separation.v5ToV9ScoreDelta).toBeGreaterThan(0);
+    expect(result.separation.v5ToV8ScoreDelta).toBeGreaterThan(0);
   });
 
   it('content-aware mode creates harder variants with more fruits and ambiguity', () => {
@@ -168,14 +168,14 @@ describe('validated variant optimizer', () => {
       enforceSeparation: true,
     });
     const variant5 = result.variants.find((variant) => variant.variantNumber === 5)!;
-    const variant9 = result.variants.find((variant) => variant.variantNumber === 9)!;
+    const variant8 = result.variants.find((variant) => variant.variantNumber === 8)!;
 
     expect(result.canExport).toBe(true);
     expect(result.separation.passed).toBe(true);
     expect(variant5.contentChanges.extraItems).toBe(0);
-    expect(variant9.contentChanges.totalItems).toBeGreaterThan(variant5.contentChanges.totalItems);
-    expect(variant9.contentChanges.ambiguityItems).toBeGreaterThan(0);
-    expect(variant9.contentChanges.newColorItems).toBeGreaterThan(0);
-    expect(variant9.config.selectableItems).toHaveLength(variant9.contentChanges.totalItems);
+    expect(variant8.contentChanges.totalItems).toBeGreaterThan(variant5.contentChanges.totalItems);
+    expect(variant8.contentChanges.ambiguityItems).toBeGreaterThan(0);
+    expect(variant8.contentChanges.newColorItems).toBeGreaterThan(0);
+    expect(variant8.config.selectableItems).toHaveLength(variant8.contentChanges.totalItems);
   });
 });
