@@ -25,80 +25,32 @@ import {
   DesignedLevel,
   FlowZone,
 } from '@/types/squareBlock';
+import {
+  DEFAULT_SAWTOOTH_CONFIG,
+  DEFAULT_TIER_THRESHOLDS,
+  TAP_MUSIC_SAWTOOTH_STORAGE_KEY,
+  getTapMusicExpectedDifficultyScore,
+  loadTapMusicSawtoothConfig,
+  scoreToTierWithThresholds,
+} from '@/lib/tapMusicDifficultyCurve';
+import type {
+  DisplayTier,
+  SawtoothConfig,
+  SawtoothPhase,
+  TierThresholds,
+} from '@/lib/tapMusicDifficultyCurve';
 
-// ============================================================================
-// Types
-// ============================================================================
-
-/** Display tier for the chart — 5 tiers with configurable score boundaries. */
-export type DisplayTier = 'trivial' | 'easy' | 'medium' | 'hard' | 'superHard';
-
-export const DISPLAY_TIER_ORDER: DisplayTier[] = ['trivial', 'easy', 'medium', 'hard', 'superHard'];
-
-/** Score thresholds: score < trivialMax → trivial, < easyMax → easy, etc. */
-export interface TierThresholds {
-  trivialMax: number;   // e.g. 15  → scores 0-14 = trivial
-  easyMax: number;      // e.g. 30  → scores 15-29 = easy
-  mediumMax: number;    // e.g. 55  → scores 30-54 = medium
-  hardMax: number;      // e.g. 75  → scores 55-74 = hard
-  // scores 75+ = superHard
-}
-
-/**
- * A sawtooth phase defines a repeating cycle of difficulty values.
- * Each value is a difficulty score (0-100) for that position in the cycle.
- */
-export interface SawtoothPhase {
-  cycleLength: number;       // how many levels in one cycle
-  difficulties: number[];    // difficulty score (0-100) for each position
-}
-
-export interface SawtoothConfig {
-  onboardingLength: number;
-  onboarding: SawtoothPhase;
-  main: SawtoothPhase;
-  /** How much difficulty increases per cycle (added to the base pattern). */
-  baselineIncrease: number;
-  /** Skill growth rate per level for flow state analysis. */
-  skillGrowthRate: number;
-  /** Configurable tier score boundaries. */
-  tierThresholds: TierThresholds;
-}
-
-// Defaults for Tap Music (Square Block):
-// Onboarding (5-level gentle ramp): ~5 → 10 → 18 → 25 → 35
-// Main (10-level sawtooth):
-//   Pos 1: 10 (victory lap after previous peak)
-//   Pos 2: 15 (recovery)
-//   Pos 3: 25 (rising)
-//   Pos 4: 35 (testing)
-//   Pos 5: 50 (mid-cycle hard spike)
-//   Pos 6: 30 (brief dip — relief)
-//   Pos 7: 35 (continued relief)
-//   Pos 8: 45 (rising tension)
-//   Pos 9: 55 (hard — sustained pressure)
-//   Pos 10: 70 (cycle peak — super hard)
-export const DEFAULT_TIER_THRESHOLDS: TierThresholds = {
-  trivialMax: 15,
-  easyMax: 30,
-  mediumMax: 55,
-  hardMax: 75,
-};
-
-export const DEFAULT_SAWTOOTH_CONFIG: SawtoothConfig = {
-  onboardingLength: 10,
-  onboarding: {
-    cycleLength: 5,
-    difficulties: [5, 10, 18, 25, 35],
-  },
-  main: {
-    cycleLength: 10,
-    difficulties: [10, 15, 25, 35, 50, 30, 35, 45, 55, 70],
-  },
-  baselineIncrease: 1,
-  skillGrowthRate: 0.4,
-  tierThresholds: DEFAULT_TIER_THRESHOLDS,
-};
+export {
+  DEFAULT_SAWTOOTH_CONFIG,
+  DEFAULT_TIER_THRESHOLDS,
+  scoreToTierWithThresholds,
+} from '@/lib/tapMusicDifficultyCurve';
+export type {
+  DisplayTier,
+  SawtoothConfig,
+  SawtoothPhase,
+  TierThresholds,
+} from '@/lib/tapMusicDifficultyCurve';
 
 interface CollectionCurveChartProps {
   levels: DesignedLevel[];
@@ -158,14 +110,6 @@ const FLOW_ZONE_COLORS: Record<FlowZone, string> = {
 // Helpers
 // ============================================================================
 
-export function scoreToTierWithThresholds(score: number, t: TierThresholds): DisplayTier {
-  if (score < t.trivialMax) return 'trivial';
-  if (score < t.easyMax) return 'easy';
-  if (score < t.mediumMax) return 'medium';
-  if (score < t.hardMax) return 'hard';
-  return 'superHard';
-}
-
 /** Compare actual difficulty vs expected sawtooth — for main chart tooltip/dots. */
 function getTargetMatch(actual: number, expected: number): TargetMatch {
   const diff = actual - expected;
@@ -180,47 +124,6 @@ function getFlowZone(difficulty: number, skill: number): FlowZone {
   if (diff > 15) return 'frustration';
   if (diff < -15) return 'boredom';
   return 'flow';
-}
-
-/** Get expected difficulty score for a level number from sawtooth + envelope. */
-function getExpectedDifficulty(levelNumber: number, config: SawtoothConfig): { score: number; isOnboarding: boolean } {
-  if (levelNumber <= config.onboardingLength) {
-    const phase = config.onboarding;
-    const pos = (levelNumber - 1) % phase.cycleLength;
-    const cycleIndex = Math.floor((levelNumber - 1) / phase.cycleLength);
-    const base = phase.difficulties[pos] ?? 20;
-    return { score: Math.min(100, base + cycleIndex * config.baselineIncrease), isOnboarding: true };
-  }
-  const phase = config.main;
-  const offset = levelNumber - config.onboardingLength - 1;
-  const pos = offset % phase.cycleLength;
-  const cycleIndex = Math.floor(offset / phase.cycleLength);
-  const base = phase.difficulties[pos] ?? 40;
-  return { score: Math.min(100, base + cycleIndex * config.baselineIncrease), isOnboarding: false };
-}
-
-// ============================================================================
-// localStorage
-// ============================================================================
-
-const STORAGE_KEY = 'tap-music-sawtooth-config';
-
-function loadSavedConfig(): SawtoothConfig {
-  if (typeof window === 'undefined') return DEFAULT_SAWTOOTH_CONFIG;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_SAWTOOTH_CONFIG;
-    const parsed = JSON.parse(raw);
-    return {
-      ...DEFAULT_SAWTOOTH_CONFIG,
-      ...parsed,
-      onboarding: { ...DEFAULT_SAWTOOTH_CONFIG.onboarding, ...parsed.onboarding },
-      main: { ...DEFAULT_SAWTOOTH_CONFIG.main, ...parsed.main },
-      tierThresholds: { ...DEFAULT_TIER_THRESHOLDS, ...parsed.tierThresholds },
-    };
-  } catch {
-    return DEFAULT_SAWTOOTH_CONFIG;
-  }
 }
 
 // ============================================================================
@@ -484,7 +387,7 @@ export function CollectionCurveChart({
   onLevelClick,
   config: externalConfig,
 }: CollectionCurveChartProps) {
-  const [savedConfig, setSavedConfig] = useState<SawtoothConfig>(() => loadSavedConfig());
+  const [savedConfig, setSavedConfig] = useState<SawtoothConfig>(() => loadTapMusicSawtoothConfig());
   const [showSettings, setShowSettings] = useState(false);
 
   const config = externalConfig ?? savedConfig;
@@ -492,13 +395,13 @@ export function CollectionCurveChart({
   const handleConfigChange = useCallback((newConfig: SawtoothConfig) => {
     setSavedConfig(newConfig);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(newConfig));
+      localStorage.setItem(TAP_MUSIC_SAWTOOTH_STORAGE_KEY, JSON.stringify(newConfig));
     } catch { /* ignore quota errors */ }
   }, []);
 
   const handleReset = useCallback(() => {
     setSavedConfig(DEFAULT_SAWTOOTH_CONFIG);
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(TAP_MUSIC_SAWTOOTH_STORAGE_KEY);
   }, []);
 
   const scoreToTier = useCallback((score: number) => scoreToTierWithThresholds(score, config.tierThresholds), [config.tierThresholds]);
@@ -530,7 +433,7 @@ export function CollectionCurveChart({
     const step = visibleCount > 500 ? Math.ceil(visibleCount / 500) : 1;
 
     for (let levelNum = visibleStart; levelNum <= visibleEnd; levelNum += step) {
-      const { score: expected, isOnboarding } = getExpectedDifficulty(levelNum, config);
+      const { score: expected, isOnboarding } = getTapMusicExpectedDifficultyScore(levelNum, config);
       const actualLevel = levelMap.get(levelNum);
       const difficulty = actualLevel ? actualLevel.metrics.difficultyScore : null;
       const actualTier = difficulty !== null ? scoreToTier(difficulty) : undefined;
@@ -546,7 +449,7 @@ export function CollectionCurveChart({
       const sampled = new Set(data.map((d) => d.level));
       for (const level of levels) {
         if (level.levelNumber >= visibleStart && level.levelNumber <= visibleEnd && !sampled.has(level.levelNumber)) {
-          const { score: expected, isOnboarding } = getExpectedDifficulty(level.levelNumber, config);
+          const { score: expected, isOnboarding } = getTapMusicExpectedDifficultyScore(level.levelNumber, config);
           const skillLevel = 10 + (level.levelNumber - 1) * config.skillGrowthRate;
           data.push({
             level: level.levelNumber,
@@ -571,7 +474,7 @@ export function CollectionCurveChart({
   const stats = useMemo(() => {
     let matching = 0, tooEasy = 0, tooHard = 0;
     for (const l of levels) {
-      const { score: expected } = getExpectedDifficulty(l.levelNumber, config);
+      const { score: expected } = getTapMusicExpectedDifficultyScore(l.levelNumber, config);
       const diff = l.metrics.difficultyScore - expected;
       if (Math.abs(diff) <= 10) matching++;
       else if (diff < -10) tooEasy++;

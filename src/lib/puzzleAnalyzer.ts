@@ -75,7 +75,7 @@ interface AnalysisState {
 
 const MAX_SOLUTIONS = 1000;       // Cap solution count for performance
 const MAX_STATES = 50000;         // Cap total states explored
-const SAMPLING_THRESHOLD = 25;    // Use sampling for puzzles with more blocks
+const SAMPLING_THRESHOLD = 20;    // Use sampling for dense puzzles before BFS gets explosive
 
 // ============================================================================
 // Core Analysis Functions

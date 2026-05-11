@@ -52,6 +52,7 @@ import {
   DifficultyPanel,
   ConfigurationPanel,
   EmbeddedMetricsPanel,
+  AutoGenerationPanel,
 } from './designer';
 
 // ============================================================================
@@ -1401,6 +1402,21 @@ export function SquareBlockLevelDesigner({
             canDecreaseDifficulty={canDecreaseDifficulty}
             increaseDifficulty={increaseDifficulty}
             decreaseDifficulty={decreaseDifficulty}
+          />
+
+          <AutoGenerationPanel
+            blocks={blocks}
+            rows={rows}
+            cols={cols}
+            setRows={setRows}
+            setCols={setCols}
+            setBlocks={setBlocks}
+            setHoles={setHoles}
+            onAddToCollection={onAddToCollection}
+            levelNumber={levelNumber}
+            onLevelNumberChange={onLevelNumberChange}
+            targetCollectionId={targetCollectionId}
+            collections={collections}
           />
 
           <ConfigurationPanel

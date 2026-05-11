@@ -187,7 +187,6 @@ function SquareBlockPageContent() {
     levels,
     setLevels,
     isLoaded,
-    addLevel,
     importLevels,
     syncState,
     forceSync,
@@ -302,6 +301,23 @@ function SquareBlockPageContent() {
     // Cancel any pending debounced sync to prevent it from overwriting this save
     cancelPendingSync();
     const targetId = collectionId || activeCollectionId;
+    const upsertByLevelNumber = (existing: DesignedLevel[], nextLevel: DesignedLevel): DesignedLevel[] => {
+      const existingById = existing.findIndex(l => l.id === nextLevel.id);
+      if (existingById >= 0) {
+        const updated = [...existing];
+        updated[existingById] = nextLevel;
+        return updated.sort((a, b) => a.levelNumber - b.levelNumber);
+      }
+
+      const existingByNumber = existing.findIndex(l => l.levelNumber === nextLevel.levelNumber);
+      if (existingByNumber >= 0) {
+        const updated = [...existing];
+        updated[existingByNumber] = { ...nextLevel, id: existing[existingByNumber].id };
+        return updated.sort((a, b) => a.levelNumber - b.levelNumber);
+      }
+
+      return [...existing, nextLevel].sort((a, b) => a.levelNumber - b.levelNumber);
+    };
 
     if (editingLevel) {
       // Update existing level
@@ -321,8 +337,8 @@ function SquareBlockPageContent() {
       // Add new level
       if (targetId) {
         const existing = getLevelsForCollection(targetId);
-        const numbered = { ...level, levelNumber: existing.length + 1 };
-        const updated = [...existing, numbered];
+        const numbered = level.levelNumber > 0 ? level : { ...level, levelNumber: existing.length + 1 };
+        const updated = upsertByLevelNumber(existing, numbered);
         saveLevelsForCollection(targetId, updated);
         // If adding to active collection, also update in-memory levels
         if (targetId === activeCollectionId) {
@@ -333,7 +349,7 @@ function SquareBlockPageContent() {
           setLevels(updated);
         }
       } else {
-        addLevel(level);
+        setLevels(prev => upsertByLevelNumber(prev, level));
       }
       setLevelNumber(prev => prev + 1);
     }

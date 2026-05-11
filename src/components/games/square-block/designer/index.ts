@@ -7,3 +7,4 @@ export { StagingArea } from './StagingArea';
 export { SolvabilityBanner } from './SolvabilityBanner';
 export { DifficultyPanel } from './DifficultyPanel';
 export { ConfigurationPanel } from './ConfigurationPanel';
+export { AutoGenerationPanel } from './AutoGenerationPanel';
