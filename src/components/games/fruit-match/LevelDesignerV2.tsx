@@ -132,6 +132,7 @@ export function LevelDesignerV2({
   // Track items the designer explicitly pinned to a layer (dropdown override).
   // The sync effect skips these so the user's choice isn't overwritten.
   const [pinnedItemIds, setPinnedItemIds] = useState<Set<string>>(new Set());
+  const [useBlockingItemOrder, setUseBlockingItemOrder] = useState(true);
 
   // Difficulty
   const [waitingStandSlots, setWaitingStandSlots] = useState(5);
@@ -464,6 +465,7 @@ export function LevelDesignerV2({
   // The Item Pool keeps its authored order; the Arrangement Preview
   // shows the derived sequence after blocking swaps.
   useEffect(() => {
+    if (!useBlockingItemOrder) return;
     if (!arrangementPreviewState) return;
     const { layerA, layerB, layerC } = arrangementPreviewState;
 
@@ -499,12 +501,13 @@ export function LevelDesignerV2({
       });
       return changed ? updated : prev;
     });
-  }, [arrangementPreviewState, pinnedItemIds]);
+  }, [arrangementPreviewState, pinnedItemIds, useBlockingItemOrder]);
 
   // Compute display order for Item Pool from the arrangement sequence.
   // This makes the Item Pool show items in the same order as the arrangement
   // without changing the source `order` field (which would cause infinite loops).
   const itemDisplayOrder = useMemo(() => {
+    if (!useBlockingItemOrder) return undefined;
     if (!arrangementPreviewState) return undefined;
     const { layerA, layerB, layerC } = arrangementPreviewState;
     const map = new Map<string, number>(); // item.id → display position
@@ -526,7 +529,7 @@ export function LevelDesignerV2({
       }
     }
     return map;
-  }, [arrangementPreviewState, selectableItems]);
+  }, [arrangementPreviewState, selectableItems, useBlockingItemOrder]);
 
   // ============================================================================
   // JSON Import
@@ -2136,6 +2139,8 @@ export function LevelDesignerV2({
           colorTypeToHex={colorTypeToHex}
           pinnedItemIds={pinnedItemIds}
           onClearPins={() => setPinnedItemIds(new Set())}
+          useBlockingOrder={useBlockingItemOrder}
+          onUseBlockingOrderChange={setUseBlockingItemOrder}
         />
       )}
 

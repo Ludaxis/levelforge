@@ -5,12 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Plus,
   Trash2,
   GripVertical,
   Pin,
   PinOff,
+  GitBranch,
 } from 'lucide-react';
 import { VARIANT_NAMES } from '@/types/fruitMatch';
 import { COLOR_TYPE_TO_FRUIT, COLOR_TYPE_TO_HEX, hexToColorName } from '@/lib/juicyBlastExport';
@@ -29,6 +31,8 @@ export function ItemPoolSection({
   colorTypeToHex,
   pinnedItemIds,
   onClearPins,
+  useBlockingOrder = true,
+  onUseBlockingOrderChange,
 }: {
   items: StudioSelectableItem[];
   maxSelectableItems: number;
@@ -42,6 +46,8 @@ export function ItemPoolSection({
   colorTypeToHex?: Record<number, string>;
   pinnedItemIds?: Set<string>;
   onClearPins?: () => void;
+  useBlockingOrder?: boolean;
+  onUseBlockingOrderChange?: (enabled: boolean) => void;
 }) {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -64,6 +70,13 @@ export function ItemPoolSection({
   const layerA = sorted.filter((i) => i.layer === 'A');
   const layerB = sorted.filter((i) => i.layer === 'B');
   const layerC = sorted.filter((i) => i.layer === 'C');
+  const authoredIndexById = useMemo(() => {
+    const map = new Map<string, number>();
+    [...items]
+      .sort((a, b) => a.order - b.order)
+      .forEach((item, idx) => map.set(item.id, idx));
+    return map;
+  }, [items]);
 
   const layerOptions: ('A' | 'B' | 'C')[] = ['A', 'B', 'C'];
 
@@ -145,6 +158,20 @@ export function ItemPoolSection({
                 {pinnedCount} pinned
               </Button>
             )}
+            {onUseBlockingOrderChange && (
+              <label
+                className="flex h-6 items-center gap-1.5 rounded border border-border bg-background/60 px-2 text-[10px] text-muted-foreground"
+                title="When off, the Item Pool uses the authored fruit order and stops syncing layers from Blocking Offset while you edit positions."
+              >
+                <Checkbox
+                  checked={useBlockingOrder}
+                  onCheckedChange={(value) => onUseBlockingOrderChange(value === true)}
+                  className="size-3"
+                />
+                <GitBranch className="h-3 w-3" />
+                <span>Blocking order</span>
+              </label>
+            )}
             <Badge variant="outline" className="text-[10px]">{items.length} items</Badge>
           </div>
         </CardTitle>
@@ -208,7 +235,7 @@ export function ItemPoolSection({
             <span className="text-[10px] text-muted-foreground ml-auto">{layerA.length}/{maxSelectableItems}</span>
           </div>
           <div className="space-y-0.5 max-h-[120px] overflow-y-auto">
-            {layerA.map((item, i) => renderItem(item, sorted.indexOf(item), i + 1))}
+            {layerA.map((item, i) => renderItem(item, authoredIndexById.get(item.id) ?? sorted.indexOf(item), i + 1))}
           </div>
         </div>
 
@@ -220,7 +247,7 @@ export function ItemPoolSection({
             <span className="text-[10px] text-muted-foreground ml-auto">{layerB.length}/{maxSelectableItems}</span>
           </div>
           <div className="space-y-0.5 max-h-[120px] overflow-y-auto">
-            {layerB.map((item, i) => renderItem(item, sorted.indexOf(item), i + 1))}
+            {layerB.map((item, i) => renderItem(item, authoredIndexById.get(item.id) ?? sorted.indexOf(item), i + 1))}
           </div>
         </div>
 
@@ -232,7 +259,7 @@ export function ItemPoolSection({
             <span className="text-[10px] text-muted-foreground ml-auto">{layerC.length}</span>
           </div>
           <div className="space-y-0.5 max-h-[120px] overflow-y-auto">
-            {layerC.map((item, i) => renderItem(item, sorted.indexOf(item), i + 1))}
+            {layerC.map((item, i) => renderItem(item, authoredIndexById.get(item.id) ?? sorted.indexOf(item), i + 1))}
           </div>
         </div>
       </CardContent>
