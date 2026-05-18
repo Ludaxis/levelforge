@@ -21,6 +21,7 @@ import {
 import { CollectionMetadata } from '@/lib/storage/types';
 import { gridKey } from '@/lib/squareGrid';
 import {
+  calculateMechanicTargetCounts,
   GenerationMechanics,
   GeneratedSquareBlockLevel,
   createDesignedSquareBlockLevelFromGeneration,
@@ -51,6 +52,20 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+type MechanicKind = 'gate' | 'ice' | 'mirror';
+
+const DEFAULT_MECHANIC_PERCENT: Record<MechanicKind, number> = {
+  gate: 5,
+  ice: 5,
+  mirror: 5,
+};
+
+const MECHANIC_PERCENT_KEYS: Record<MechanicKind, keyof GenerationMechanics> = {
+  gate: 'gatePercent',
+  ice: 'icePercent',
+  mirror: 'mirrorPercent',
+};
+
 function generatedToMap(generation: GeneratedSquareBlockLevel): Map<string, SquareBlock> {
   const next = new Map<string, SquareBlock>();
   for (const block of generation.blocks) {
@@ -59,23 +74,54 @@ function generatedToMap(generation: GeneratedSquareBlockLevel): Map<string, Squa
   return next;
 }
 
-function MechanicToggle({
+function getEnabledPercentTotal(mechanics: GenerationMechanics): number {
+  return (
+    (mechanics.gate ? mechanics.gatePercent ?? 0 : 0) +
+    (mechanics.ice ? mechanics.icePercent ?? 0 : 0) +
+    (mechanics.mirror ? mechanics.mirrorPercent ?? 0 : 0)
+  );
+}
+
+function MechanicPercentControl({
   checked,
+  percent,
+  targetCount,
   onCheckedChange,
+  onPercentChange,
   icon: Icon,
   label,
 }: {
   checked: boolean;
+  percent: number;
+  targetCount: number;
   onCheckedChange: (checked: boolean) => void;
+  onPercentChange: (percent: number) => void;
   icon: typeof Lock;
   label: string;
 }) {
   return (
-    <label className="flex items-center gap-2 rounded-md border bg-background/40 px-3 py-2 text-sm">
-      <Checkbox checked={checked} onCheckedChange={(value) => onCheckedChange(value === true)} />
-      <Icon className="h-4 w-4 text-muted-foreground" />
-      <span>{label}</span>
-    </label>
+    <div className="rounded-md border bg-background/40 p-3 text-sm">
+      <label className="flex items-center gap-2">
+        <Checkbox checked={checked} onCheckedChange={(value) => onCheckedChange(value === true)} />
+        <Icon className="h-4 w-4 text-muted-foreground" />
+        <span>{label}</span>
+      </label>
+      <div className="mt-3 flex items-center gap-2">
+        <Input
+          type="number"
+          min={0}
+          max={100}
+          value={percent}
+          disabled={!checked}
+          onChange={(event) => onPercentChange(Number(event.target.value) || 0)}
+          className="h-8"
+        />
+        <span className="w-8 text-muted-foreground">%</span>
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {checked ? `${targetCount} blocks` : 'Off'}
+      </p>
+    </div>
   );
 }
 
@@ -103,6 +149,9 @@ export function AutoGenerationPanel({
     gate: false,
     ice: false,
     mirror: false,
+    gatePercent: 0,
+    icePercent: 0,
+    mirrorPercent: 0,
   });
   const [bulkStart, setBulkStart] = useState(levelNumber);
   const [bulkCount, setBulkCount] = useState(10);
@@ -114,9 +163,45 @@ export function AutoGenerationPanel({
   const blockArray = useMemo(() => Array.from(blocks.values()), [blocks]);
   const hasArtwork = blockArray.length > 0;
   const selectedCollectionName = collections?.find((collection) => collection.id === targetCollectionId)?.name;
+  const mechanicTargetCounts = useMemo(
+    () => calculateMechanicTargetCounts(blockArray.length, mechanics),
+    [blockArray.length, mechanics],
+  );
+  const mechanicPercentTotal = getEnabledPercentTotal(mechanics);
 
-  const updateMechanic = (key: keyof GenerationMechanics, value: boolean) => {
-    setMechanics((prev) => ({ ...prev, [key]: value }));
+  const updateMechanic = (key: MechanicKind, value: boolean) => {
+    setMechanics((prev) => {
+      const percentKey = MECHANIC_PERCENT_KEYS[key];
+      if (!value) {
+        return { ...prev, [key]: false, [percentKey]: 0 };
+      }
+
+      const otherPercentTotal = getEnabledPercentTotal({ ...prev, [key]: false });
+      const currentPercent = Number(prev[percentKey]) || 0;
+      const fallbackPercent = Math.min(DEFAULT_MECHANIC_PERCENT[key], Math.max(0, 100 - otherPercentTotal));
+      const nextPercent = currentPercent > 0 ? currentPercent : fallbackPercent;
+
+      return {
+        ...prev,
+        [key]: nextPercent > 0,
+        [percentKey]: clampNumber(nextPercent, 0, Math.max(0, 100 - otherPercentTotal)),
+      };
+    });
+  };
+
+  const updateMechanicPercent = (key: MechanicKind, value: number) => {
+    setMechanics((prev) => {
+      const percentKey = MECHANIC_PERCENT_KEYS[key];
+      const otherPercentTotal = getEnabledPercentTotal({ ...prev, [key]: false });
+      const maxPercent = Math.max(0, 100 - otherPercentTotal);
+      const nextPercent = Math.round(clampNumber(value, 0, maxPercent));
+
+      return {
+        ...prev,
+        [key]: nextPercent > 0,
+        [percentKey]: nextPercent,
+      };
+    });
   };
 
   const applyGenerationToDesigner = (generation: GeneratedSquareBlockLevel) => {
@@ -254,9 +339,37 @@ export function AutoGenerationPanel({
       </div>
 
       <div className="grid gap-2 sm:grid-cols-3">
-        <MechanicToggle checked={mechanics.gate} onCheckedChange={(value) => updateMechanic('gate', value)} icon={Lock} label="Gate" />
-        <MechanicToggle checked={mechanics.ice} onCheckedChange={(value) => updateMechanic('ice', value)} icon={Snowflake} label="Ice" />
-        <MechanicToggle checked={mechanics.mirror} onCheckedChange={(value) => updateMechanic('mirror', value)} icon={FlipHorizontal} label="Mirror" />
+        <MechanicPercentControl
+          checked={mechanics.gate}
+          percent={mechanics.gatePercent ?? 0}
+          targetCount={mechanicTargetCounts.gate}
+          onCheckedChange={(value) => updateMechanic('gate', value)}
+          onPercentChange={(value) => updateMechanicPercent('gate', value)}
+          icon={Lock}
+          label="Gate"
+        />
+        <MechanicPercentControl
+          checked={mechanics.ice}
+          percent={mechanics.icePercent ?? 0}
+          targetCount={mechanicTargetCounts.ice}
+          onCheckedChange={(value) => updateMechanic('ice', value)}
+          onPercentChange={(value) => updateMechanicPercent('ice', value)}
+          icon={Snowflake}
+          label="Ice"
+        />
+        <MechanicPercentControl
+          checked={mechanics.mirror}
+          percent={mechanics.mirrorPercent ?? 0}
+          targetCount={mechanicTargetCounts.mirror}
+          onCheckedChange={(value) => updateMechanic('mirror', value)}
+          onPercentChange={(value) => updateMechanicPercent('mirror', value)}
+          icon={FlipHorizontal}
+          label="Mirror"
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-3 rounded-md bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+        <span>Total mechanics: <span className="font-mono text-foreground">{mechanicPercentTotal}%</span></span>
+        <span>Normal: <span className="font-mono text-foreground">{mechanicTargetCounts.normal}</span></span>
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row">

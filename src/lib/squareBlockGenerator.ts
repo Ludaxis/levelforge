@@ -27,6 +27,18 @@ export interface GenerationMechanics {
   gate: boolean;
   ice: boolean;
   mirror: boolean;
+  gatePercent?: number;
+  icePercent?: number;
+  mirrorPercent?: number;
+}
+
+type MechanicKind = 'gate' | 'ice' | 'mirror';
+
+export interface MechanicTargetCounts {
+  gate: number;
+  ice: number;
+  mirror: number;
+  normal: number;
 }
 
 export interface TargetedSquareBlockGenerationOptions {
@@ -71,6 +83,7 @@ export interface BulkSquareBlockGenerationResult {
 }
 
 const DIRECTIONS: SquareDirection[] = ['N', 'E', 'S', 'W'];
+const MECHANIC_KINDS: MechanicKind[] = ['gate', 'ice', 'mirror'];
 const DEFAULT_TOLERANCE = 3;
 const DEFAULT_MAX_ATTEMPTS = 220;
 
@@ -80,6 +93,61 @@ function clamp(value: number, min: number, max: number): number {
 
 function randomInt(rng: () => number, min: number, max: number): number {
   return min + Math.floor(rng() * (max - min + 1));
+}
+
+function getMechanicPercent(mechanics: GenerationMechanics, kind: MechanicKind): number {
+  if (!mechanics[kind]) return 0;
+
+  const raw = mechanics[`${kind}Percent`];
+  return Number.isFinite(raw) ? clamp(Number(raw), 0, 100) : 0;
+}
+
+function hasExplicitMechanicPercent(mechanics: GenerationMechanics): boolean {
+  return MECHANIC_KINDS.some((kind) => Number.isFinite(mechanics[`${kind}Percent`]));
+}
+
+export function calculateMechanicTargetCounts(
+  blockCount: number,
+  mechanics: GenerationMechanics,
+): MechanicTargetCounts {
+  const totalBlocks = Math.max(0, Math.round(blockCount));
+  const rawPercents = MECHANIC_KINDS.map((kind) => ({
+    kind,
+    percent: getMechanicPercent(mechanics, kind),
+  }));
+  const rawTotalPercent = rawPercents.reduce((sum, entry) => sum + entry.percent, 0);
+  const scale = rawTotalPercent > 100 ? 100 / rawTotalPercent : 1;
+
+  const targets = rawPercents.map((entry) => {
+    const rawCount = totalBlocks * entry.percent * scale / 100;
+    return {
+      ...entry,
+      rawCount,
+      count: Math.round(rawCount),
+    };
+  });
+
+  let allocated = targets.reduce((sum, entry) => sum + entry.count, 0);
+  const roundedUpByMost = [...targets].sort((a, b) => (b.count - b.rawCount) - (a.count - a.rawCount));
+  for (const target of roundedUpByMost) {
+    if (allocated <= totalBlocks) break;
+    if (target.count <= 0) continue;
+    target.count -= 1;
+    allocated -= 1;
+  }
+
+  const counts = targets.reduce(
+    (acc, entry) => ({ ...acc, [entry.kind]: entry.count }),
+    { gate: 0, ice: 0, mirror: 0 } as Record<MechanicKind, number>,
+  );
+  const mechanicTotal = counts.gate + counts.ice + counts.mirror;
+
+  return {
+    gate: counts.gate,
+    ice: counts.ice,
+    mirror: counts.mirror,
+    normal: Math.max(0, totalBlocks - mechanicTotal),
+  };
 }
 
 function shuffle<T>(items: T[], rng: () => number): T[] {
@@ -296,6 +364,10 @@ function maybeApplyMechanics(
   const orderIndex = new Map<string, number>();
   order.forEach((block, index) => orderIndex.set(gridKey(block.coord), index));
 
+  if (hasExplicitMechanicPercent(mechanics)) {
+    return applyMechanicTargets(blocks, orderIndex, actualDirections, mechanics, rng);
+  }
+
   const intensity = clamp(targetScore / 100, 0, 1);
   const gateChance = mechanics.gate ? 0.02 + intensity * 0.18 : 0;
   const iceChance = mechanics.ice ? 0.02 + intensity * 0.16 : 0;
@@ -367,6 +439,85 @@ function maybeApplyMechanics(
       },
       result,
     );
+  }
+
+  return result;
+}
+
+function applyMechanicTargets(
+  blocks: SquareBlock[],
+  orderIndex: Map<string, number>,
+  actualDirections: Map<string, SquareDirection>,
+  mechanics: GenerationMechanics,
+  rng: () => number,
+): SquareBlock[] {
+  const targets = calculateMechanicTargetCounts(blocks.length, mechanics);
+  const used = new Set<string>();
+  const result = blocks.map((block): SquareBlock => {
+    const actualDirection = actualDirections.get(gridKey(block.coord)) ?? 'E';
+    return {
+      ...block,
+      direction: actualDirection,
+      locked: undefined,
+      iceCount: undefined,
+      mirror: undefined,
+    };
+  });
+
+  const getUnusedCandidates = (predicate: (block: SquareBlock) => boolean) =>
+    result.filter((block) => !used.has(gridKey(block.coord)) && predicate(block));
+
+  const choose = (candidates: SquareBlock[], count: number) => shuffle(candidates, rng).slice(0, Math.max(0, count));
+
+  for (const block of choose(
+    getUnusedCandidates((candidate) => {
+      const index = orderIndex.get(gridKey(candidate.coord)) ?? 0;
+      return isGateSafe(candidate, orderIndex, index);
+    }),
+    targets.gate,
+  )) {
+    const key = gridKey(block.coord);
+    const index = result.findIndex((candidate) => gridKey(candidate.coord) === key);
+    if (index < 0) continue;
+    used.add(key);
+    result[index] = {
+      ...result[index],
+      locked: true,
+      iceCount: undefined,
+      mirror: undefined,
+    };
+  }
+
+  for (const block of choose(
+    getUnusedCandidates((candidate) => (orderIndex.get(gridKey(candidate.coord)) ?? 0) > 0),
+    targets.ice,
+  )) {
+    const key = gridKey(block.coord);
+    const index = result.findIndex((candidate) => gridKey(candidate.coord) === key);
+    if (index < 0) continue;
+    const orderPosition = Math.max(1, orderIndex.get(key) ?? 1);
+    used.add(key);
+    result[index] = {
+      ...result[index],
+      locked: undefined,
+      iceCount: randomInt(rng, Math.max(1, Math.floor(orderPosition * 0.25)), orderPosition),
+      mirror: undefined,
+    };
+  }
+
+  for (const block of choose(getUnusedCandidates(() => true), targets.mirror)) {
+    const key = gridKey(block.coord);
+    const index = result.findIndex((candidate) => gridKey(candidate.coord) === key);
+    if (index < 0) continue;
+    const actualDirection = actualDirections.get(key) ?? result[index].direction as SquareDirection;
+    used.add(key);
+    result[index] = {
+      ...result[index],
+      direction: getOppositeDirection(actualDirection),
+      locked: undefined,
+      iceCount: undefined,
+      mirror: true,
+    };
   }
 
   return result;
