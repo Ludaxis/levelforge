@@ -1,6 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Gamepad2, Hexagon, Square, Apple } from 'lucide-react';
+import { Apple, Gamepad2, Hexagon, Palette, Square } from 'lucide-react';
 import Link from 'next/link';
 
 const games = [
@@ -43,6 +43,16 @@ const games = [
     status: 'ready' as const,
     color: 'from-red-500/20 to-green-500/20',
     borderColor: 'border-red-500/30 hover:border-red-500/50',
+  },
+  {
+    id: 'pixel-sort',
+    title: 'Pixel Sort Studio',
+    description: 'Square pixel-art sort tool. Paint targets, simulate tray moves, and export portable level JSON.',
+    href: '/game/pixel-sort',
+    icon: Palette,
+    status: 'ready' as const,
+    color: 'from-sky-500/20 to-lime-500/20',
+    borderColor: 'border-sky-500/30 hover:border-sky-500/50',
   },
 ];
 
