@@ -20,6 +20,7 @@ import {
   buildSolvableSequenceSeeded,
   buildChallengingSequenceSeeded,
   buildBlockingAwareSelectableItems,
+  buildPreviewState,
   calculateLauncherOrderDifficulty,
   calculateBlockingAwareLauncherOrderDifficulty,
   calculateStudioDifficulty,
@@ -176,6 +177,27 @@ describe('Seeded PRNG', () => {
     expect(shuffled).not.toEqual(original);
     // But should contain same elements
     expect(shuffled.sort((a, b) => a - b)).toEqual(original);
+  });
+});
+
+describe('Studio preview layer handling', () => {
+  it('preserves explicit imported layers instead of promoting order-only queue items', () => {
+    const config = makeTestConfig({
+      maxSelectableItems: 3,
+      selectableItems: [
+        { colorType: 1, variant: 0, order: 0, layer: 'C' },
+        { colorType: 0, variant: 0, order: 1, layer: 'A' },
+        { colorType: 0, variant: 0, order: 2, layer: 'A' },
+        { colorType: 0, variant: 0, order: 3, layer: 'A' },
+        { colorType: 1, variant: 0, order: 4, layer: 'C' },
+        { colorType: 1, variant: 0, order: 5, layer: 'C' },
+      ],
+    });
+
+    const preview = buildPreviewState(config);
+
+    expect(preview.layerA.map((tile) => tile?.colorType)).toEqual([0, 0, 0]);
+    expect(preview.layerC.map((tile) => tile.colorType)).toEqual([1, 1, 1]);
   });
 });
 

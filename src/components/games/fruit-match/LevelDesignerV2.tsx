@@ -401,9 +401,10 @@ export function LevelDesignerV2({
         colorType: item.colorType,
         variant: item.variant,
         order: item.order,
-        // Only pass explicit layer for pinned items — unpinned items let
-        // the blocking algorithm decide their layer assignment
-        layer: pinnedItemIds.has(item.id) ? item.layer : undefined,
+        // When Blocking order is off, the authored A/B/C layer is the source
+        // of truth. When it is on, only pinned items override the blocking
+        // algorithm.
+        layer: !useBlockingItemOrder || pinnedItemIds.has(item.id) ? item.layer : undefined,
       })),
       launchers: [...launchers]
         .sort((a, b) => a.order - b.order)
@@ -419,7 +420,7 @@ export function LevelDesignerV2({
       seed,
       moveLimit,
     };
-  }, [pixelCellArray, artWidth, artHeight, maxSelectableItems, waitingStandSlots, itemsWithLayers, launchers, activeLauncherCount, blockingOffset, colorTypeToHex, seed, moveLimit, pinnedItemIds]);
+  }, [pixelCellArray, artWidth, artHeight, maxSelectableItems, waitingStandSlots, itemsWithLayers, launchers, activeLauncherCount, blockingOffset, colorTypeToHex, seed, moveLimit, pinnedItemIds, useBlockingItemOrder]);
 
   const arrangementPreviewState = useMemo(() => {
     if (!studioGameConfig) return null;
@@ -633,6 +634,7 @@ export function LevelDesignerV2({
           setSeed(undefined);
           setMoveLimit(undefined);
           setPinnedItemIds(new Set());
+          setUseBlockingItemOrder(true);
 
           // Extract level number from filename
           const match = file.name.match(/level[_-]?(\d+)/i);
@@ -668,6 +670,7 @@ export function LevelDesignerV2({
           setSeed(typeof studioData.Seed === 'number' ? studioData.Seed : undefined);
           setMoveLimit(typeof studioData.MoveLimit === 'number' ? studioData.MoveLimit : undefined);
           setPinnedItemIds(new Set());
+          setUseBlockingItemOrder(false);
 
           // Build group → colorType map from launchers so pixel colorTypes
           // are reconciled when hex-mapping produced a different colorType
@@ -859,6 +862,7 @@ export function LevelDesignerV2({
 
           // Build selectable items — use Layer field if present, otherwise compute from position
           const hasLayerField = result.selectableItems.some((si) => si.Layer !== undefined && si.Layer !== null);
+          setUseBlockingItemOrder(!hasLayerField);
           const newItems: StudioSelectableItem[] = result.selectableItems
             .map((si, idx) => {
               const layer: 'A' | 'B' | 'C' = hasLayerField
@@ -1860,6 +1864,7 @@ export function LevelDesignerV2({
         })),
       );
       setMaxSelectableItems(editingLevel.studioMaxSelectableItems ?? 10);
+      setUseBlockingItemOrder(false);
     } else {
       const fallbackLaunchers = editingLevel.studioLaunchers && editingLevel.studioLaunchers.length > 0
         ? editingLevel.studioLaunchers
@@ -1910,6 +1915,7 @@ export function LevelDesignerV2({
         }
       }
       setSelectableItems(newItems);
+      setUseBlockingItemOrder(true);
     }
   }, [editingLevel]);
 
